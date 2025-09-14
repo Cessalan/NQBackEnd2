@@ -1,0 +1,22 @@
+# == Python-specific Files and Directories ==
+# Byte-compiled files
+__pycache__/
+*.pyc
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+
+# Python packaging and distribution
+dist/
+build/
+*.egg-info/
+*.whl
+
+# Common development and IDE files
+.vscode/
+.idea/
+.env
+.DS_Store # macOS
+Thumbs.db # Windows
