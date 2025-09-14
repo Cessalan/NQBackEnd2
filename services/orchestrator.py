@@ -3,7 +3,7 @@ from tools.quiztools import NursingTools, set_session_context
 from models.session import PersistentSessionContext
 import json
 from collections.abc import AsyncGenerator
-import datetime
+from datetime import datetime
 
 class NursingTutor:
     """
@@ -30,11 +30,12 @@ class NursingTutor:
         user_input: str, 
         chat_history: list = None,
         language: str = "english"
-    ) -> AsyncGenerator[str, None]:
+    ):
         """
         Process student message with proper tool calling and streaming
         """
         try:
+            print(f"processing user input:{user_input}")
             # Update session language
             self.session.user_language = language
             
@@ -45,6 +46,7 @@ class NursingTutor:
             if chat_history:
                 self.session.message_history = chat_history
             
+            # update session with user msg
             self.session.message_history.append({
                 "role": "user",
                 "content": user_input,
@@ -65,13 +67,15 @@ class NursingTutor:
             response_content = ""
             tool_calls_made = []
             
+            # send reponse while streaming
             async for chunk in self.llm_with_tools.astream(messages):
                 # Handle different chunk types
+                print(f"{chunk}")
                 if hasattr(chunk, 'content') and chunk.content:
                     response_content += chunk.content
                     yield json.dumps({
                         "type": "content",
-                        "content": chunk.content
+                        "answer_chunk": chunk.content
                     }) + "\n"
                 
                 elif hasattr(chunk, 'tool_calls') and chunk.tool_calls:
@@ -98,6 +102,7 @@ class NursingTutor:
             }) + "\n"
             
         except Exception as e:
+            print(f"Exception occured: {str(e)}")
             yield json.dumps({
                 "type": "error",
                 "message": f"Processing failed: {str(e)}"
@@ -135,8 +140,23 @@ class NursingTutor:
         """Format chat history for LLM"""
         formatted = []
         for msg in self.session.message_history[-10:]:  # Last 10 messages
-            formatted.append({
-                "role": msg["role"],
-                "content": msg["content"]
-            })
+            # Handle both dict and Message object formats
+            if isinstance(msg, dict):
+                # Dictionary format (most common)
+                formatted.append({
+                    "role": msg.get("role", "user"),
+                    "content": msg.get("content", "")
+                })
+            elif hasattr(msg, 'role') and hasattr(msg, 'content'):
+                # LangChain Message object
+                formatted.append({
+                    "role": msg.role,
+                    "content": msg.content
+                })
+            else:
+                # Fallback - try to convert to string
+                formatted.append({
+                    "role": "user",
+                    "content": str(msg)
+                })
         return formatted

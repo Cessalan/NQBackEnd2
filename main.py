@@ -20,6 +20,10 @@ from services.orchestrator import NursingTutor
 import firebase_admin
 from firebase_admin import credentials
 
+
+from models.reponses import GenerateTitleResponse
+from models.requests import GenerateTitleRequest
+
 # Initialize Firebase
 cred = credentials.Certificate("FireBaseAccess.json")
 firebase_admin.initialize_app(cred, {
@@ -67,6 +71,7 @@ async def chat_stream_response(request: StatelessChatRequest):
     
     # GET TUTOR FOR CURRENT SESSION
     nursing_tutor = ACTIVE_SESSIONS[request.chat_id]
+    print(f"nursing tutor created")
     
     # Update session with documents if provided
     if request.documents:
@@ -101,11 +106,44 @@ async def generate_quiz(request):
     # Keep your existing implementation
     pass
 
-@app.post("/chat/generate-title")
-async def generate_title(request):
-    """Your existing title generation"""
-    # Keep your existing implementation
-    pass
+from langchain.prompts import PromptTemplate
+from langchain_community.chat_models import ChatOpenAI
+from langchain_core.output_parsers import StrOutputParser
+
+@app.post("/chat/generate-title", response_model=GenerateTitleResponse)
+async def generate_chat_title(request: GenerateTitleRequest):
+    if request.message:
+        prompt = PromptTemplate(
+            template="""
+            You are an AI assistant for nursing students.
+
+            Based on the following user message, generate a short, descriptive chat title in 3 to 6 words.
+
+            Requirements:
+            - Be concise and clear
+            - Write a title in the language of Message you received
+            - Max 6 words
+
+            Message:
+            {message}
+            """,
+            input_variables=["message"]
+        )
+        
+       
+        llm = ChatOpenAI(
+            temperature=0.8,
+            model_name="gpt-4o-mini",
+            streaming=False
+        )
+
+        chain = prompt | llm | StrOutputParser()
+        generated_title = await chain.ainvoke({"message": request.message})
+        
+        # Clean up the title
+        cleaned_title = generated_title.replace('"', '').replace("'", "").strip()
+
+        return GenerateTitleResponse(title=cleaned_title)
 
 # ============================================================================
 # ADMIN/DEBUG ENDPOINTS (optional but helpful)
@@ -140,13 +178,9 @@ async def clear_session(chat_id: str):
 # HEALTH CHECK
 # ============================================================================
 
-@app.get("/")
-async def root():
-    return {
-        "status": "healthy",
-        "service": "Nursing Tutor AI",
-        "sessions_active": len(ACTIVE_SESSIONS)
-    }
+@app.post("/warm_up")
+async def warm_up():
+    return {"status": "ok", "message": "Server warmed up successfully"}
 
 # ============================================================================
 # RUN THE APP
