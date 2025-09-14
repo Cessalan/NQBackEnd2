@@ -20,3 +20,9 @@ build/
 .env
 .DS_Store # macOS
 Thumbs.db # Windows
+
+
+# Ignore sensitive files and credentials
+.env
+FireBaseAccess.json
+secrets/*.json

@@ -39,3 +39,7 @@ class SummaryRequest(BaseModel):
 class DocumentsEmbedRequest(BaseModel):
     chatId: str  # Note: camelCase for frontend compatibility
     documents: List[Document]
+    
+    
+class GenerateTitleRequest(BaseModel):
+    message:str
