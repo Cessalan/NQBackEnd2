@@ -121,7 +121,8 @@ class NursingTutor:
                                     async for chunk in self.stream_document_summary(
                                         result["relevant_chunks"], 
                                         result["detail_level"], 
-                                        result["filename"]
+                                        result["filename"],
+                                        language
                                     ):
                                         yield json.dumps({
                                             "answer_chunk": chunk
@@ -132,10 +133,16 @@ class NursingTutor:
                                     yield json.dumps({
                                         "answer_chunk": result.get("error", "Summarization failed")
                                     }) + "\n"
-                                                           
+                                
+                            elif tool_name == "generate_study_sheet":
+                                from tools.quiztools import generate_study_sheet
+                                result = await generate_study_sheet.ainvoke(tool_args)
+                                tool_results.append(result)   
+                                                       
                         except Exception as e:
                             print(f"🔥 Tool execution error: {e}")
                             tool_results.append({"error": str(e)})
+                        
                     
                     # Format and stream the tool results
                     if tool_results:
@@ -155,6 +162,14 @@ class NursingTutor:
                                         "quiz_data": questions,
                                         "status": "quiz_generated"
                                     }) + "\n"
+                                    
+                                elif "html_content" in result:
+                                    html = result["html_content"]
+                                    
+                                    yield json.dumps({
+                                        "html": html,
+                                        "status":"studysheet_generated"
+                                    })+ "\n"
                                     
                                 elif "context" in result:
                                     # Handle document search results - STREAM THIS
@@ -224,7 +239,8 @@ class NursingTutor:
         tool_keywords = [
             "quiz", "test", "practice", "generate", 
             "search", "find", "progress", "score",
-            "create", "make", "show me", "summary","resume","summarize"
+            "create", "make", "show me", "summary","resume","summarize",
+            "study sheet", "feuille d'etude"
         ]
         return any(keyword in user_input.lower() for keyword in tool_keywords)
     
@@ -280,15 +296,14 @@ class NursingTutor:
                     "content": str(msg)
                 })
         return formatted
-    
-
-                
+                    
     # Streaming function that works with chunks
     @staticmethod
     async def stream_document_summary(
         relevant_chunks: list, 
         detail_level: str,
-        filename: str
+        filename: str,
+        language: str
     ) -> AsyncGenerator[str, None]:
         """
         Stream summary generation from relevant vector store chunks
@@ -329,6 +344,8 @@ class NursingTutor:
                 
                 Important: Use emojis, space, bold, etc to organize the text and make it easy to digest. 
                 Adapt it for dyslexic people to be easy to read and understand
+                
+                Important: Use must write the content in the language {language}
 
                 Create an accurate summary of the ACTUAL content above (do not create hypothetical nursing content):
                 """

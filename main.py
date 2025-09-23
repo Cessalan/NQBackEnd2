@@ -43,6 +43,8 @@ from langchain_community.document_loaders import (
     UnstructuredExcelLoader,
     UnstructuredPowerPointLoader)
 
+from core.imageloader import OCRImageLoader
+
 # langchain
 from langchain.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
@@ -52,21 +54,26 @@ from langchain_core.output_parsers import StrOutputParser
 import firebase_admin
 from firebase_admin import credentials,storage
 
+from core.language import LanguageDetector
+
 # to load documents
 def get_loader_for_file(path):
     ext = os.path.splitext(path)[-1].lower()
-    if ext == ".pdf":
+    if ext == ".pdf": # pdf file support
         return PyPDFLoader(path)
-    elif ext == ".txt":
+    elif ext == ".txt": # txt file support
         return TextLoader(path)
-    elif ext == ".csv":
+    elif ext == ".csv":  #excel support
         return CSVLoader(path)
-    elif ext in [".doc", ".docx"]:
-        return Docx2txtLoader(path)
-    elif ext in [".xls", ".xlsx"]:
-        return UnstructuredExcelLoader(path)
-    elif ext in [".ppt", ".pptx"]:
+    elif ext in [".doc", ".docx"]: # word document support
+        return Docx2txtLoader(path) 
+    elif ext in [".xls", ".xlsx"]: #excel support
+        return UnstructuredExcelLoader(path) 
+    elif ext in [".ppt", ".pptx"]: # power point support
         return UnstructuredPowerPointLoader(path)
+    elif ext in [".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp",".heic"]:  # Add image support
+        print("Extracting text from image")
+        return OCRImageLoader(path)
     else:
         raise ValueError("Unsupported file type")
 
@@ -75,6 +82,8 @@ cred = credentials.Certificate("FireBaseAccess.json")
 firebase_admin.initialize_app(cred, {
     "storageBucket": os.getenv("FIREBASE_BUCKET", "docai-efb03.firebasestorage.app")
 })
+
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.getenv("GOOGLE_API_KEY")
 
 # Create FastAPI app
 app = FastAPI(
@@ -121,6 +130,9 @@ async def chat_stream_response(request: StatelessChatRequest):
     if request.documents:
         nursing_tutor.session.documents = request.documents
     
+    
+    user_language = LanguageDetector.detect_language(request.input)
+    
     # Process message and stream response
     return StreamingResponse(
         nursing_tutor.process_message(
@@ -129,7 +141,7 @@ async def chat_stream_response(request: StatelessChatRequest):
             # feed the tutor the chat history
             chat_history=request.chat_history,
             # feed the tutor the language the user's browser
-            language=request.language
+            language=user_language
         ),
         media_type="application/json"
     )

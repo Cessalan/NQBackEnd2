@@ -37,6 +37,142 @@ def get_session() -> PersistentSessionContext:
 # FIXED TOOLS WITH PROPER DECORATORS
 # ============================================================================
 
+#tool study sheet
+@tool
+async def generate_study_sheet(user_request: str) -> Dict[str, Any]:
+    """Generate a personalized study sheet based on user's request."""
+    try:
+        session = get_session()
+        
+        document_content = await _get_study_sheet_content(session)
+        conversation_context = _get_conversation_context(session)
+        
+        # Generate complete HTML study sheet
+        html_content = await _create_study_sheet_with_anthropic(
+            document_content=document_content,
+            conversation_context=conversation_context,
+            user_request=user_request,
+            language=session.user_language
+        )
+        
+        print("HTML STUDY SHEET", html_content)
+        
+        return {
+            "status": "success",
+            "html_content": html_content,
+            "message": f"Created HTML study sheet based on: {user_request}"
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Study sheet generation failed: {str(e)}"
+        }
+
+def _get_conversation_context(session: PersistentSessionContext) -> str:
+    """Get recent conversation for context"""
+    if not session.message_history:
+        return ""
+    
+    try:
+        recent_messages = session.message_history[-8:]
+        context_parts = []
+        
+        for msg in recent_messages:
+            # Handle tuple format: (role, content) or (role, content, timestamp)
+            if isinstance(msg, tuple) and len(msg) >= 2:
+                role = msg[0]
+                content = msg[1]
+            elif hasattr(msg, 'role') and hasattr(msg, 'content'):
+                # LangChain Message object
+                role = msg.role
+                content = msg.content
+            elif isinstance(msg, dict):
+                # Dictionary format
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+            else:
+                continue
+                
+            if content and len(str(content)) < 500:
+                context_parts.append(f"{role}: {content}")
+        
+        return "\n".join(context_parts)
+        
+    except Exception as e:
+        print(f"Exception in _get_conversation_context: {e}")
+        return ""
+
+async def _get_study_sheet_content(session: PersistentSessionContext) -> str:
+    """Get content from uploaded documents for study sheet generation"""
+    try:
+        if not session.vectorstore:
+            return ""
+        
+        # Get all document chunks (similar to your quiz generation)
+        docs = session.vectorstore.similarity_search(query="", k=1000)
+        
+        if not docs:
+            return ""
+        
+        # Combine content, limiting size for API
+        full_text = "\n\n".join([doc.page_content for doc in docs])
+        return full_text[:12000]  # Limit for Anthropic API
+    except Exception as e:
+        print("Excpetion occured in get_study_sheet_content() ",e)
+        return ""
+
+async def _create_study_sheet_with_anthropic(
+    document_content: str,
+    conversation_context: str,
+    user_request: str,
+    language: str,
+    existing_study_sheet: dict = None
+) -> str:  # Return HTML string instead of dict
+    """Generate complete HTML study sheet"""
+    
+    try:
+        from anthropic import Anthropic
+        client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        
+        prompt = f"""
+        Create a complete HTML study sheet based on the user's request.
+
+        USER REQUEST: {user_request}
+        DOCUMENT CONTENT: {document_content if document_content else "General study content"}
+        CONVERSATION: {conversation_context if conversation_context else "User requested study sheet"}
+
+        Create a self-contained HTML page with embedded CSS and JavaScript.
+        Include:
+        - Beautiful, modern styling
+        - Responsive design for mobile and desktop
+        - Interactive elements (collapsible sections, highlight tools, etc.)
+        - Print-friendly styles
+        - Content organized for effective studying
+
+        Return ONLY the complete HTML (no explanations, no markdown):
+        """
+        
+        response = client.messages.create(
+            model="claude-3-5-sonnet-20241022",
+            max_tokens=4000,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        html_content = response.content[0].text
+        
+        # Clean any markdown formatting if present
+        if html_content.startswith("```html"):
+            html_content = html_content.split("```html")[1].split("```")[0]
+        elif html_content.startswith("```"):
+            html_content = html_content.split("```")[1].split("```")[0]
+            
+        return html_content.strip()
+        
+    except Exception as e:
+        print(f"Anthropic API error: {e}")
+        raise Exception(f"Failed to generate study content: {str(e)}")
+
 # tools/enhanced_summary_tools.py
 
 @tool
@@ -623,5 +759,6 @@ class NursingTools:
             search_documents,
             generate_quiz,
             check_student_progress,
-            summarize_document
+            summarize_document,
+            generate_study_sheet
         ]
