@@ -10,13 +10,21 @@ from langchain_community.vectorstores import FAISS
 from langchain_openai import OpenAIEmbeddings
 from fastapi import HTTPException
 from typing import AsyncGenerator
-from firebase_admin import credentials,storage
-import firebase_admin
 import os, tempfile
 import json
 
 #to format llm response into string
 from langchain_core.output_parsers import StrOutputParser 
+
+# firebase that stores data needed for context (conversation)
+from firebase_admin import firestore
+
+# firebase that stores the vector store files
+from firebase_admin import storage
+
+
+def get_firestore_client():
+    return firestore.client()
 
 # Global session access - this will be injected by NursingTutor
 _CURRENT_SESSION: Optional[PersistentSessionContext] = None
@@ -25,6 +33,7 @@ _CURRENT_SESSION: Optional[PersistentSessionContext] = None
 def set_session_context(session: PersistentSessionContext):
     """Set the current session context for tool access"""
     global _CURRENT_SESSION
+    session.vectorstore = get_chat_vectorstore(session.chat_id)
     _CURRENT_SESSION = session
 
 def get_session() -> PersistentSessionContext:
@@ -37,31 +46,71 @@ def get_session() -> PersistentSessionContext:
 # FIXED TOOLS WITH PROPER DECORATORS
 # ============================================================================
 
+@tool
+async def respond_to_student(
+    user_message: str,
+    response_focus: str = "general"
+) -> Dict[str, Any]:
+    """
+    Provide educational responses and explanations to student questions.
+    
+    Use this for general tutoring, explanations, answering questions, providing
+    feedback, or any conversational response that doesn't require other tools.
+    
+    Use spacing, font-weight , line breaks and emojis to make the text easier to read for dyslexic people
+    
+    Args:
+        user_message: The student's question or message
+        response_focus: Type of response needed ("explanation", "feedback", "encouragement", "general")
+    
+    Returns:
+        Dictionary with response content for streaming
+    """
+    try:
+        # This tool doesn't need to do heavy processing
+        # # It just signals that the LLM should provide a direct response
+        return {
+            "status": "respond_directly",
+            "user_message": user_message,
+            "response_focus": response_focus,
+            "message": "Providing educational response to student"
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Response generation failed: {str(e)}"
+        }
+
+
 #tool study sheet
 @tool
 async def generate_study_sheet(user_request: str) -> Dict[str, Any]:
-    """Generate a personalized study sheet based on user's request."""
+    """Generate or Update a personalized study sheet based on user's request."""
     try:
         session = get_session()
+        document_content="none"
         
-        document_content = await _get_study_sheet_content(session)
-        conversation_context = _get_conversation_context(session)
-        
+        if(session.documents):
+            document_content = await _get_study_sheet_content(session)
+            print("DOCUMENT CONTENT FOUND: ", document_content)
+              
         # Generate complete HTML study sheet
         html_content = await _create_study_sheet_with_anthropic(
             document_content=document_content,
-            conversation_context=conversation_context,
             user_request=user_request,
             language=session.user_language
         )
-        
-        print("HTML STUDY SHEET", html_content)
-        
-        return {
+             
+        study_sheet_result = {
             "status": "success",
             "html_content": html_content,
             "message": f"Created HTML study sheet based on: {user_request}"
         }
+        
+        print("HTML STUDY SHEET", study_sheet_result)
+        
+        return study_sheet_result
         
     except Exception as e:
         return {
@@ -69,93 +118,182 @@ async def generate_study_sheet(user_request: str) -> Dict[str, Any]:
             "message": f"Study sheet generation failed: {str(e)}"
         }
 
-def _get_conversation_context(session: PersistentSessionContext) -> str:
-    """Get recent conversation for context"""
-    if not session.message_history:
-        return ""
-    
-    try:
-        recent_messages = session.message_history[-8:]
-        context_parts = []
-        
-        for msg in recent_messages:
-            # Handle tuple format: (role, content) or (role, content, timestamp)
-            if isinstance(msg, tuple) and len(msg) >= 2:
-                role = msg[0]
-                content = msg[1]
-            elif hasattr(msg, 'role') and hasattr(msg, 'content'):
-                # LangChain Message object
-                role = msg.role
-                content = msg.content
-            elif isinstance(msg, dict):
-                # Dictionary format
-                role = msg.get("role", "user")
-                content = msg.get("content", "")
-            else:
-                continue
-                
-            if content and len(str(content)) < 500:
-                context_parts.append(f"{role}: {content}")
-        
-        return "\n".join(context_parts)
-        
-    except Exception as e:
-        print(f"Exception in _get_conversation_context: {e}")
-        return ""
 
 async def _get_study_sheet_content(session: PersistentSessionContext) -> str:
     """Get content from uploaded documents for study sheet generation"""
+    
+    print("Checking for docs to create study sheet from!!")
+    
     try:
         if not session.vectorstore:
-            return ""
+            print(" no vectorstore found when trying to find docs")
+
+            fetched_vectorstore = get_chat_vectorstore(chat_id=session.chat_id)
+        
+            if not fetched_vectorstore:
+                print("tried to fetch vectorstore from firebase but it did not work")
+            else:
+                session.vectorstore = fetched_vectorstore
         
         # Get all document chunks (similar to your quiz generation)
         docs = session.vectorstore.similarity_search(query="", k=1000)
         
         if not docs:
+            print("WOW, no docs could be create from vectorstore")
             return ""
         
         # Combine content, limiting size for API
         full_text = "\n\n".join([doc.page_content for doc in docs])
+        print(f"CONTENT FOR STUDY SHEET!!! {full_text}")
         return full_text[:12000]  # Limit for Anthropic API
     except Exception as e:
         print("Excpetion occured in get_study_sheet_content() ",e)
         return ""
 
+
+def get_study_sheet_messages(chat_id):
+    """Get all study sheet messages from a specific chat"""
+    try:
+        # Reference the messages collection for the chat
+        
+        db = get_firestore_client()
+        
+        messages_ref = db.collection("chats").document(chat_id).collection("messages")
+        
+        # Query messages ordered by timestamp (same as your JavaScript)
+        messages_query = messages_ref.order_by("timestamp", direction=firestore.Query.ASCENDING)
+        
+        # Get all messages
+        messages = messages_query.stream()
+        
+        study_sheet_messages = []
+        
+        for doc in messages:
+            message_data = doc.to_dict()
+            message_data['id'] = doc.id
+            
+            # Filter for study sheet, by looking for html object in the messages
+            if (message_data.get('html')):  
+                study_sheet_messages.append(message_data)
+        
+        return study_sheet_messages
+        
+    except Exception as e:
+        print(f"Error fetching study sheet messages: {e}")
+        return []
+
+async def get_chat_context_from_db(chat_id: str) -> dict:
+    """Query Firebase directly to get structured chat context"""
+    try:
+        db = get_firestore_client()
+        
+        # Query messages ordered by timestamp
+        messages_ref = db.collection("chats").document(chat_id).collection("messages")
+        messages_query = messages_ref.order_by("timestamp", direction=firestore.Query.ASCENDING)
+        messages = messages_query.stream()
+        
+        conversation_history = []
+        quizzes_created = []
+        study_sheets_created = []
+        
+        for doc in messages:
+            message_data = doc.to_dict()
+            
+            # Regular conversation messages
+            if message_data.get('role') and message_data.get('content'):
+                if isinstance(message_data.get('content'), str):
+                    conversation_history.append({
+                        'role': message_data['role'],
+                        'content': message_data['content']
+                    })
+            
+            # Extract quizzes
+            if message_data.get('quizData'):
+                quizzes_created.append({
+                    'timestamp': message_data.get('timestamp'),
+                    'quiz_data': message_data['quizData']
+                })
+            
+            # Extract study sheets
+            if message_data.get('html'):
+                study_sheets_created.append({
+                    'timestamp': message_data.get('timestamp'),
+                    'html_content': message_data['html']
+                })
+        
+        return {
+            'conversation': conversation_history[-20:],
+            'quizzes': quizzes_created,
+            'study_sheets': study_sheets_created
+        }
+        
+    except Exception as e:
+        print(f"Error querying chat context: {e}")
+        return {'conversation': [], 'quizzes': [], 'study_sheets': []}
+    
 async def _create_study_sheet_with_anthropic(
     document_content: str,
-    conversation_context: str,
     user_request: str,
     language: str,
-    existing_study_sheet: dict = None
 ) -> str:  # Return HTML string instead of dict
     """Generate complete HTML study sheet"""
+    
+    session = get_session()
+    context_study_sheet=  await get_chat_context_from_db(session.chat_id)
     
     try:
         from anthropic import Anthropic
         client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-        
+              
         prompt = f"""
-        Create a complete HTML study sheet based on the user's request.
+        Create a complete HTML study sheet with the following exact specifications:
 
+        Your primary goal is to display the information to make it easy to read and understand
+        Focus on the User experience during the design process to display the information
+        
         USER REQUEST: {user_request}
-        DOCUMENT CONTENT: {document_content if document_content else "General study content"}
-        CONVERSATION: {conversation_context if conversation_context else "User requested study sheet"}
+        DOCUMENT CONTENT: {document_content if document_content else "No document content provided"}
+        CONVERSATION CONTEXT: {context_study_sheet["conversation"] if context_study_sheet["conversation"] else "No previous conversation"}
+        PREVIOUS STUDY SHEETS: {context_study_sheet["study_sheets"] if context_study_sheet["study_sheets"] else "No study sheets create previously" }
+        PREVIOUS QUIZZES: {context_study_sheet["quizzes"] if context_study_sheet["quizzes"] else "No quiz created previously." }
+        
+        Language of the content : {language}
+        
+        DESIGN REQUIREMENTS (follow exactly):
+        - Color scheme: Primary #b58cd6, Secondary #d9b8f4, with MOSTLY white minimalist background
+        - No pink background, background color is always white
+        - Glass morphism design with subtle transparency and backdrop blur effects
+        - Responsive layout that works on mobile and desktop
+        - Clean, modern typography with good readability
+        - Interactive collapsible sections with smooth animations
 
-        Create a self-contained HTML page with embedded CSS and JavaScript.
-        Include:
-        - Beautiful, modern styling
-        - Responsive design for mobile and desktop
-        - Interactive elements (collapsible sections, highlight tools, etc.)
-        - Print-friendly styles
-        - Content organized for effective studying
+        CONTENT STRUCTURE (include these sections in order):
+        1. Header with study sheet title
+        2. "Document Summary" section (if document_content exists) - key concepts from uploaded materials
+        3. "Conversation Focus" section - topics discussed/questions asked that indicate learning gaps
+        4. "Key Concepts" section - important definitions and explanations
+        5. "Quick Reference" section - bullet points and essential facts
+        6. Interactive elements: collapsible sections (if it enhances the UX), print button
 
-        Return ONLY the complete HTML (no explanations, no markdown):
+        TECHNICAL REQUIREMENTS:
+        - Self-contained HTML with embedded CSS and JavaScript
+        - Glass effect using backdrop-filter and rgba colors
+        - Print-friendly styles that remove glass effects
+        - Mobile-first responsive design
+        - Smooth transitions and hover effects
+
+        CONTENT PRIORITY:
+        1. Base content primarily on document materials if available
+        2. Address specific topics from conversation (these indicate knowledge gaps)
+        3. Create comprehensive coverage of the subject
+        4. Include practical study aids and memory techniques
+
+        Return ONLY the complete HTML code with no explanations or markdown formatting.
         """
         
         response = client.messages.create(
             model="claude-3-5-sonnet-20241022",
-            max_tokens=4000,
+            max_tokens=6000,
             messages=[{"role": "user", "content": prompt}]
         )
         
@@ -284,6 +422,43 @@ async def _search_vectorstore_for_summary(
         print(f"🔥 Vector store search error: {e}")
         return []
 
+def get_chat_vectorstore(
+    chat_id: str, 
+) -> FAISS:
+    """
+    Search vector store for relevant chunks to create summary
+    """
+    try:
+        session = get_session()
+        if(session.documents):
+            with tempfile.TemporaryDirectory() as tempdir:
+                # Use same pattern as your working code
+                bucket = storage.bucket()
+                
+                faiss_blob = bucket.blob(f"vectorstores/{chat_id}/index.faiss")
+                pkl_blob = bucket.blob(f"vectorstores/{chat_id}/index.pkl")
+                
+                faiss_path = os.path.join(tempdir, "index.faiss")
+                pkl_path = os.path.join(tempdir, "index.pkl")
+                
+                # Download files (same as your working code)
+                faiss_blob.download_to_filename(faiss_path)
+                pkl_blob.download_to_filename(pkl_path)
+                
+                # Load vector store (same as your working code)
+                vectorstore = FAISS.load_local(
+                    tempdir, 
+                    OpenAIEmbeddings(), 
+                    allow_dangerous_deserialization=True
+                )
+                
+                return vectorstore
+        else:
+            return None
+                
+    except Exception as e:
+        print(f"EY, COULD NOT FIND vectorstore for {chat_id}, exception",e)
+        return None
 
 @tool
 async def search_documents(query: str, max_results: int = 3) -> Dict[str, Any]:
@@ -303,41 +478,47 @@ async def search_documents(query: str, max_results: int = 3) -> Dict[str, Any]:
     try:
         session = get_session()
         
-        # Load vectorstore if not already loaded
-        if session.vectorstore is None and session.documents:
-            session.vectorstore = await load_vectorstore_from_firebase(session)
-            session.vectorstore_loaded = True
-        
-        if session.vectorstore:
-            # Search for relevant content
-            docs = session.vectorstore.similarity_search(query, k=max_results)
-            for i, doc in enumerate(docs):
-                print(f"Chunk {i}: {doc.page_content[:200]}...")
-                print(f"Source: {doc.metadata.get('source', 'unknown')}")
-            context = "\n\n".join([doc.page_content for doc in docs])
+        if(session.documents):
+            # Load vectorstore if not already loaded
+            if session.vectorstore is None and session.documents:
+                session.vectorstore = await load_vectorstore_from_firebase(session)
+                session.vectorstore_loaded = True
             
-            # Cache the retrieval
-            session.last_retrieval = context
-            
-            # Record tool call
-            session.tool_calls.append({
-                "tool": "search_documents",
-                "timestamp": datetime.now().isoformat(),
-                "query": query,
-                "chunks_found": len(docs)
-            })
+            if session.vectorstore:
+                # Search for relevant content
+                docs = session.vectorstore.similarity_search(query, k=max_results)
+                for i, doc in enumerate(docs):
+                    print(f"Chunk {i}: {doc.page_content[:200]}...")
+                    print(f"Source: {doc.metadata.get('source', 'unknown')}")
+                context = "\n\n".join([doc.page_content for doc in docs])
+                
+                # Cache the retrieval
+                session.last_retrieval = context
+                
+                # Record tool call
+                session.tool_calls.append({
+                    "tool": "search_documents",
+                    "timestamp": datetime.now().isoformat(),
+                    "query": query,
+                    "chunks_found": len(docs)
+                })
+                
+                return {
+                    "status": "success",
+                    "context": context,
+                    "num_chunks": len(docs),
+                    "message": f"Found {len(docs)} relevant sections in your documents."
+                }
             
             return {
-                "status": "success",
-                "context": context,
-                "num_chunks": len(docs),
-                "message": f"Found {len(docs)} relevant sections in your documents."
+                "status": "no_documents",
+                "message": "No documents available for search. Ask the student to upload study materials first."
             }
-        
-        return {
-            "status": "no_documents",
-            "message": "No documents available for search. Ask the student to upload study materials first."
-        }
+        else:
+         return {
+                "status": "no_documents",
+                "message": "No documents available for search. Ask the student to upload study materials first."
+            }
         
     except Exception as e:
         return {

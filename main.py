@@ -83,6 +83,12 @@ firebase_admin.initialize_app(cred, {
     "storageBucket": os.getenv("FIREBASE_BUCKET", "docai-efb03.firebasestorage.app")
 })
 
+# cred = credentials.Certificate("service-account-key.json")  # Path to key file
+#     firebase_admin.initialize_app(cred, {
+#         'storageBucket': 'docai-efb03.firebasestorage.app'
+# })
+
+
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.getenv("GOOGLE_API_KEY")
 
 # Create FastAPI app
@@ -130,7 +136,7 @@ async def chat_stream_response(request: StatelessChatRequest):
     if request.documents:
         nursing_tutor.session.documents = request.documents
     
-    
+    print("HIIIIISTORY", request.chat_history)
     user_language = LanguageDetector.detect_language(request.input)
     
     # Process message and stream response
@@ -139,7 +145,7 @@ async def chat_stream_response(request: StatelessChatRequest):
             # feed the tutor the user input
             user_input=request.input,
             # feed the tutor the chat history
-            chat_history=request.chat_history,
+            chat_history=[],
             # feed the tutor the language the user's browser
             language=user_language
         ),

@@ -61,158 +61,152 @@ class NursingTutor:
             # Prepare messages for LLM
             messages = [
                 {"role": "system", "content": system_prompt},
-                *self._format_chat_history(),
+                *self.session.message_history,
                 {"role": "user", "content": user_input}
             ]
+                        
+            print("DECIDED TO USE TOOLS")
+            # NON-STREAMING for tool calls (your existing logic)
+            response = await self.llm_with_tools.ainvoke(messages)
             
-            print("CHECKING IF SHOULD USE TOOLS")
-            # CHECK: Will this likely use tools?
-            will_use_tools = self._should_use_tools(user_input)
-            
-            if will_use_tools:
-                print("DECIDED TO USE TOOLS")
-                # NON-STREAMING for tool calls (your existing logic)
-                response = await self.llm_with_tools.ainvoke(messages)
+            # Check if tools were called
+            if hasattr(response, 'tool_calls') and response.tool_calls:
+                tool_calls_made = response.tool_calls
                 
-                # Check if tools were called
-                if hasattr(response, 'tool_calls') and response.tool_calls:
-                    tool_calls_made = response.tool_calls
+                # Notify about tool execution
+                for tool_call in tool_calls_made:
+                    yield json.dumps({
+                        "status": "tool_executing",
+                        "tool_name": tool_call.get("name"),
+                        "message": f"Executing {tool_call.get('name')}..."
+                    }) + "\n"
+                
+                # MANUALLY EXECUTE TOOLS
+                tool_results = []
+                for tool_call in tool_calls_made:
+                    tool_name = tool_call.get("name")
+                    tool_args = tool_call.get("args", {})
                     
-                    # Notify about tool execution
-                    for tool_call in tool_calls_made:
-                        yield json.dumps({
-                            "status": "tool_executing",
-                            "tool_name": tool_call.get("name"),
-                            "message": f"Executing {tool_call.get('name')}..."
-                        }) + "\n"
+                    print(f"🔥 Manually executing tool: {tool_name} with args: {tool_args}")
                     
-                    # MANUALLY EXECUTE TOOLS
-                    tool_results = []
-                    for tool_call in tool_calls_made:
-                        tool_name = tool_call.get("name")
-                        tool_args = tool_call.get("args", {})
-                        
-                        print(f"🔥 Manually executing tool: {tool_name} with args: {tool_args}")
-                        
-                        try:
-                            if tool_name == "generate_quiz":                           
-                                result = await generate_quiz.ainvoke(tool_args)
-                                tool_results.append(result)
+                    try:
+                        if tool_name == "generate_quiz":                           
+                            result = await generate_quiz.ainvoke(tool_args)
+                            tool_results.append(result)
+                            
+                        elif tool_name == "search_documents":
+                            result = await search_documents.ainvoke(tool_args)
+                            tool_results.append(result)
+                            
+                        elif tool_name == "check_student_progress":
+                            from tools.quiztools import check_student_progress
+                            result = await check_student_progress.ainvoke(tool_args)
+                            tool_results.append(result)
+                            
+                        elif tool_name == "summarize_document": 
+                            print("Tool call summarize_document triggered")                               
+                            # Get chunks from vector store using your tool
+                            result = await summarize_document.ainvoke(tool_args)
+                            
+                            if result.get("status") == "ready_for_streaming":
+                                # Now stream using your existing method
+                                async for chunk in self.stream_document_summary(
+                                    result["relevant_chunks"], 
+                                    result["detail_level"], 
+                                    result["filename"],
+                                    language
+                                ):
+                                    yield json.dumps({
+                                        "answer_chunk": chunk
+                                    }) + "\n"
                                 
-                            elif tool_name == "search_documents":
-                                result = await search_documents(
-                                    query=tool_args.get("query", ""),
-                                    max_results=tool_args.get("max_results", 3)
-                                )
-                                tool_results.append(result)
+                            else:
+                                # Handle error from tool
+                                yield json.dumps({
+                                    "answer_chunk": result.get("error", "Summarization failed")
+                                }) + "\n"
+                            
+                        elif tool_name == "generate_study_sheet":
+                            from tools.quiztools import generate_study_sheet
+                            print("CALLING STUDY SHEET TOOL")
+                            result = await generate_study_sheet.ainvoke(tool_args)
+                            tool_results.append(result)   
+                            
+                        elif tool_name == "respond_to_student":
+                            response_content = ""            
+                            async for chunk in self.llm_with_tools.astream(messages):
+                                if hasattr(chunk, 'content') and chunk.content:
+                                    response_content += chunk.content
+                                    yield json.dumps({
+                                        "answer_chunk": chunk.content
+                                    }) + "\n"
+                                                    
+                    except Exception as e:
+                        print(f"🔥 Tool execution error: {e}")
+                        tool_results.append({"error": str(e)})
+                    
+                
+                # Format and stream the tool results
+                if tool_results:
+                    print("ORCHESTRATOR USING A TOOL")
+                    for result in tool_results:
+                        if isinstance(result, dict):
+                            if "quiz" in result:
+                                # Handle quiz results
+                                quiz_data = result["quiz"]
                                 
-                            elif tool_name == "check_student_progress":
-                                from tools.quiztools import check_student_progress
-                                result = check_student_progress()
-                                tool_results.append(result)
-                                
-                            elif tool_name == "summarize_document": 
-                                print("Tool call summarize_document triggered")                               
-                               # Get chunks from vector store using your tool
-                                result = await summarize_document.ainvoke(tool_args)
-                                
-                                if result.get("status") == "ready_for_streaming":
-                                    # Now stream using your existing method
-                                    async for chunk in self.stream_document_summary(
-                                        result["relevant_chunks"], 
-                                        result["detail_level"], 
-                                        result["filename"],
-                                        language
-                                    ):
-                                        yield json.dumps({
-                                            "answer_chunk": chunk
-                                        }) + "\n"
-                                    
+                                if isinstance(quiz_data, dict) and "quiz" in quiz_data:
+                                    questions = quiz_data["quiz"]
                                 else:
-                                    # Handle error from tool
-                                    yield json.dumps({
-                                        "answer_chunk": result.get("error", "Summarization failed")
-                                    }) + "\n"
+                                    questions = quiz_data
                                 
-                            elif tool_name == "generate_study_sheet":
-                                from tools.quiztools import generate_study_sheet
-                                result = await generate_study_sheet.ainvoke(tool_args)
-                                tool_results.append(result)   
-                                                       
-                        except Exception as e:
-                            print(f"🔥 Tool execution error: {e}")
-                            tool_results.append({"error": str(e)})
-                        
-                    
-                    # Format and stream the tool results
-                    if tool_results:
-                        for result in tool_results:
-                            if isinstance(result, dict):
-                                if "quiz" in result:
-                                    # Handle quiz results
-                                    quiz_data = result["quiz"]
-                                    
-                                    if isinstance(quiz_data, dict) and "quiz" in quiz_data:
-                                        questions = quiz_data["quiz"]
-                                    else:
-                                        questions = quiz_data
-                                    
-                                    # Send quiz as structured JSON
-                                    yield json.dumps({
-                                        "quiz_data": questions,
-                                        "status": "quiz_generated"
-                                    }) + "\n"
-                                    
-                                elif "html_content" in result:
-                                    html = result["html_content"]
-                                    
-                                    yield json.dumps({
-                                        "html": html,
-                                        "status":"studysheet_generated"
-                                    })+ "\n"
-                                    
-                                elif "context" in result:
-                                    # Handle document search results - STREAM THIS
-                                    context = result['context']
-                                    words = context.split()
-                                    current_chunk = ""
-                                    
-                                    for word in words:
-                                        current_chunk += word + " "
-                                        if len(current_chunk) > 50:  # Longer chunks for better flow
-                                            yield json.dumps({
-                                                "answer_chunk": current_chunk.strip()
-                                            }) + "\n"
-                                            current_chunk = ""
-                                    
-                                    # Send remaining content
-                                    if current_chunk.strip():
+                                # Send quiz as structured JSON
+                                yield json.dumps({
+                                    "quiz_data": questions,
+                                    "status": "quiz_generated"
+                                }) + "\n"
+                                
+                            elif "html_content" in result:
+                                print("getting html content in study sheet")
+                                html = result["html_content"]
+                                print("this is the html:", html)
+                                yield json.dumps({
+                                    "html": html,
+                                    "status":"studysheet_generated"
+                                })+ "\n"
+                                
+                            elif "context" in result:
+                                # Handle document search results - STREAM THIS
+                                context = result['context']
+                                words = context.split()
+                                current_chunk = ""
+                                
+                                for word in words:
+                                    current_chunk += word + " "
+                                    if len(current_chunk) > 50:  # Longer chunks for better flow
                                         yield json.dumps({
                                             "answer_chunk": current_chunk.strip()
                                         }) + "\n"
-                                    
-                                elif "error" in result:
-                                    # Handle errors
+                                        current_chunk = ""
+                                
+                                # Send remaining content
+                                if current_chunk.strip():
                                     yield json.dumps({
-                                        "answer_chunk": f"Error: {result['error']}"
+                                        "answer_chunk": current_chunk.strip()
                                     }) + "\n"
-                else:
-                    # No tools called, send complete response
-                    yield json.dumps({
-                        "answer_chunk": response.content
-                    }) + "\n"
-                    
+                                
+                            elif "error" in result:
+                                # Handle errors
+                                yield json.dumps({
+                                    "answer_chunk": f"Error: {result['error']}"
+                                }) + "\n"
             else:
-                print("DECIDED TO NOT USE TOOLS")
-                # REAL STREAMING for simple responses
-                response_content = ""
-                
-                async for chunk in self.llm_with_tools.astream(messages):
-                    if hasattr(chunk, 'content') and chunk.content:
-                        response_content += chunk.content
-                        yield json.dumps({
-                            "answer_chunk": chunk.content
-                        }) + "\n"
+                print("NO TOOLS USED, STRAIGHT RESPONSE")
+                # No tools called, send complete response
+                yield json.dumps({
+                    "answer_chunk": response.content
+                }) + "\n"
+                    
             
             # Add assistant response to history
             self.session.message_history.append({
@@ -227,27 +221,19 @@ class NursingTutor:
             }) + "\n"
             
         except Exception as e:
+            print("ERROR OCCURED DURING PROCESS MESSAGE",e)
             yield json.dumps({
                 "type": "error",
                 "message": f"Processing failed: {str(e)}"
             }) + "\n"
 
-    def _should_use_tools(self, user_input: str) -> bool:
-        """
-        Simple heuristic to detect if user input will trigger tools
-        """
-        tool_keywords = [
-            "quiz", "test", "practice", "generate", 
-            "search", "find", "progress", "score",
-            "create", "make", "show me", "summary","resume","summarize",
-            "study sheet", "feuille d'etude"
-        ]
-        return any(keyword in user_input.lower() for keyword in tool_keywords)
     
     def _create_system_prompt(self) -> str:
         """Create nursing-specific system prompt"""
         return f"""You are an AI nursing tutor helping students develop clinical skills.
-
+    
+        Carefully analyze the user intent
+        
         Your role:
         - Help students learn nursing concepts, pharmacology, pathophysiology
         - Generate practice questions and quizzes  
@@ -259,6 +245,8 @@ class NursingTutor:
         - search_documents: Search student's uploaded materials
         - generate_quiz: Create practice questions on any topic
         - check_student_progress: See what student has been working on
+        - generate_study_sheet: When they want study materials OR when they ask for previous/old study sheets, basically, if the intent is to create or modify a study sheet
+        - summarize_document: When they want document summaries
 
         Guidelines:
         - Always provide rationales for answers (WHY, not just WHAT)
@@ -266,37 +254,26 @@ class NursingTutor:
         - Focus on critical thinking and clinical judgment
         - Be encouraging but academically rigorous
         - Respond in {self.session.user_language}
-        - use emojis , spacing, line breaks to make the content clearer and easier to read, adapt it for dyslexia
+           
+        FORMATTING REQUIREMENTS:
+        - Use clear section headers with relevant emojis (🫁 for respiratory, 🩺 for assessment, ⚠️ for critical info) if required
+        - Use SINGLE line breaks between list items for better readability
+        - Use bullet points (•) for lists with ONE line break between each item if it applies
+        - Structure numbered steps with ONE line break between each step if it applies
+        - Include **bold text** for important medical terms and concepts
+
+        - Add TWO line breaks only between major sections
+        - Keep content tight and scannable - avoid excessive white space
+        - Make the content pretty aligned and easy to consume to the eye
+        - Avoid putting text above the header if there is one
+
+        Enhance the formatting while keeping all the original content and meaning intact.
 
         Current session:
         - Student has {"documents uploaded" if self.session.documents else "no documents"}
         - Language preference: {self.session.user_language}"""
 
-    def _format_chat_history(self) -> list:
-        """Format chat history for LLM"""
-        formatted = []
-        for msg in self.session.message_history[-10:]:  # Last 10 messages
-            # Handle both dict and Message object formats
-            if isinstance(msg, dict):
-                # Dictionary format (most common)
-                formatted.append({
-                    "role": msg.get("role", "user"),
-                    "content": msg.get("content", "")
-                })
-            elif hasattr(msg, 'role') and hasattr(msg, 'content'):
-                # LangChain Message object
-                formatted.append({
-                    "role": msg.role,
-                    "content": msg.content
-                })
-            else:
-                # Fallback - try to convert to string
-                formatted.append({
-                    "role": "user",
-                    "content": str(msg)
-                })
-        return formatted
-                    
+                  
     # Streaming function that works with chunks
     @staticmethod
     async def stream_document_summary(
@@ -359,3 +336,5 @@ class NursingTutor:
                     
         except Exception as e:
             yield f"Error generating summary: {str(e)}"
+            
+            

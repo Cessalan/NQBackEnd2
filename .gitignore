@@ -25,4 +25,5 @@ Thumbs.db # Windows
 # Ignore sensitive files and credentials
 .env
 FireBaseAccess.json
+service-account-key.json
 secrets/*.json

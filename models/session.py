@@ -19,3 +19,4 @@ class PersistentSessionContext:
     documents: List[Any] = field(default_factory=list)
     message_history: List[tuple] = field(default_factory=list)
     tool_calls: List[Dict] = field(default_factory=list)
+    studysheet_history: str = field(default="")
