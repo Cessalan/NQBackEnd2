@@ -17,6 +17,7 @@ class PersistentSessionContext:
     
     vectorstore: Any = None
     documents: List[Any] = field(default_factory=list)
+    name_last_document_used:str = field(default="")
     message_history: List[tuple] = field(default_factory=list)
     tool_calls: List[Dict] = field(default_factory=list)
     studysheet_history: str = field(default="")

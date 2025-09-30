@@ -2,10 +2,9 @@ from langchain_openai import ChatOpenAI
 from tools.quiztools import NursingTools, set_session_context
 from models.session import PersistentSessionContext
 import json
-from collections.abc import AsyncGenerator
 from typing import AsyncGenerator
 from datetime import datetime
-from tools.quiztools import generate_quiz,search_documents,summarize_document
+from tools.quiztools import generate_quiz,search_documents,summarize_document,get_chat_context_from_db
 
 class NursingTutor:
     """
@@ -23,7 +22,8 @@ class NursingTutor:
         self.llm = ChatOpenAI(
             model="gpt-4", 
             temperature=0.3,
-            streaming=True  # Enable streaming for better UX
+            # Enable streaming for better UX
+            streaming=True  
         )
         
         self.llm_with_tools = self.llm.bind_tools(tools)
@@ -31,7 +31,6 @@ class NursingTutor:
     async def process_message(
         self, 
         user_input: str, 
-        chat_history: list = None,
         language: str = "english"
     ):
         """
@@ -41,29 +40,45 @@ class NursingTutor:
         try:
             # Update session language
             self.session.user_language = language
+                  
+            full_context_from_db = await get_chat_context_from_db(self.session.chat_id)
             
             # Ensure session context is available to tools
             set_session_context(self.session)
             
             # Add user message to history
-            if chat_history:
-                self.session.message_history = chat_history
+            try:               
+                if(full_context_from_db["conversation"]):
+                    print("CONTEXT PREV CONVO",full_context_from_db["conversation"])
+                    self.session.message_history = full_context_from_db["conversation"]
+            except Exception as e:
+                print("error during context creation",e)
             
-            self.session.message_history.append({
-                "role": "user",
-                "content": user_input,
-                "timestamp": datetime.now().isoformat()
-            })
+            
+            # self.session.message_history.append({
+            #     "role": "user",
+            #     "content": user_input,
+            #     "timestamp": datetime.now().isoformat()
+            # })
+              
+                # Prepare messages for LLM
+            print("About to create messages to feed llm")
             
             # Create nursing-specific system prompt
             system_prompt = self._create_system_prompt()
             
-            # Prepare messages for LLM
-            messages = [
-                {"role": "system", "content": system_prompt},
-                *self.session.message_history,
-                {"role": "user", "content": user_input}
-            ]
+        
+            print("System Prompt created")
+            
+            messages = []
+            try:
+                messages = [
+                    {"role": "system", "content": system_prompt},
+                    *self.session.message_history,
+                    {"role": "user", "content": user_input}
+                ]
+            except Exception as e:
+                print("Error when building message",e)
                         
             print("DECIDED TO USE TOOLS")
             # NON-STREAMING for tool calls (your existing logic)
@@ -179,22 +194,44 @@ class NursingTutor:
                                 # Handle document search results - STREAM THIS
                                 context = result['context']
                                 words = context.split()
-                                current_chunk = ""
+                            
+                                print("WORDS FOUND:", words)
+                                # Ask LLM to answer based on the search results
+                                prompt = f"""Based on this information {words} from the user's documents, 
+                                            answer their question:\n\n{user_input}
+                                            using the language {language} use spacing,fonts,line breaks, emojis 
+                                            to make the content clear and easy to read"""
                                 
-                                for word in words:
-                                    current_chunk += word + " "
-                                    if len(current_chunk) > 50:  # Longer chunks for better flow
-                                        yield json.dumps({
-                                            "answer_chunk": current_chunk.strip()
-                                        }) + "\n"
-                                        current_chunk = ""
+                                searchresultmessages = [{"role": "user", "content": prompt}]
                                 
-                                # Send remaining content
-                                if current_chunk.strip():
-                                    yield json.dumps({
-                                        "answer_chunk": current_chunk.strip()
-                                    }) + "\n"
+                                print("search result streaming starting")
                                 
+                                print("🔍 Now trying streaming...")
+                                try:
+                                    # Add timeout to prevent infinite hanging
+                                    import asyncio
+                                    
+                                    async def stream_with_timeout():
+                                        async for chunk in self.llm.astream(searchresultmessages):
+                                            print(f"🔍 GOT CHUNK: {chunk}")
+                                            if hasattr(chunk, 'content') and chunk.content:
+                                                print(f"🔍 YIELDING: {chunk.content}")
+                                                yield json.dumps({
+                                                    "answer_chunk": chunk.content
+                                                }) + "\n"
+                                    
+                                    # Try with 30 second timeout
+                                    async for chunk in stream_with_timeout():
+                                        yield chunk
+                                        
+                                except asyncio.TimeoutError:
+                                    print("🔍 STREAMING TIMED OUT!")
+                                    yield json.dumps({"answer_chunk": "Streaming timed out"}) + "\n"
+                                except Exception as e:
+                                    print(f"🔍 STREAMING EXCEPTION: {e}")
+                                    import traceback
+                                    traceback.print_exc()
+                                                                
                             elif "error" in result:
                                 # Handle errors
                                 yield json.dumps({
@@ -244,7 +281,6 @@ class NursingTutor:
         Available tools:
         - search_documents: Search student's uploaded materials
         - generate_quiz: Create practice questions on any topic
-        - check_student_progress: See what student has been working on
         - generate_study_sheet: When they want study materials OR when they ask for previous/old study sheets, basically, if the intent is to create or modify a study sheet
         - summarize_document: When they want document summaries
 
@@ -271,6 +307,8 @@ class NursingTutor:
 
         Current session:
         - Student has {"documents uploaded" if self.session.documents else "no documents"}
+        - file name of the last file uploaded {self.session.documents[-1]["filename"]if self.session.documents else "no documents uploaded yet"}, if you are unsure about which file the user is talking about always use this one
+        - file name of the last file you had an interaction with {self.session.name_last_document_used if self.session.name_last_document_used else " no file yet"}
         - Language preference: {self.session.user_language}"""
 
                   

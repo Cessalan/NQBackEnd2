@@ -1,4 +1,4 @@
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional,List
 from datetime import datetime
 from langchain_core.tools import tool
 from models.session import PersistentSessionContext
@@ -34,6 +34,7 @@ def set_session_context(session: PersistentSessionContext):
     """Set the current session context for tool access"""
     global _CURRENT_SESSION
     session.vectorstore = get_chat_vectorstore(session.chat_id)
+    session.documents = load_files_for_chat(session.chat_id)
     _CURRENT_SESSION = session
 
 def get_session() -> PersistentSessionContext:
@@ -42,6 +43,56 @@ def get_session() -> PersistentSessionContext:
         raise RuntimeError("No session context available. This is a system error.")
     return _CURRENT_SESSION
 
+
+
+def load_files_for_chat(chat_id: str) -> List[Dict[str, Any]]:
+    """
+    Retrieves a list of all files uploaded for a specific chat from Firebase Storage,
+    including their name, path, and a temporary download URL.
+
+    This is the Python equivalent of the client-side JavaScript 'loadFilesForChat'
+    using the Firebase Admin SDK to list blobs and generate signed URLs.
+
+    Args:
+        chat_id: The ID of the chat/user whose files are to be loaded.
+
+    Returns:
+        A list of dictionaries, each containing 'name', 'path', and 'downloadURL'.
+    """
+    try:
+        # Import storage here to avoid issues if the module isn't loaded yet
+        from firebase_admin import storage
+        
+        # Get the default storage bucket (assumes service account has access)
+        bucket = storage.bucket()
+        
+        # Define the path prefix to list files within
+        uploads_path_prefix = f"chats/{chat_id}/uploads/"
+        
+        # List all blobs (files) under the given prefix
+        # By default, this lists non-directory objects
+        blobs = bucket.list_blobs(prefix=uploads_path_prefix)
+
+        file_infos = []
+        for blob in blobs:
+            # Exclude the directory itself or any folder markers if they appear
+            if blob.name == uploads_path_prefix or blob.name.endswith('/'):
+                continue
+                        
+            # os.path.basename extracts the filename from the full path
+            file_infos.append({
+                "filename": os.path.basename(blob.name), 
+                "path": blob.name,
+            })
+
+
+        print("files in chat according to storage", file_infos)
+        return file_infos
+
+    except Exception as error:
+        # Log the error and return an empty list upon failure, matching the JavaScript
+        print(f"🔥 Failed to list files for chat {chat_id}: {error}")
+        return []
 # ============================================================================
 # FIXED TOOLS WITH PROPER DECORATORS
 # ============================================================================
@@ -118,7 +169,6 @@ async def generate_study_sheet(user_request: str) -> Dict[str, Any]:
             "message": f"Study sheet generation failed: {str(e)}"
         }
 
-
 async def _get_study_sheet_content(session: PersistentSessionContext) -> str:
     """Get content from uploaded documents for study sheet generation"""
     
@@ -149,7 +199,6 @@ async def _get_study_sheet_content(session: PersistentSessionContext) -> str:
     except Exception as e:
         print("Excpetion occured in get_study_sheet_content() ",e)
         return ""
-
 
 def get_study_sheet_messages(chat_id):
     """Get all study sheet messages from a specific chat"""
@@ -236,16 +285,12 @@ async def _create_study_sheet_with_anthropic(
     user_request: str,
     language: str,
 ) -> str:  # Return HTML string instead of dict
-    """Generate complete HTML study sheet"""
+    """Generate complete HTML study sheet with Anthropic primary, OpenAI fallback"""
     
     session = get_session()
-    context_study_sheet=  await get_chat_context_from_db(session.chat_id)
+    context_study_sheet = await get_chat_context_from_db(session.chat_id)
     
-    try:
-        from anthropic import Anthropic
-        client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-              
-        prompt = f"""
+    prompt = f"""
         Create a complete HTML study sheet with the following exact specifications:
 
         Your primary goal is to display the information to make it easy to read and understand
@@ -274,7 +319,16 @@ async def _create_study_sheet_with_anthropic(
         4. "Key Concepts" section - important definitions and explanations
         5. "Quick Reference" section - bullet points and essential facts
         6. Interactive elements: collapsible sections (if it enhances the UX), print button
-
+        
+        MEDICAL/NURSING FRAMEWORK SECTIONS (include ONLY IF an illness or a health condition is mentionned in the context):
+        4. "Physiopathologie" - disease mechanisms, pathological processes
+        5. "Causes" - etiology, precipitating factors  
+        6. "Facteurs de risque" - risk factors, predisposing conditions
+        7. "Investigations / Examen para-clinique / Laboratoire" - diagnostic tests, lab values, imaging
+        8. "Traitement pharmacologique" - medications, dosages, mechanisms, side effects
+        9. "Traitement non-pharmacologique" - non-drug interventions, lifestyle modifications
+        10. "Interventions infirmières" - nursing assessments, interventions, monitoring, patient education
+        
         TECHNICAL REQUIREMENTS:
         - Self-contained HTML with embedded CSS and JavaScript
         - Glass effect using backdrop-filter and rgba colors
@@ -287,9 +341,16 @@ async def _create_study_sheet_with_anthropic(
         2. Address specific topics from conversation (these indicate knowledge gaps)
         3. Create comprehensive coverage of the subject
         4. Include practical study aids and memory techniques
+        
+        IMPORTANT ALL THE TEXT SHOULD BE IN THE LANGUAGE ASKED 
 
         Return ONLY the complete HTML code with no explanations or markdown formatting.
         """
+    
+    # Try Anthropic first
+    try:
+        from anthropic import Anthropic
+        client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
         
         response = client.messages.create(
             model="claude-3-5-sonnet-20241022",
@@ -298,18 +359,42 @@ async def _create_study_sheet_with_anthropic(
         )
         
         html_content = response.content[0].text
-        
-        # Clean any markdown formatting if present
-        if html_content.startswith("```html"):
-            html_content = html_content.split("```html")[1].split("```")[0]
-        elif html_content.startswith("```"):
-            html_content = html_content.split("```")[1].split("```")[0]
-            
-        return html_content.strip()
+        print("✅ Study sheet generated successfully with Anthropic")
         
     except Exception as e:
         print(f"Anthropic API error: {e}")
-        raise Exception(f"Failed to generate study content: {str(e)}")
+        
+        # Fallback to OpenAI
+        try:
+            from openai import OpenAI
+            openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            
+            response = openai_client.chat.completions.create(
+                model="gpt-4o",
+                max_tokens=6000,
+                temperature=0.3,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            
+            html_content = response.choices[0].message.content
+            print("✅ Study sheet generated successfully with OpenAI (fallback)")
+            
+        except Exception as openai_error:
+            print(f"OpenAI API error: {openai_error}")
+            raise Exception(f"Both AI providers failed. Anthropic: {str(e)}, OpenAI: {str(openai_error)}")
+    
+    # Clean any markdown formatting if present (works for both providers)
+    if html_content.startswith("```html"):
+        html_content = html_content.split("```html")[1].split("```")[0]
+    elif html_content.startswith("```"):
+        html_content = html_content.split("```")[1].split("```")[0]
+    
+    # Validate HTML output
+    html_content = html_content.strip()
+    if not html_content.startswith("<!DOCTYPE html") and not html_content.startswith("<html"):
+        raise Exception("Generated content is not valid HTML format")
+        
+    return html_content
 
 # tools/enhanced_summary_tools.py
 
@@ -334,6 +419,7 @@ async def summarize_document(
         session = get_session()
         
         print("SEARCHING FOR REVELENT STUFF FOR SUMMARY")       
+        
         # Search vector store for relevant chunks
         relevant_chunks = await _search_vectorstore_for_summary(
             filename, 
@@ -372,14 +458,33 @@ async def _search_vectorstore_for_summary(
 ) -> list:
     """
     Search vector store for relevant chunks to create summary
+    This function has the list of documents uploaded by user, and if the file is not found , it will just summarize the last file
     """
     try:
         with tempfile.TemporaryDirectory() as tempdir:
             # Use same pattern as your working code
             bucket = storage.bucket()
             
-            faiss_blob = bucket.blob(f"FileVectorStore/{chat_id}/{filename}/index.faiss")
-            pkl_blob = bucket.blob(f"FileVectorStore/{chat_id}/{filename}/index.pkl")
+            session = get_session()
+            
+            #get last filename uploaded by user
+            lastfile = session.documents[-1]
+            print("Last File Uploaded Obj", lastfile)
+            
+            #set it as the file we want to summarize by default
+            fileToSummarize = lastfile['filename']
+            
+            # but if there was a file specified during a request, and it is found in the file list
+            # summarize the file mentionned in the request
+            
+            is_requested_file_uploaded = any(doc.get('filename') == filename for doc in session.documents)
+            if(is_requested_file_uploaded):
+                fileToSummarize= filename
+          
+            print("filename we decided to summarize", fileToSummarize)
+            
+            faiss_blob = bucket.blob(f"FileVectorStore/{chat_id}/{fileToSummarize}/index.faiss")
+            pkl_blob = bucket.blob(f"FileVectorStore/{chat_id}/{fileToSummarize}/index.pkl")
             
             faiss_path = os.path.join(tempdir, "index.faiss")
             pkl_path = os.path.join(tempdir, "index.pkl")
@@ -399,7 +504,7 @@ async def _search_vectorstore_for_summary(
             docs = vectorstore.similarity_search(
                 query="", 
                 k=1000, 
-                filter={"source": filename}
+                filter={"source": fileToSummarize}
             )
             
             if not docs:
@@ -457,7 +562,7 @@ def get_chat_vectorstore(
             return None
                 
     except Exception as e:
-        print(f"EY, COULD NOT FIND vectorstore for {chat_id}, exception",e)
+        print(f"HEY, COULD NOT FIND vectorstore for {chat_id}, exception",e)
         return None
 
 @tool
@@ -622,44 +727,6 @@ async def generate_quiz(
             "message": f"Quiz generation failed: {str(e)}"
         }
 
-@tool
-def check_student_progress() -> Dict[str, Any]:
-    """
-    Check the current student's learning session and progress.
-    
-    Use this to understand what the student has been working on,
-    what materials they have available, and their recent activity.
-    
-    Returns:
-        Dictionary with session information and learning progress
-    """
-    try:
-        session = get_session()     
-        return {
-            "status": "success",
-            "session_info": {
-                "chat_id": session.chat_id,
-                "language": session.user_language,
-                "has_documents": bool(session.documents),
-                "document_count": len(session.documents) if session.documents else 0,
-                "vectorstore_loaded": session.vectorstore_loaded,
-                "message_count": len(session.message_history),
-                "recent_topics": _extract_recent_topics(session),
-                "recent_tool_usage": [
-                    {k: v for k, v in call.items() if k != 'context'}
-                    for call in session.tool_calls[-5:]
-                ] if session.tool_calls else [],
-                "has_cached_materials": session.last_retrieval is not None,
-                "last_quiz_available": session.last_quiz_generated is not None
-            }
-        }
-        
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": f"Progress check failed: {str(e)}"
-        }
-
 # @tool
 # def summarize_document() ->
 # ============================================================================
@@ -759,18 +826,21 @@ async def _generate_from_documents(topic: str,
         """
     )
 
-    llm = ChatOpenAI(model_name="gpt-4o", temperature=0.4)
-    chain = LLMChain(llm=llm, prompt=prompt)
+    llm = ChatOpenAI(model="gpt-4o", temperature=0.4)  # Note: model_name -> model
+    output_parser = StrOutputParser()
 
-    result = chain.run(
-        content=full_text,
-        num_questions=num_questions,
-        difficulty =difficulty,
-        quiz_type="multiple choice",
-        filename=session.documents,
-        language=session.user_language
-    )
-    
+    # Create the chain using pipe operator
+    chain = prompt | llm | output_parser
+
+    # Invoke the chain
+    result = chain.invoke({
+        "content": full_text,
+        "num_questions": num_questions,
+        "difficulty": difficulty,
+        "quiz_type": "multiple choice",
+        "filename": session.documents,
+        "language": session.user_language
+    })
     
     try:
         cleaned = result.strip().strip("```json").strip("```")
@@ -939,7 +1009,6 @@ class NursingTools:
         return [
             search_documents,
             generate_quiz,
-            check_student_progress,
             summarize_document,
             generate_study_sheet
         ]

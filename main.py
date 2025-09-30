@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Import your models
-from models.requests import StatelessChatRequest, DocumentsEmbedRequest
+from models.requests import StatelessChatRequest, DocumentsEmbedRequest, SummaryRequest
 
 # Import your orchestrator
 from services.orchestrator import NursingTutor
@@ -55,6 +55,8 @@ import firebase_admin
 from firebase_admin import credentials,storage
 
 from core.language import LanguageDetector
+
+import json
 
 # to load documents
 def get_loader_for_file(path):
@@ -136,7 +138,8 @@ async def chat_stream_response(request: StatelessChatRequest):
     if request.documents:
         nursing_tutor.session.documents = request.documents
     
-    print("HIIIIISTORY", request.chat_history)
+    #not using this anymore fetching directly from firebase
+    # print("HIIIIISTORY", request.chat_history)
     user_language = LanguageDetector.detect_language(request.input)
     
     # Process message and stream response
@@ -144,8 +147,6 @@ async def chat_stream_response(request: StatelessChatRequest):
         nursing_tutor.process_message(
             # feed the tutor the user input
             user_input=request.input,
-            # feed the tutor the chat history
-            chat_history=[],
             # feed the tutor the language the user's browser
             language=user_language
         ),
@@ -249,8 +250,57 @@ async def generate_quiz(request):
     # Keep your existing implementation
     pass
 
+
+@app.post("/chat/generate-summary")
+async def generate_summary(request:SummaryRequest):
+    
+    from tools.quiztools import _search_vectorstore_for_summary,set_session_context
+     # Get or create session for this chat
+    if request.chat_id not in ACTIVE_SESSIONS:
+        ACTIVE_SESSIONS[request.chat_id] = NursingTutor(request.chat_id)
+        print(f"Created new session for chat_id: {request.chat_id}")
+    
+    # GET TUTOR FOR CURRENT SESSION
+    nursing_tutor = ACTIVE_SESSIONS[request.chat_id]
+    print(f"nursing tutor created")
+        
+    
+    nursing_tutor.session.name_last_document_used=request.filename
+    
+    # === FIX FOR ATTRIBUTE ERROR ===
+    # The NursingTutor object seems to be missing the chat_id attribute internally.
+    # We enforce its existence here before passing it to set_session_context.
+    if not hasattr(nursing_tutor, 'chat_id'):
+        nursing_tutor.chat_id = request.chat_id
+        
+    set_session_context(nursing_tutor)
+    
+    from tools.quiztools import _search_vectorstore_for_summary
+    chunks = await _search_vectorstore_for_summary(request.filename, request.chat_id, "", "detailed")
+    
+    print("Got the chunks for summary through endpoint")
+    
+    async def json_chunk_generator():
+       async for chunk in   nursing_tutor.stream_document_summary(
+           relevant_chunks=chunks,
+           detail_level="detailed",
+           filename=request.filename,
+           language=request.language):
+            yield json.dumps({
+                "answer_chunk": chunk
+            }) + "\n"
+    
+    print("Streaming summary through endpoint response")
+    
+    return StreamingResponse(
+        json_chunk_generator(),
+        media_type="application/json"
+    )
+ 
+        
 @app.post("/chat/generate-title", response_model=GenerateTitleResponse)
 async def generate_chat_title(request: GenerateTitleRequest):
+    
     if request.message:
         prompt = PromptTemplate(
             template="""
