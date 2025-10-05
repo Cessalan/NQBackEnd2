@@ -20,8 +20,8 @@ class NursingTutor:
         
         # Configure LLM with tools
         self.llm = ChatOpenAI(
-            model="gpt-4", 
-            temperature=0.3,
+            model="gpt-4o", 
+            temperature=0.5,
             # Enable streaming for better UX
             streaming=True  
         )
@@ -43,17 +43,22 @@ class NursingTutor:
                   
             full_context_from_db = await get_chat_context_from_db(self.session.chat_id)
             
-            # Ensure session context is available to tools
-            set_session_context(self.session)
-            
             # Add user message to history
             try:               
                 if(full_context_from_db["conversation"]):
-                    print("CONTEXT PREV CONVO",full_context_from_db["conversation"])
-                    self.session.message_history = full_context_from_db["conversation"]
+                    #print("CONTEXT PREV CONVO",full_context_from_db["conversation"])
+                    self.session.message_history = full_context_from_db["conversation"][-15:]
             except Exception as e:
-                print("error during context creation",e)
-            
+                print("error during conversation context creation",e)
+                
+            # add quizzes history to context
+            try:
+                if(full_context_from_db["quizzes"]):
+                    #print("CONTEXT PREV QUIZZES",full_context_from_db["quizzes"])
+                    self.session.quizzes = full_context_from_db["quizzes"]
+            except Exception as e:
+                print("error during quizzes context creation",e)
+                
             
             # self.session.message_history.append({
             #     "role": "user",
@@ -64,10 +69,15 @@ class NursingTutor:
                 # Prepare messages for LLM
             print("About to create messages to feed llm")
             
+            
+            # Ensure session context is available to tools
+            set_session_context(self.session)
+            
             # Create nursing-specific system prompt
             system_prompt = self._create_system_prompt()
             
-        
+            print("SYSTEM PROMPT", system_prompt)
+                   
             print("System Prompt created")
             
             messages = []
@@ -141,11 +151,11 @@ class NursingTutor:
                                     "answer_chunk": result.get("error", "Summarization failed")
                                 }) + "\n"
                             
-                        elif tool_name == "generate_study_sheet":
-                            from tools.quiztools import generate_study_sheet
-                            print("CALLING STUDY SHEET TOOL")
-                            result = await generate_study_sheet.ainvoke(tool_args)
-                            tool_results.append(result)   
+                        # elif tool_name == "generate_study_sheet":
+                        #     from tools.quiztools import generate_study_sheet_
+                        #     print("CALLING STUDY SHEET TOOL")
+                        #     result = await generate_study_sheet.ainvoke(tool_args)
+                        #     tool_results.append(result)   
                             
                         elif tool_name == "respond_to_student":
                             response_content = ""            
@@ -155,10 +165,92 @@ class NursingTutor:
                                     yield json.dumps({
                                         "answer_chunk": chunk.content
                                     }) + "\n"
-                                                    
+                        elif tool_name == "generate_study_sheet_stream":
+                            print("🎓 Study guide tool triggered")
+                            from tools.quiztools import generate_study_sheet_stream
+                            
+                            result = await generate_study_sheet_stream.ainvoke(tool_args)
+                            
+                            # Check if it's a study guide trigger
+                            if result.get("type") == "study_guide_trigger":
+                                print("triggering front-end interaction")
+                                # Send trigger to frontend
+                                yield json.dumps({
+                                    "type": "study_guide_trigger",
+                                    "topic": result["topic"],
+                                    "num_sections": result.get("num_sections", 6),
+                                    "message": result["message"]
+                                }) + "\n"
+                                
+                                # exit let the front-end iterate to create the study sheet now
+                                return      
+                        if tool_name == "generate_quiz_stream":
+                            print("🎯 Quiz tool called - checking for streaming")
+                            # Import streaming function
+                            from tools.quiztools import generate_quiz_stream
+                            result = await generate_quiz_stream.ainvoke(tool_args)
+                            
+                            # Check if tool signaled streaming intent
+                            if result.get("status") == "quiz_streaming_initiated":
+                                
+                                print("🌊 Starting quiz streaming from orchestrator")
+                                
+                                metadata = result.get("metadata", {})
+                                
+                                # Import streaming function
+                                from tools.quiztools import stream_quiz_questions
+                                
+                                # Track questions for final save
+                                all_questions = []
+                                
+                                # Stream questions one by one
+                                async for chunk in stream_quiz_questions(
+                                    topic=metadata.get("topic"),
+                                    difficulty=metadata.get("difficulty"),
+                                    num_questions=metadata.get("num_questions"),
+                                    source=metadata.get("source"),
+                                    session=self.session
+                                ):
+                                    if chunk.get("status") == "generating":
+                                        
+                                        value ={ "status": "quiz_generating",
+                                            "current": chunk.get("current"),
+                                            "type":"quiz",
+                                            "total": chunk.get("total"),
+                                            "message": f"Génération question {chunk.get('current')} sur {chunk.get('total')}..."}
+                                        
+                                        print("GENERATING", value)
+                                        # Send progress update
+                                        yield json.dumps(value) + "\n"
+                                    
+                                    elif chunk.get("status") == "question_ready":
+                                        # Send complete question to frontend
+                                        question = chunk.get("question")
+                                        all_questions.append(question)
+                                        
+                                        value = { "status": "quiz_question",
+                                            "question": question,
+                                            "type":"quiz",
+                                            "index": chunk.get("index"),
+                                            "total_so_far": len(all_questions)}
+                                        
+                                        print("READY",value)
+                                        yield json.dumps(value) + "\n"
+                                    
+                                    elif chunk.get("status") == "quiz_complete":
+                                        # Send completion signal with all questions
+                                        yield json.dumps({
+                                            "status": "quiz_complete",
+                                            "type":"quiz",
+                                            "quiz_data": all_questions,
+                                            "total_generated": chunk.get("total_generated")
+                                        }) + "\n"
+                                                        
                     except Exception as e:
                         print(f"🔥 Tool execution error: {e}")
                         tool_results.append({"error": str(e)})
+                        import traceback
+                        traceback.print_exc()  
                     
                 
                 # Format and stream the tool results
@@ -269,10 +361,10 @@ class NursingTutor:
         """Create nursing-specific system prompt"""
         return f"""You are an AI nursing tutor helping students develop clinical skills.
     
-        Carefully analyze the user intent
+        Carefully analyze the context and determine the user intent before taking action
         
         Your role:
-        - Help students learn nursing concepts, pharmacology, pathophysiology
+        - Help students learn nursing concepts
         - Generate practice questions and quizzes  
         - Search their uploaded study materials
         - Provide clear explanations with rationales
@@ -280,8 +372,8 @@ class NursingTutor:
 
         Available tools:
         - search_documents: Search student's uploaded materials
-        - generate_quiz: Create practice questions on any topic
-        - generate_study_sheet: When they want study materials OR when they ask for previous/old study sheets, basically, if the intent is to create or modify a study sheet
+        - generate_quiz_stream: Create practice questions on any topic
+        - generate_study_sheet_stream: When they want study materials OR when they ask for previous/old study sheets, basically, if the intent is to create or modify a study sheet
         - summarize_document: When they want document summaries
 
         Guidelines:
@@ -304,9 +396,20 @@ class NursingTutor:
         - Avoid putting text above the header if there is one
 
         Enhance the formatting while keeping all the original content and meaning intact.
+        ---
+        # TOOL-USE INFERENCE RULES
+        ---
+
+        1.  **Required Argument Focus:** When a tool requires a parameter (like 'topic' for 'generate_study_sheet_stream'), you MUST find the value for that parameter, base on the context (conversation, quizzes, summaries) provided.
+
+        2.  **Context Extraction:** If the user requests a study guide immediately following a detailed discussion, a summary, or a displayed chunk of information, you MUST use the **primary subject** of that immediately preceding content as the **required 'topic' argument**.
+
+        3.  **Fallback:** ONLY if the conversation is new or the topic is completely ambiguous (e.g., "Hi, what tools do you have?"), ask the user for the topic."
 
         Current session:
+        - Conversation so far {self.session.message_history if self.session.message_history else "no conversation yet"}
         - Student has {"documents uploaded" if self.session.documents else "no documents"}
+        - Quizzes previously done {self.session.quizzes if self.session.quizzes else "no quiz done yet"}
         - file name of the last file uploaded {self.session.documents[-1]["filename"]if self.session.documents else "no documents uploaded yet"}, if you are unsure about which file the user is talking about always use this one
         - file name of the last file you had an interaction with {self.session.name_last_document_used if self.session.name_last_document_used else " no file yet"}
         - Language preference: {self.session.user_language}"""

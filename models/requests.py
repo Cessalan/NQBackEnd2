@@ -43,3 +43,15 @@ class DocumentsEmbedRequest(BaseModel):
     
 class GenerateTitleRequest(BaseModel):
     message:str
+
+
+class PlanRequest(BaseModel):
+    topic: str
+    chat_id: str
+    num_sections: Optional[int] = 6
+    
+class SectionRequest(BaseModel):
+    section_title: str
+    topic: str
+    chat_id: str
+    context: str

@@ -169,6 +169,46 @@ async def generate_study_sheet(user_request: str) -> Dict[str, Any]:
             "message": f"Study sheet generation failed: {str(e)}"
         }
 
+
+
+@tool
+async def generate_study_sheet_stream(
+    topic: str,
+    num_sections: Optional[int] = 6
+) -> dict:
+    """
+    Generate a comprehensive, interactive study guide with progressive loading.
+    
+    Use this tool when the user wants:
+    - "Explain [topic] to me"
+    - "Teach me about [topic]"  
+    - "Create a study guide for [topic]"
+    - "I want to learn [topic]"
+    - "Break down [topic] for me"
+    - Comprehensive explanations or tutorials
+    
+    DO NOT use for:
+    - Simple questions like "What is X?" (use search_documents instead)
+    - Quiz generation (use generate_quiz)
+    - Document summaries (use summarize_document)
+    
+    Args:
+        topic: The topic to create a study guide for
+        num_sections: Number of sections (default 6)
+    
+    Returns:
+        dict with type "study_guide_trigger" to initiate progressive loading
+    """
+    
+    # Signal to orchestrator to start progressive generation
+    return {
+        "type": "study_guide_trigger",
+        "topic": topic,
+        "num_sections": num_sections,
+        "message": f"I'll create a comprehensive study guide about {topic}."
+    }
+
+
 async def _get_study_sheet_content(session: PersistentSessionContext) -> str:
     """Get content from uploaded documents for study sheet generation"""
     
@@ -631,7 +671,6 @@ async def search_documents(query: str, max_results: int = 3) -> Dict[str, Any]:
             "message": f"Document search failed: {str(e)}"
         }
 
-@tool
 async def generate_quiz(
         topic: str, 
         difficulty: str = "medium", 
@@ -727,6 +766,228 @@ async def generate_quiz(
             "message": f"Quiz generation failed: {str(e)}"
         }
 
+@tool
+async def generate_quiz_stream(
+    topic: str, 
+    difficulty: str = "medium", 
+    num_questions: int = 4,
+    source_preference: str = "auto"
+) -> Dict[str, Any]:
+    """
+    Generate a nursing quiz for the student.
+    
+    Use this when students request practice questions, want to test their knowledge,
+    or need NCLEX-style questions on specific topics.
+    
+    Args:
+        topic: Subject area (e.g., "pharmacology", "cardiac care", "NCLEX prep")
+        difficulty: Question difficulty ("easy", "medium", "hard")
+        num_questions: Number of questions to generate (1-10, default: 4)
+        source_preference: "documents" (from uploads), "scratch" (general), or "auto"
+    
+    Returns:
+        Dictionary signaling quiz streaming should begin
+    """
+    
+    print("🎯 QUIZ TOOL: Initiating streaming quiz generation")
+    
+    try:
+        session = get_session()
+         
+        # Normalize difficulty
+        difficulty_map = {
+            "facile": "easy", "easy": "easy",
+            "moyen": "medium", "medium": "medium", "normal": "medium",
+            "difficile": "hard", "hard": "hard", "challenging": "hard"
+        }
+        
+        normalized_difficulty = difficulty_map.get(difficulty.lower(), difficulty)
+        
+        # Determine source
+        if source_preference == "auto":
+            source = "documents" if session.documents else "scratch"
+        else:
+            source = source_preference
+        
+        # Validate num_questions
+        num_questions = max(1, min(15, num_questions))
+        
+        # Record tool call
+        session.tool_calls.append({
+            "tool": "generate_quiz_stream",
+            "timestamp": datetime.now().isoformat(),
+            "topic": topic,
+            "difficulty": normalized_difficulty,
+            "num_questions": num_questions,
+            "source": source,
+            "status": "streaming_initiated"
+        })
+        
+        # 🔥 KEY CHANGE: Return signal to orchestrator to handle streaming
+        return {
+            "status": "quiz_streaming_initiated",
+            "metadata": {
+                "topic": topic,
+                "difficulty": normalized_difficulty,
+                "num_questions": num_questions,
+                "source": source,
+                "language": session.user_language
+            },
+            "message": f"Starting quiz generation: {num_questions} questions on {topic}"
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Quiz generation failed: {str(e)}"
+        }
+
+
+# Helper function for streaming quiz generation
+async def stream_quiz_questions(
+    topic: str,
+    difficulty: str,
+    num_questions: int,
+    source: str,
+    session: PersistentSessionContext
+):
+    """
+    Generator that yields complete quiz questions one at a time.
+    Called by orchestrator after tool signals streaming intent.
+    """
+    
+    # Get content based on source
+    if source == "documents" and session.vectorstore:
+        # Get document content
+        docs = session.vectorstore.similarity_search(query=topic, k=1000)
+        full_text = "\n\n".join([doc.page_content for doc in docs])[:12000]
+        content_context = f"Document content:\n{full_text}"
+    else:
+        # Generate from scratch
+        content_context = f"General nursing knowledge about: {topic}"
+    
+    # Generate questions one at a time
+    for question_num in range(1, num_questions + 1):
+        
+        # Yield progress
+        yield {
+            "status": "generating",
+            "current": question_num,
+            "total": num_questions
+        }
+        
+        # Generate single question
+        question_data = await _generate_single_question(
+            content=content_context,
+            topic=topic,
+            difficulty=difficulty,
+            question_num=question_num,
+            language=session.user_language,
+            source_type=source
+        )
+        
+        if question_data:
+            # Yield complete question
+            yield {
+                "status": "question_ready",
+                "question": question_data,
+                "index": question_num - 1
+            }
+    
+    # Final completion
+    yield {
+        "status": "quiz_complete",
+        "total_generated": num_questions
+    }
+
+
+async def _generate_single_question(
+    content: str,
+    topic: str,
+    difficulty: str,
+    question_num: int,
+    language: str,
+    source_type: str
+) -> dict:
+    """
+    Generate ONE complete quiz question using LLM.
+    Returns fully-formed question object.
+    """
+    
+    prompt = PromptTemplate(
+        input_variables=["content", "topic", "difficulty", "question_num", "language"],
+        template="""
+        You are a {language}-speaking nursing quiz generator.
+
+        🎯 Generate **EXACTLY ONE high-quality multiple choice question** about: {topic}
+        
+        Difficulty: {difficulty}
+        Question number: {question_num}
+        
+        Context:
+        {content}
+
+        ✅ Requirements:
+        - Test critical thinking and clinical judgment
+        - Use realistic nursing scenarios
+        - Create 4 plausible options (A-D)
+        - Provide detailed rationale
+        - Use clear {language}
+
+        📤 Return ONLY valid JSON (no markdown):
+        {{
+            "question": "Question text in {language}",
+            "options": [
+                "A) Option 1",
+                "B) Option 2", 
+                "C) Option 3",
+                "D) Option 4"
+            ],
+            "answer": "B) Option 2",
+            "justification": "Detailed explanation in {language}",
+            "metadata": {{
+                "sourceLanguage": "{language}",
+                "topic": "{topic}",
+                "category": "nursing_category",
+                "difficulty": "{difficulty}",
+                "correctAnswerIndex": 1,
+                "sourceDocument": "conversational_generation",
+                "keywords": ["keyword1", "keyword2"]
+            }}
+        }}
+
+        📌 Guidelines:
+        - Evidence-based nursing practice
+        - Realistic patient scenarios
+        - Focus on nursing interventions
+        - Age-appropriate conditions
+        """
+    )
+
+    llm = ChatOpenAI(model="gpt-4o", temperature=0.4)
+    chain = prompt | llm | StrOutputParser()
+
+    try:
+        result = await chain.ainvoke({
+            "content": content,
+            "topic": topic,
+            "difficulty": difficulty,
+            "question_num": question_num,
+            "language": language
+        })
+        
+        # Clean and parse
+        cleaned = result.strip().strip("```json").strip("```")
+        parsed_question = json.loads(cleaned)
+        
+        return parsed_question
+        
+    except json.JSONDecodeError as e:
+        print(f"❌ Failed to parse question {question_num}: {e}")
+        return None
+    except Exception as e:
+        print(f"❌ Error generating question {question_num}: {e}")
+        return None
 # @tool
 # def summarize_document() ->
 # ============================================================================
@@ -1008,7 +1269,7 @@ class NursingTools:
         """Return list of tools for LangChain binding"""
         return [
             search_documents,
-            generate_quiz,
+            generate_quiz_stream,
             summarize_document,
-            generate_study_sheet
+            generate_study_sheet_stream
         ]

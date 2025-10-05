@@ -2,6 +2,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi import HTTPException
 from typing import Dict
 import os
 from dotenv import load_dotenv
@@ -10,7 +11,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Import your models
-from models.requests import StatelessChatRequest, DocumentsEmbedRequest, SummaryRequest
+from models.requests import StatelessChatRequest, DocumentsEmbedRequest, SummaryRequest,SectionRequest,PlanRequest
 
 # Import your orchestrator
 from services.orchestrator import NursingTutor
@@ -297,6 +298,166 @@ async def generate_summary(request:SummaryRequest):
         media_type="application/json"
     )
  
+
+@app.post("/plan")
+async def create_plan(request: PlanRequest):
+    from tools.quiztools import search_documents
+     
+    print("building plan for study guide",request)
+    
+    session = ACTIVE_SESSIONS[request.chat_id]
+    
+    try:
+        # Get context using your existing tool
+        search_result = await search_documents.ainvoke({
+            "query": request.topic
+        })
+        
+        context = search_result.get("context", "")
+        
+        
+        # STEP 1: Create a prompt asking LLM to generate a plan
+        prompt = f"""
+        Create {request.num_sections} sections for a study guide about {request.topic}.
+        base in this context {context}
+        in this language {session.session.user_language}
+        Return ONLY a JSON array:
+        [
+        {{"id": "introduction", "title": "Introduction", "color": "blue"}},
+        {{"id": "concepts", "title": "Key Concepts", "color": "green"}}
+        ]
+        """
+        # This creates an LLM instance
+        llm = ChatOpenAI(
+            model="gpt-4o-mini",           # Which AI model to use
+            temperature=0.3          # How creative (0=focused, 1=creative)
+        )
+        
+        # STEP 2: Send prompt to LLM (this generates the actual plan)
+        response = await llm.ainvoke([{"role": "user", "content": prompt}])
+
+        # STEP 3: LLM returns a string that looks like JSON
+        plan_json = response.content.strip()
+        # plan_json is now a STRING: '[{"id":"intro","title":"Introduction"...}]'
+
+        # STEP 4: Clean up markdown code blocks if LLM wrapped it
+        if plan_json.startswith("```"):
+            plan_json = plan_json.split("```")[1]
+            if plan_json.startswith("json"):
+                plan_json = plan_json[4:]
+            plan_json = plan_json.strip()
+
+        # STEP 5: Convert JSON string to Python list/dict
+        sections = json.loads(plan_json)  # ← This parses the string into actual Python objects
+        # sections is now a Python LIST: [{"id": "intro", "title": "Introduction"...}]
+        # Generate plan...
+        
+        # Return BOTH sections AND context
+        plan = {
+            "sections": sections,
+            "context": context  # ← Add this
+        }
+    
+        print("This is the plan", plan)
+        
+        return plan
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.post("/search")
+async def search_for_context(request: dict):
+    """
+    Reuse your existing search_documents tool to get context
+    """
+    from tools.quiztools import search_documents
+    
+    try:
+        # Call your existing search tool
+        result = await search_documents.ainvoke({
+            "query": request.get("query"),
+            # Add any other params your search tool needs
+        })
+        
+        # Extract context string
+        context = result.get("context", "")
+        
+        return {"context": context}
+        
+    except Exception as e:
+        print(f"Search error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+ 
+@app.post("/generate-section")
+async def generate_section(request: SectionRequest):
+    """Generate content for a section using RAG context"""
+    
+    print("GENERATING SECTION BASED ON",request)
+    
+    try:
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)    
+        prompt = f"""
+        You are creating educational content for a study guide.
+
+        Topic: {request.topic}
+        Section: {request.section_title}
+
+        Retrieved Context from Student's Documents:
+        {request.context}
+
+        Generate comprehensive educational content for this section using ONLY information from the documents.
+
+        Format as HTML:
+        - <h3>Subsection Title</h3>
+        - <p>Explanation text</p>
+        - <ul><li>Bullet points</li></ul>
+
+        - <div class="card card-blue">
+            <div class="card-title">🔑 Key Concept</div>
+            <p>Important nursing information</p>
+        </div>
+
+        - <div class="card card-green">
+            <div class="card-title">✅ Clinical Application</div>
+            <p>How to apply this in practice</p>
+        </div>
+
+        - <div class="card card-yellow">
+            <div class="card-title">⚠️ Critical Alert</div>
+            <p>Warning or safety information</p>
+        </div>
+
+        - Use <strong> for emphasis
+        - Use <span class="highlight">term</span> for key terms
+
+        Guidelines:
+        - Use nursing emojis (🩺 💊 🫁 ❤️ 🧠)
+        - Include rationales (WHY, not just WHAT)
+        - Focus on NCLEX-style critical thinking
+        - Be comprehensive but concise
+        - Use proper medical terminology
+        
+        IMPORTANT:
+        Make sure all the content written are in the same language, either french or english
+        It should be uniform from the header titles, to critical alert, key concepts etc
+
+        Return ONLY the HTML content, no markdown code blocks.
+        """
+        
+        response = await llm.ainvoke([{"role": "user", "content": prompt}])
+        content = response.content.strip()
+        
+        # Clean up
+        if content.startswith("```"):
+            content = content.split("```")[1]
+            if content.startswith("html"):
+                content = content[4:]
+            content = content.strip()
+        
+        return {"content": content}
+        
+    except Exception as e:
+        print(f"Error generating section: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
         
 @app.post("/chat/generate-title", response_model=GenerateTitleResponse)
 async def generate_chat_title(request: GenerateTitleRequest):
