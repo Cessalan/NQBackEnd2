@@ -671,101 +671,6 @@ async def search_documents(query: str, max_results: int = 3) -> Dict[str, Any]:
             "message": f"Document search failed: {str(e)}"
         }
 
-async def generate_quiz(
-        topic: str, 
-        difficulty: str = "medium", 
-        num_questions: int = 4,
-        source_preference: str = "auto"
-    ) -> Dict[str, Any]:
-     
-    # standard description to tell llm that the tool is for (langchain format)
-    """
-    Generate a nursing quiz for the student.
-    
-    Use this when students request practice questions, want to test their knowledge,
-    or need NCLEX-style questions on specific topics.
-    
-    Args:
-        topic: Subject area (e.g., "pharmacology", "cardiac care", "NCLEX prep")
-        difficulty: Question difficulty ("easy", "medium", "hard")
-        num_questions: Number of questions to generate (1-10, default: 4)
-        source_preference: "documents" (from uploads), "scratch" (general), or "auto"
-    
-    Returns:
-        Dictionary with quiz questions, answers, and rationales
-    """
-    
-    print("INSIDE THE QUIZ TOOL")
-    
-    try:
-        session = get_session()
-         
-        # Normalize difficulty
-        difficulty_map = {
-            "facile": "easy", "easy": "easy",
-            "moyen": "medium", "medium": "medium", "normal": "medium",
-            "difficile": "hard", "hard": "hard", "challenging": "hard"
-        }
-        
-        normalized_difficulty = difficulty_map.get(difficulty.lower(), difficulty)
-        
-        # Determine source
-        if source_preference == "auto":
-            source = "documents" if session.documents else "scratch"
-        else:
-            source = source_preference
-        
-        # Validate num_questions
-        num_questions = max(1, min(10, num_questions))
-        
-        # Generate quiz
-        if source == "documents" and session.vectorstore:
-            quiz_data = await _generate_from_documents(
-                topic=topic,
-                difficulty=normalized_difficulty,
-                num_questions=num_questions,
-                session=session
-            )
-        else:
-            print("NEED TO GENERATE QUIZ FROM SCRATCH")
-            quiz_data = await _generate_from_scratch(
-                topic=topic,
-                difficulty=normalized_difficulty,
-                num_questions=num_questions,
-                session=session
-            )
-        
-        # Cache the generated quiz
-        session.last_quiz_generated = quiz_data
-        
-        # Record tool call
-        session.tool_calls.append({
-            "tool": "generate_quiz",
-            "timestamp": datetime.now().isoformat(),
-            "topic": topic,
-            "difficulty": normalized_difficulty,
-            "num_questions": num_questions,
-            "source": source,
-            "status": "generated"
-        })
-        
-        return {
-            "status": "success",
-            "quiz": quiz_data,
-            "metadata": {
-                "topic": topic,
-                "difficulty": normalized_difficulty,
-                "question_count": num_questions,
-                "source": source
-            }
-        }
-        
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": f"Quiz generation failed: {str(e)}"
-        }
-
 @tool
 async def generate_quiz_stream(
     topic: str, 
@@ -782,7 +687,7 @@ async def generate_quiz_stream(
     Args:
         topic: Subject area (e.g., "pharmacology", "cardiac care", "NCLEX prep")
         difficulty: Question difficulty ("easy", "medium", "hard")
-        num_questions: Number of questions to generate (1-10, default: 4)
+        num_questions: Number of questions to generate (1-50, default: 4)
         source_preference: "documents" (from uploads), "scratch" (general), or "auto"
     
     Returns:
@@ -866,6 +771,10 @@ async def stream_quiz_questions(
         # Generate from scratch
         content_context = f"General nursing knowledge about: {topic}"
     
+    
+    #track generate questions
+    generated_questions = _extract_previous_questions(session=session, limit=30)
+      
     # Generate questions one at a time
     for question_num in range(1, num_questions + 1):
         
@@ -883,10 +792,12 @@ async def stream_quiz_questions(
             difficulty=difficulty,
             question_num=question_num,
             language=session.user_language,
-            source_type=source
+            questions_to_avoid=generated_questions
         )
         
         if question_data:
+            #Append to list for next iteration
+            generated_questions.append(question_data['question'])
             # Yield complete question
             yield {
                 "status": "question_ready",
@@ -907,28 +818,37 @@ async def _generate_single_question(
     difficulty: str,
     question_num: int,
     language: str,
-    source_type: str
+    questions_to_avoid:list = None
 ) -> dict:
     """
     Generate ONE complete quiz question using LLM.
     Returns fully-formed question object.
     """
     
+    if questions_to_avoid:
+        avoid_text = "\n".join([f"- {q}" for q in questions_to_avoid])
+    else:
+        avoid_text = "None - this is the first question in this quiz"
+        
     prompt = PromptTemplate(
-        input_variables=["content", "topic", "difficulty", "question_num", "language"],
+        input_variables=["content", "topic", "difficulty", "question_num", "language", "questions_to_avoid"],
         template="""
         You are a {language}-speaking nursing quiz generator.
 
-        🎯 Generate **EXACTLY ONE high-quality multiple choice question** about: {topic}
+        Generate **EXACTLY ONE high-quality multiple choice question** about: {topic}
         
         Difficulty: {difficulty}
         Question number: {question_num}
         
+        CRITICAL - DO NOT repeat or rephrase these questions ALREADY IN THIS QUIZ:
+        {questions_to_avoid}
+        
         Context:
         {content}
 
-        ✅ Requirements:
+        Requirements:
         - Test critical thinking and clinical judgment
+        - Create a COMPLETELY NEW question testing a DIFFERENT concept/scenario than the ones above
         - Use realistic nursing scenarios
         - Create 4 plausible options (A-D)
         - Provide detailed rationale
@@ -967,13 +887,15 @@ async def _generate_single_question(
     llm = ChatOpenAI(model="gpt-4o", temperature=0.4)
     chain = prompt | llm | StrOutputParser()
 
+    print("Questions to avoid:", avoid_text);
     try:
         result = await chain.ainvoke({
             "content": content,
             "topic": topic,
             "difficulty": difficulty,
             "question_num": question_num,
-            "language": language
+            "language": language,
+            "questions_to_avoid": avoid_text
         })
         
         # Clean and parse
@@ -988,214 +910,43 @@ async def _generate_single_question(
     except Exception as e:
         print(f"❌ Error generating question {question_num}: {e}")
         return None
-# @tool
-# def summarize_document() ->
-# ============================================================================
-# HELPER FUNCTIONS (keep your existing implementation)
-# ============================================================================
 
-async def _generate_from_documents(topic: str, 
-                                   difficulty: str,
-                                   num_questions: int,
-                                   session: PersistentSessionContext):
-    # TODO: Implement your existing document-based quiz generation
-    # This should use the vectorstore to find relevant content and create questions
-      # build the vecotorstore with the .faiss and .pkl files
-    vectorstore = session.vectorstore
+
+def _extract_previous_questions(session: PersistentSessionContext, limit: int = 15) -> list:
+    """
+    Extract question text from recent quiz history for deduplication.
     
-     # Get all chunks for the file
-    docs = vectorstore.similarity_search(
-        query="", 
-        k=1000,
-    )
+    Args:
+        session: Current session context
+        limit: Maximum number of previous questions to return
     
-    if not docs:
-        raise HTTPException(status_code=404, detail="FAST API: No content found for this file.")
+    Returns:
+        List of question strings from previous quizzes
+    """
+    previous_questions = []
     
-    full_text = "\n\n".join([doc.page_content for doc in docs])[:12000]
+    if not session.quizzes:
+        return []
     
-    prompt = PromptTemplate(
-        input_variables=["content", "num_questions", "quiz_type", "language", "filename"],
-        template="""
-        You are a {language}-speaking quiz generator designed to evaluate understanding of nursing educational documents.
-
-        🎯 Your task is to generate **{num_questions} high-quality {quiz_type} questions** that verify the user's **true understanding** of the following content.
-
-        Do **NOT** copy examples or facts directly. Instead:
-
-        ✅ Create questions that:
-        - Apply concepts in **new situations**
-        - Require **logic**, **cause-effect reasoning**, or **critical thinking**
-        - Involve **scenarios**, **"what if" cases**, or **comparisons**
-        - Use clear and correct {language}
-
-        ❌ Do NOT:
-        - Ask questions based on literal examples from the text
-        - Repeat data, dates, or values
-        - Ask questions that could be answered by scanning a line
-
-        🧠 Think like a nursing instructor creating a comprehension test.
-
-        📤 Return ONLY valid JSON in the following structure:
-        [
-        {{
-        "question": "Question text in {language}",
-        "options": [
-            "A) Option 1",
-            "B) Option 2", 
-            "C) Option 3",
-            "D) Option 4"
-        ],
-        "answer": "B) Option 2",
-        "justification": "Explanation in {language}",
-        "metadata": {{
-            "sourceLanguage": "{language}",
-            "topic": "main_topic_identifier",
-            "category": "nursing_category_based_on_content",
-            "difficulty": {difficulty},
-            "correctAnswerIndex": 1,
-            "sourceDocument": "{filename}",
-            "keywords": ["keyword1", "keyword2", "keyword3"]
-            }}
-        }}
-        ]
-
-        📌 Metadata Guidelines:
-        - topic: Concise identifier (e.g., "medication_administration", "patient_assessment", "infection_control")
-        - category: Analyze the document content and choose the most appropriate nursing category (e.g., "fundamentals", "medical_surgical", "pediatrics", "mental_health", "pharmacology", "anatomy_physiology", "pathophysiology", "nursing_process", "ethics", "leadership", etc.)
-        - difficulty: easy (basic nursing concepts), medium (application in practice), hard (critical thinking/complex scenarios)
-        - keywords: 3-6 relevant nursing/medical terms for search and clustering
-        - correctAnswerIndex: Must match the position of correct answer in options array (0-based indexing)
+    # Get last 3 quiz sessions
+    for quiz_session in session.quizzes[-3:]:
+        quiz_data = quiz_session.get('quiz_data', {})
         
-        📌 Clinical Accuracy Guidelines:
-        - Base questions on evidence-based nursing practice and current medical standards
-        - Ensure all scenarios reflect realistic patient populations and conditions
-        - For rare conditions, clearly indicate prevalence (e.g., "Though rare in men, breast cancer...")
-        - Avoid outdated medical practices or misconceptions
-        - Focus on nursing interventions and assessments rather than medical diagnosis
-        - Use age-appropriate scenarios for the condition being discussed
-
-        📌 Question Quality Requirements:
-        - Questions should test nursing knowledge, not obscure medical facts
-        - Scenarios should reflect situations nurses commonly encounter
-        - Include diverse patient populations (age, gender, ethnicity) when clinically relevant
-        - Ensure all answer options are plausible and realistic
-        - Focus on nursing process: assessment, diagnosis, planning, implementation, evaluation
-
-        📄 Document content:
-        {content}
-        """
-    )
-
-    llm = ChatOpenAI(model="gpt-4o", temperature=0.4)  # Note: model_name -> model
-    output_parser = StrOutputParser()
-
-    # Create the chain using pipe operator
-    chain = prompt | llm | output_parser
-
-    # Invoke the chain
-    result = chain.invoke({
-        "content": full_text,
-        "num_questions": num_questions,
-        "difficulty": difficulty,
-        "quiz_type": "multiple choice",
-        "filename": session.documents,
-        "language": session.user_language
-    })
-    
-    try:
-        cleaned = result.strip().strip("```json").strip("```")
-        parsed_quiz = json.loads(cleaned)
-    except json.JSONDecodeError as e:
-        raise HTTPException(status_code=500, detail=f"Failed to parse JSON: {str(e)}")
-                       
-    return {"quiz": parsed_quiz}
-
-async def _generate_from_scratch(topic: str,
-                                 difficulty: str,
-                                 num_questions: int,
-                                 session: PersistentSessionContext):
-    try:
-        print(f"starting QUIZ FROM SCRATCH")
-        prompt = PromptTemplate(
-            input_variables=["topic", "difficulty", "num_questions", "quiz_type", "language"],
-            template="""
-            You are a quiz generator creating educational questions from scratch.
-            
-            🎯 Create **{num_questions} high-quality {quiz_type} questions** on the topic: **{topic}**
-            📊 Difficulty level: **{difficulty}**
-
-            Requirements:
-            ✅ Questions explanation and the content produced should be in the language :{language}
-            ✅ Questions should test understanding, not just memorization
-            ✅ Create realistic, educational scenarios when appropriate
-            ✅ Ensure questions are appropriate for the {difficulty} difficulty level
-            ✅ Cover different aspects of {topic}
-            
-            Important:
-            The content of the quiz should be in the user language: {language}
-            Number each question, so we can refer to it in the conversation
-
-            📤 Return ONLY valid JSON in the following structure:
-            [
-            {{
-            "question": "1) Question text",
-            "options": [
-                "A) Option 1",
-                "B) Option 2", 
-                "C) Option 3",
-                "D) Option 4"
-            ],
-            "answer": "B) Option 2",
-            "justification": "Explanation that justifies the answer",
-            "metadata": {{
-                "sourceLanguage": "{language},
-                "topic": "{topic}",
-                "category": "educational_category_based_on_topic",
-                "difficulty": "{difficulty}",
-                "correctAnswerIndex": 1,
-                "sourceDocument": "generated_from_scratch",
-                "keywords": ["keyword1", "keyword2", "keyword3"]
-            }}
-            }}
-            ]
-            """
-        )
-
-        llm = ChatOpenAI(model="gpt-4o", temperature=0.4)
-        output_parser = StrOutputParser()
-
-        # Create the chain using LCEL (LangChain Expression Language)
-        chain = prompt | llm | output_parser
-
-        # Execute
-        result = await chain.ainvoke({
-            "topic": topic,
-            "difficulty": difficulty, 
-            "quiz_type": "mcq",
-            "num_questions": num_questions,
-            "language": session.user_language
-        })
+        # Handle both dict and list formats
+        if isinstance(quiz_data, dict) and 'quiz' in quiz_data:
+            questions = quiz_data['quiz']
+        else:
+            questions = quiz_data
         
-        cleaned = result.strip().strip("```json").strip("```")
-        parsed_quiz = json.loads(cleaned)
-        print(f"this is the quiz{parsed_quiz}")
-        return {"quiz": parsed_quiz}
-
-    except Exception as e:
-        print("🔥🔥🔥 ERROR IN SCRATCH QUIZ:", e)
-        raise Exception(f"Scratch quiz generation failed: {str(e)}")
-
-def _extract_recent_topics(session: PersistentSessionContext) -> list:
-    """Extract topics from recent messages and tool calls"""
-    topics = []
+        # Extract question text
+        if isinstance(questions, list):
+            for q in questions:
+                if isinstance(q, dict) and 'question' in q:
+                    previous_questions.append(q['question'])
     
-    # Get topics from recent tool calls
-    for call in session.tool_calls[-5:]:
-        if call.get("tool") == "generate_quiz" and "topic" in call:
-            topics.append(call["topic"])
-    
-    return list(set(topics))  # Remove duplicates
+    # Return most recent questions up to limit
+    return previous_questions[-limit:]
+
 
 @tool
 async def load_vectorstore_from_firebase(session: PersistentSessionContext) -> Optional[FAISS]:

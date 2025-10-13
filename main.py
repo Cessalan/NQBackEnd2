@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi import HTTPException
+from fastapi import WebSocket, WebSocketDisconnect
 from typing import Dict
 import os
 from dotenv import load_dotenv
@@ -15,6 +16,7 @@ from models.requests import StatelessChatRequest, DocumentsEmbedRequest, Summary
 
 # Import your orchestrator
 from services.orchestrator import NursingTutor
+from services.voice_orchestrator import VoiceTutor
 
 # Import Firebase initialization
 import firebase_admin
@@ -24,6 +26,7 @@ from firebase_admin import credentials
 from langchain_openai import OpenAIEmbeddings
 from langchain.text_splitter import CharacterTextSplitter
 from langchain_community.vectorstores import FAISS
+from langchain.schema import Document
 
 # to store files temporarily
 import tempfile
@@ -93,6 +96,18 @@ firebase_admin.initialize_app(cred, {
 
 
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.getenv("GOOGLE_API_KEY")
+api_key = os.getenv("OPENAI_API_KEY")
+if api_key:
+    print(f"✅ OPENAI_API_KEY found")
+    print(f"   Length: {len(api_key)}")
+    print(f"   First 15 chars: {api_key[:15]}")
+    print(f"   Last 4 chars: ...{api_key[-4:]}")
+    print(f"   Type: {type(api_key)}")
+    # Move the check outside the f-string
+    has_whitespace = ' ' in api_key or '\n' in api_key or '\t' in api_key
+    print(f"   Contains whitespace: {has_whitespace}")
+else:
+    print("❌ OPENAI_API_KEY is NOT SET")
 
 # Create FastAPI app
 app = FastAPI(
@@ -108,7 +123,8 @@ app.add_middleware(
         "http://localhost:3000",
         "https://docai-efb03.web.app",
         "https://docai-efb03.firebaseapp.com",
-        "https://chats.nursequizai.com"
+        "https://chats.nursequizai.com",
+        "https://ragfastapi-1075876064685.europe-west1.run.app"
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -154,6 +170,61 @@ async def chat_stream_response(request: StatelessChatRequest):
         media_type="application/json"
     )
 
+
+# Track active voice sessions
+ACTIVE_VOICE_SESSIONS: Dict[str, VoiceTutor] = {}
+
+@app.websocket("/voice/stream/{chat_id}")
+async def voice_stream(websocket: WebSocket, chat_id: str):
+    """WebSocket endpoint for voice calls"""
+    await websocket.accept()
+    session_id = None
+    voice_orch = None
+    
+    try:
+        # Wait for start message
+        init_msg = await websocket.receive_json()
+        
+        if init_msg.get("type") != "start":
+            await websocket.send_json({"type": "error", "message": "Send 'start' first"})
+            await websocket.close()
+            return
+        
+        language = init_msg.get("language", "en")
+        session_id = f"voice_{chat_id}_{id(websocket)}"
+        
+        # Create voice orchestrator
+        voice_orch = VoiceTutor(chat_id, language, websocket)
+        ACTIVE_VOICE_SESSIONS[session_id] = voice_orch
+        
+        await voice_orch.start_session()
+        await websocket.send_json({"type": "ready", "session_id": session_id})
+        
+        # Message loop
+        while True:
+            message = await websocket.receive()
+            
+            if "text" in message:
+                data = json.loads(message["text"])
+                if data.get("type") == "end":
+                    break
+            elif "bytes" in message:
+                await voice_orch.process_audio(message["bytes"])
+    
+    except WebSocketDisconnect:
+        print(f"Voice disconnected: {session_id}")
+    except Exception as e:
+        print(f"Voice error: {e}")
+    finally:
+        if voice_orch:
+            await voice_orch.end_session()
+        if session_id in ACTIVE_VOICE_SESSIONS:
+            del ACTIVE_VOICE_SESSIONS[session_id]
+        try:
+            await websocket.close()
+        except:
+            pass
+
 # ============================================================================
 # SUPPORTING ENDPOINTS (keep your existing ones)
 # ============================================================================
@@ -167,90 +238,128 @@ def get_temp_dir():
         return tempfile.gettempdir()
 
 @app.post("/chat/embed")
-def embed_documents(request:DocumentsEmbedRequest): 
+def embed_documents(request: DocumentsEmbedRequest): 
     try:
         if request.documents:
             all_chunks = []
             text_splitter = CharacterTextSplitter(separator="\n", chunk_size=1000, chunk_overlap=200)
+            word_count = 0
             
             for doc in request.documents:
+                print(f"📄 Processing: {doc.filename}")
+                
                 response = requests.get(doc.source)
-                print("fetch firebase response", response)
+                print(f"✅ Downloaded {doc.filename}")
+                
                 suffix = os.path.splitext(doc.filename)[-1].lower()
+                
                 with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as f:
                     f.write(response.content)
                     temp_path = f.name
+                
                 try:
                     loader = get_loader_for_file(temp_path)  
-                    print(f"✅ Loader created for {doc.filename}: {type(loader)}")
+                    print(f"✅ Loader created for {doc.filename}")
                     
                     pages = loader.load()                   
                     print(f"✅ Loaded {len(pages)} pages from {doc.filename}")
                     
-                    
                     text = "\n\n".join([p.page_content for p in pages])
                     print(f"✅ Extracted {len(text)} characters from {doc.filename}")
                     
-                    # get the word count to estimate reading time in front-end
-                    word_count = 0
-                    word_count = len(text.split())
+                    word_count += len(text.split())
                     chunks = text_splitter.split_text(text)
+                    
+                    file_chunks = []
+                    
                     for chunk in chunks:
-                       all_chunks.append(type("Document", (), {"page_content": chunk,"metadata": {"source": doc.filename}})())
-
-                        #this is how langchain expects to receive metadata
-                        #all_chunks.append(Document(page_content=chunk, metadata={"source": doc.filename}))
+                        # ✅ FIXED: Use proper Document class
+                        chunk_doc = Document(
+                            page_content=chunk,
+                            metadata={"source": doc.filename}
+                        )
+                        
+                        file_chunks.append(chunk_doc)
+                        all_chunks.append(chunk_doc)
+                    
+                    print(f"✅ Created {len(file_chunks)} chunks for {doc.filename}")
+                    
+                    # Upload file-specific vectorstore
+                    with tempfile.TemporaryDirectory(dir=get_temp_dir()) as tempdir:
+                        print(f"📤 Creating file-specific vectorstore for {doc.filename}")
+                        
+                        file_vectorstore = FAISS.from_documents(
+                            file_chunks,
+                            embedding=OpenAIEmbeddings()
+                        )
+                        file_vectorstore.save_local(tempdir)
+                        
+                        bucket = storage.bucket()
+                        
+                        blob_faiss_file = bucket.blob(
+                            f"FileVectorStore/{request.chatId}/{doc.filename}/index.faiss"
+                        )
+                        blob_faiss_file.upload_from_filename(
+                            os.path.join(tempdir, "index.faiss")
+                        )
+                        
+                        blob_pkl_file = bucket.blob(
+                            f"FileVectorStore/{request.chatId}/{doc.filename}/index.pkl"
+                        )
+                        blob_pkl_file.upload_from_filename(
+                            os.path.join(tempdir, "index.pkl")
+                        )
+                        
+                        print(f"✅ Uploaded file-specific vectorstore for {doc.filename}")
+                    
                 except Exception as e:
                     print(f"❌ Failed to process {doc.filename}: {e}")
-                    print(f"File extension: {os.path.splitext(doc.filename)[-1].lower()}")
-                    continue  # Skip this file and continue with others
+                    import traceback
+                    traceback.print_exc()
+                    continue
+                    
                 finally:
-                    os.unlink(temp_path)
-                    with tempfile.TemporaryDirectory(dir=get_temp_dir()) as tempdir:
-                        vectorstore = FAISS.from_documents(all_chunks, embedding=OpenAIEmbeddings())
-                        vectorstore.save_local(tempdir)
-
-                        # Upload both files to Firebase
-                        bucket = storage.bucket()
-                                        
-                        # upload it to the file vectorstore specific knowledge for a file (quiz, summary, mise en situation)
-                        blob_faiss_file = bucket.blob(f"FileVectorStore/{request.chatId}/{doc.filename}/index.faiss")
-                        blob_faiss_file.upload_from_filename(os.path.join(tempdir, "index.faiss"))
-                        
-                        blob_pkl_file = bucket.blob(f"FileVectorStore/{request.chatId}/{doc.filename}/index.pkl")
-                        blob_pkl_file.upload_from_filename(os.path.join(tempdir, "index.pkl"))
-                            
-            # Save vector store locally to /tmp
+                    try:
+                        os.unlink(temp_path)
+                        print(f"🗑️ Cleaned up temp file for {doc.filename}")
+                    except Exception as cleanup_error:
+                        print(f"⚠️ Cleanup failed: {cleanup_error}")
+            
+            # Chat-level vectorstore
+            print(f"📤 Creating chat-level vectorstore with {len(all_chunks)} total chunks")
+            
             with tempfile.TemporaryDirectory(dir=get_temp_dir()) as tempdir:
-                vectorstore = FAISS.from_documents(all_chunks, embedding=OpenAIEmbeddings())
-                vectorstore.save_local(tempdir)
+                chat_vectorstore = FAISS.from_documents(
+                    all_chunks,
+                    embedding=OpenAIEmbeddings()
+                )
+                chat_vectorstore.save_local(tempdir)
 
-                # Upload both files to Firebase
                 bucket = storage.bucket()
                 
-                # upload it in the chat vector store (general knowledge for the chat)
                 blob_faiss_chat = bucket.blob(f"vectorstores/{request.chatId}/index.faiss")
                 blob_faiss_chat.upload_from_filename(os.path.join(tempdir, "index.faiss"))
 
                 blob_pkl_chat = bucket.blob(f"vectorstores/{request.chatId}/index.pkl")
                 blob_pkl_chat.upload_from_filename(os.path.join(tempdir, "index.pkl"))
                 
+                print(f"✅ Uploaded chat-level vectorstore")
+            
+            print(f"✅✅✅ EMBED COMPLETE - Total words: {word_count}")
+            
             return {
                 "status": "success",
-                "word-count":word_count,
+                "word-count": word_count,
                 "firebase_path": f"vectorstores/{request.chatId}/"
             }
+            
         return {"status": "no_documents"}
+        
     except Exception as e:
-        print("🔥🔥🔥 ERROR:", e)
+        print(f"🔥🔥🔥 ERROR: {e}")
+        import traceback
+        traceback.print_exc()
         return {"status": "error", "message": str(e)}
-
-@app.post("/chat/generate-quiz")
-async def generate_quiz(request):
-    """Your existing quiz generation"""
-    # Keep your existing implementation
-    pass
-
 
 @app.post("/chat/generate-summary")
 async def generate_summary(request:SummaryRequest):
@@ -483,7 +592,7 @@ async def generate_chat_title(request: GenerateTitleRequest):
        
         llm = ChatOpenAI(
             temperature=0.8,
-            model_name="gpt-4o-mini",
+            model="gpt-4o-mini",
             streaming=False
         )
 
@@ -536,11 +645,16 @@ async def warm_up():
 # ============================================================================
 if __name__ == "__main__":
     import uvicorn
+    import os
+    
+    # Get port from environment (Cloud Run sets this to 8080)
     port = int(os.getenv("PORT", 8080))
+    
+    print(f"Starting server on port {port}...")
     
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
+        host="0.0.0.0",  # CRITICAL: Must be 0.0.0.0, not 127.0.0.1
         port=port,
-        reload=os.getenv("DEBUG", "false").lower() == "true",
+        reload=False,  # CRITICAL: No reload in production
     )

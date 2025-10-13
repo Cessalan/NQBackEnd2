@@ -4,7 +4,7 @@ from models.session import PersistentSessionContext
 import json
 from typing import AsyncGenerator
 from datetime import datetime
-from tools.quiztools import generate_quiz,search_documents,summarize_document,get_chat_context_from_db
+from tools.quiztools import search_documents,summarize_document,get_chat_context_from_db
 
 class NursingTutor:
     """
@@ -18,12 +18,14 @@ class NursingTutor:
         # Get properly decorated tools
         tools = self.tools_instance.get_tools()
         
+        import os
+        api_key = os.getenv("OPENAI_API_KEY")
         # Configure LLM with tools
         self.llm = ChatOpenAI(
             model="gpt-4o", 
             temperature=0.5,
-            # Enable streaming for better UX
-            streaming=True  
+            streaming=True,
+            openai_api_key=api_key  
         )
         
         self.llm_with_tools = self.llm.bind_tools(tools)
@@ -114,12 +116,8 @@ class NursingTutor:
                     
                     print(f"🔥 Manually executing tool: {tool_name} with args: {tool_args}")
                     
-                    try:
-                        if tool_name == "generate_quiz":                           
-                            result = await generate_quiz.ainvoke(tool_args)
-                            tool_results.append(result)
-                            
-                        elif tool_name == "search_documents":
+                    try:            
+                        if tool_name == "search_documents":
                             result = await search_documents.ainvoke(tool_args)
                             tool_results.append(result)
                             
@@ -144,19 +142,15 @@ class NursingTutor:
                                     yield json.dumps({
                                         "answer_chunk": chunk
                                     }) + "\n"
+                                    
+                                return
                                 
                             else:
                                 # Handle error from tool
                                 yield json.dumps({
                                     "answer_chunk": result.get("error", "Summarization failed")
                                 }) + "\n"
-                            
-                        # elif tool_name == "generate_study_sheet":
-                        #     from tools.quiztools import generate_study_sheet_
-                        #     print("CALLING STUDY SHEET TOOL")
-                        #     result = await generate_study_sheet.ainvoke(tool_args)
-                        #     tool_results.append(result)   
-                            
+                                                        
                         elif tool_name == "respond_to_student":
                             response_content = ""            
                             async for chunk in self.llm_with_tools.astream(messages):
@@ -186,7 +180,7 @@ class NursingTutor:
                                 return      
                         if tool_name == "generate_quiz_stream":
                             print("🎯 Quiz tool called - checking for streaming")
-                            # Import streaming function
+                            # creates parameters we will need for the quizz, and start streaming
                             from tools.quiztools import generate_quiz_stream
                             result = await generate_quiz_stream.ainvoke(tool_args)
                             
@@ -331,11 +325,18 @@ class NursingTutor:
                                 }) + "\n"
             else:
                 print("NO TOOLS USED, STRAIGHT RESPONSE")
-                # No tools called, send complete response
-                yield json.dumps({
-                    "answer_chunk": response.content
-                }) + "\n"
-                    
+                
+                response_content = ""
+            
+                # Stream the response chunk by chunk
+                async for chunk in self.llm.astream(messages):
+                    if hasattr(chunk, 'content') and chunk.content:
+                        response_content += chunk.content
+                        print(chunk.content)
+                        # Yield each chunk properly formatted
+                        yield json.dumps({
+                            "answer_chunk":chunk.content
+                        }) + "\n"
             
             # Add assistant response to history
             self.session.message_history.append({
@@ -469,11 +470,13 @@ class NursingTutor:
                 """
             
             # REAL STREAMING with vector store content
-            llm = ChatOpenAI(model="gpt-4o", temperature=0.3)
+            llm = ChatOpenAI(model="gpt-4o", temperature=0.3,streaming=True )
             
             async for chunk in llm.astream([{"role": "user", "content": summary_prompt}]):
                 if hasattr(chunk, 'content') and chunk.content:
-                    yield chunk.content
+                     # ✅ Just the text!
+                     yield chunk.content 
+
                     
         except Exception as e:
             yield f"Error generating summary: {str(e)}"

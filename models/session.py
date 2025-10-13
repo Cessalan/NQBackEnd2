@@ -22,3 +22,4 @@ class PersistentSessionContext:
     message_history: List[tuple] = field(default_factory=list)
     tool_calls: List[Dict] = field(default_factory=list)
     studysheet_history: str = field(default="")
+    previously_generate_questions_in_quiz = []

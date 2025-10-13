@@ -1,33 +1,98 @@
-fastapi
-uvicorn
-python-dotenv
-requests
-pydantic
-firebase-admin
-langchain
-langchain-community
+# fastapi
+# uvicorn
+# python-dotenv
+# requests
+# pydantic
+# firebase-admin
+# langchain
+# langchain-community
+# langchain-openai
+# openai
+# numpy==1.23.5
+# faiss-cpu==1.7.4
+# pypdf
+# pandas
+# tiktoken
+
+# # Modular LangChain packages (v0.1+)
+# langchain==0.2.17
+# langchain-community==0.2.19
+# langchain-core==0.2.43
+# langchain-text-splitters==0.2.4
+
+
+# # Document processing
+# python-pptx  # For PowerPoint files
+# docx2txt     # For Word documents (you had the error earlier)
+# python-docx  # Alternative/additional Word support
+# unstructured # For various file types (Excel, etc.)
+# nltk         # For text processing in unstructured
+
+# # Optional but recommended for better file support
+# openpyxl     # For Excel files
+# xlrd         # For older Excel files
+
+
+# ============================================
+# CORE WEB FRAMEWORK
+# ============================================
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+requests==2.31.0
+
+# ============================================
+# LANGCHAIN STACK (v0.2)
+# ============================================
+langchain==0.3.0
 langchain-openai
+langchain-community
+langchain-core
+
+
+# ============================================
+# AI MODEL APIS
+# ============================================
 openai
-numpy==1.23.5
+anthropic
+
+# ============================================
+# VECTOR STORE & EMBEDDINGS
+# ============================================
 faiss-cpu==1.7.4
-pypdf
-pandas
-tiktoken
+tiktoken==0.8.0
+numpy==1.26.4
 
-# Modular LangChain packages (v0.1+)
-langchain==0.2.17
-langchain-community==0.2.19
-langchain-core==0.2.43
-langchain-text-splitters==0.2.4
+# ============================================
+# DOCUMENT LOADERS
+# ============================================
+pypdf            # PDF files
+python-docx       # Word documents (.docx)
+docx2txt          # Alternative Word parser
+python-pptx      # PowerPoint files
+openpyxl         # Excel files (.xlsx)
+unstructured    # Multi-format document loader
 
+# ============================================
+# IMAGE PROCESSING & OCR
+# ============================================
+pillow==10.4.0                  # Image handling (PIL)
+pytesseract==0.3.13            # Local OCR engine
+google-cloud-vision==3.7.4     # Google Vision API for advanced OCR
+pillow-heif==0.18.0            # HEIC image format support
 
-# Document processing
-python-pptx  # For PowerPoint files
-docx2txt     # For Word documents (you had the error earlier)
-python-docx  # Alternative/additional Word support
-unstructured # For various file types (Excel, etc.)
-nltk         # For text processing in unstructured
+# ============================================
+# FIREBASE & GOOGLE CLOUD
+# ============================================
+firebase-admin==6.5.0
+google-auth>=2.23.0            # Auth for Google Cloud services
 
-# Optional but recommended for better file support
-openpyxl     # For Excel files
-xlrd         # For older Excel files
+# ============================================
+# DATA PROCESSING
+# ============================================
+pandas==2.2.3
+
+# ============================================
+# UTILITIES
+# ============================================
+python-dotenv==1.0.1
+pydantic==2.9.2

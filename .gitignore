@@ -17,7 +17,7 @@ build/
 # Common development and IDE files
 .vscode/
 .idea/
-.env
+# .env
 .DS_Store # macOS
 Thumbs.db # Windows
 
