@@ -16,7 +16,6 @@ from models.requests import StatelessChatRequest, DocumentsEmbedRequest, Summary
 
 # Import your orchestrator
 from services.orchestrator import NursingTutor
-from services.voice_orchestrator import VoiceTutor
 
 # Import Firebase initialization
 import firebase_admin
@@ -169,61 +168,6 @@ async def chat_stream_response(request: StatelessChatRequest):
         ),
         media_type="application/json"
     )
-
-
-# Track active voice sessions
-ACTIVE_VOICE_SESSIONS: Dict[str, VoiceTutor] = {}
-
-@app.websocket("/voice/stream/{chat_id}")
-async def voice_stream(websocket: WebSocket, chat_id: str):
-    """WebSocket endpoint for voice calls"""
-    await websocket.accept()
-    session_id = None
-    voice_orch = None
-    
-    try:
-        # Wait for start message
-        init_msg = await websocket.receive_json()
-        
-        if init_msg.get("type") != "start":
-            await websocket.send_json({"type": "error", "message": "Send 'start' first"})
-            await websocket.close()
-            return
-        
-        language = init_msg.get("language", "en")
-        session_id = f"voice_{chat_id}_{id(websocket)}"
-        
-        # Create voice orchestrator
-        voice_orch = VoiceTutor(chat_id, language, websocket)
-        ACTIVE_VOICE_SESSIONS[session_id] = voice_orch
-        
-        await voice_orch.start_session()
-        await websocket.send_json({"type": "ready", "session_id": session_id})
-        
-        # Message loop
-        while True:
-            message = await websocket.receive()
-            
-            if "text" in message:
-                data = json.loads(message["text"])
-                if data.get("type") == "end":
-                    break
-            elif "bytes" in message:
-                await voice_orch.process_audio(message["bytes"])
-    
-    except WebSocketDisconnect:
-        print(f"Voice disconnected: {session_id}")
-    except Exception as e:
-        print(f"Voice error: {e}")
-    finally:
-        if voice_orch:
-            await voice_orch.end_session()
-        if session_id in ACTIVE_VOICE_SESSIONS:
-            del ACTIVE_VOICE_SESSIONS[session_id]
-        try:
-            await websocket.close()
-        except:
-            pass
 
 # ============================================================================
 # SUPPORTING ENDPOINTS (keep your existing ones)

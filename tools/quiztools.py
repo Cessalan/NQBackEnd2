@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from typing import AsyncGenerator
 import os, tempfile
 import json
+import random
 
 #to format llm response into string
 from langchain_core.output_parsers import StrOutputParser 
@@ -902,6 +903,9 @@ async def _generate_single_question(
         cleaned = result.strip().strip("```json").strip("```")
         parsed_question = json.loads(cleaned)
         
+        # ✅ NEW: Shuffle options to randomize correct answer position
+        parsed_question = _shuffle_question_options(parsed_question)
+        
         return parsed_question
         
     except json.JSONDecodeError as e:
@@ -947,6 +951,77 @@ def _extract_previous_questions(session: PersistentSessionContext, limit: int = 
     # Return most recent questions up to limit
     return previous_questions[-limit:]
 
+
+def _shuffle_question_options(question: dict) -> dict:
+    """
+    Shuffle options to randomize correct answer position.
+    Updates both 'answer' and 'correctAnswerIndex' accordingly.
+    
+    Args:
+        question: Parsed question dict with options and answer
+        
+    Returns:
+        Question dict with shuffled options and updated answer/index
+    """
+    
+    if not question.get('options') or not question.get('answer'):
+        return question
+    
+    # Extract the letter labels (A, B, C, D)
+    options = question['options']
+    
+    # Find current correct answer
+    correct_answer_text = question['answer']
+    
+    # Extract the actual answer text (remove the letter prefix like "A) ")
+    correct_text = correct_answer_text.split(') ', 1)[1] if ') ' in correct_answer_text else correct_answer_text
+    
+    # Find which option contains the correct answer
+    old_correct_index = -1
+    option_texts = []
+    
+    for i, opt in enumerate(options):
+        # Extract text without letter prefix
+        text = opt.split(') ', 1)[1] if ') ' in opt else opt
+        option_texts.append(text)
+        
+        if text == correct_text or opt == correct_answer_text:
+            old_correct_index = i
+    
+    if old_correct_index == -1:
+        print(f"⚠️ Warning: Could not find correct answer in options")
+        return question
+    
+    # Create list of tuples (text, is_correct)
+    options_data = [(text, i == old_correct_index) for i, text in enumerate(option_texts)]
+    
+    # Shuffle the options
+    random.shuffle(options_data)
+    
+    # Rebuild options with new letter labels
+    letters = ['A', 'B', 'C', 'D']
+    new_options = []
+    new_correct_index = -1
+    new_answer = ""
+    
+    for i, (text, is_correct) in enumerate(options_data):
+        new_option = f"{letters[i]}) {text}"
+        new_options.append(new_option)
+        
+        if is_correct:
+            new_correct_index = i
+            new_answer = new_option
+    
+    # Update question with shuffled data
+    question['options'] = new_options
+    question['answer'] = new_answer
+    
+    if 'metadata' in question:
+        question['metadata']['correctAnswerIndex'] = new_correct_index
+    
+    print(f"🔀 Shuffled options: correct answer moved from position {old_correct_index} to {new_correct_index}")
+    
+    return question
 
 @tool
 async def load_vectorstore_from_firebase(session: PersistentSessionContext) -> Optional[FAISS]:
