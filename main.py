@@ -8,6 +8,8 @@ from typing import Dict
 import os
 from dotenv import load_dotenv
 
+import asyncio
+import json
 # Load environment variables
 load_dotenv()
 
@@ -132,6 +134,130 @@ app.add_middleware(
 
 # Global session storage
 ACTIVE_SESSIONS: Dict[str, NursingTutor] = {}
+
+
+# Connection manager for WebSocket connections
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Dict[str, WebSocket] = {}
+    
+    async def connect(self, websocket: WebSocket, chat_id: str):
+        await websocket.accept()
+        self.active_connections[chat_id] = websocket
+        print(f"✅ WebSocket connected for chat_id: {chat_id}")
+    
+    def disconnect(self, chat_id: str):
+        if chat_id in self.active_connections:
+            del self.active_connections[chat_id]
+            print(f"❌ WebSocket disconnected for chat_id: {chat_id}")
+    
+    async def send_message(self, chat_id: str, message: dict):
+        if chat_id in self.active_connections:
+            try:
+                await self.active_connections[chat_id].send_text(json.dumps(message))
+            except Exception as e:
+                print(f"Error sending message to {chat_id}: {e}")
+                self.disconnect(chat_id)
+
+
+# Global connection manager
+manager = ConnectionManager()
+
+
+# WebSocket endpoint
+@app.websocket("/ws/{chat_id}")
+async def websocket_endpoint(websocket: WebSocket, chat_id: str):
+    #connect
+    await manager.connect(websocket, chat_id) 
+    try:
+        while True:
+            # Wait for incoming message from client
+            data = await websocket.receive_text()
+            message = json.loads(data)
+            
+            # Handle different message types
+            await handle_websocket_message(chat_id, message, websocket)
+            
+    except WebSocketDisconnect:
+        manager.disconnect(chat_id)
+        print(f"Client {chat_id} disconnected")
+    except Exception as e:
+        print(f"WebSocket error for {chat_id}: {e}")
+        manager.disconnect(chat_id)
+        
+async def handle_websocket_message(chat_id: str, message: dict, websocket: WebSocket):
+    """Handle incoming WebSocket messages""" 
+    message_type = message.get("type")
+    
+    # check if Im getting a message
+    if message_type == "chat_message":
+        # Handle regular chat messages (proceed to call the AI Tutor)
+        await process_chat_message(chat_id, message, websocket)
+      
+    # check if Im getting a ping to get the session alive  
+    elif message_type == "ping":
+        # Handle ping/pong for connection keepalive
+        await websocket.send_text(json.dumps({"type": "pong"}))
+        
+    else:
+        # Unknown message type
+        await websocket.send_text(json.dumps({
+            "type": "error",
+            "message": f"Unknown message type: {message_type}"
+        }))
+        
+        
+async def process_chat_message(chat_id: str, message: dict, websocket: WebSocket):
+    """Process chat messages through the existing NursingTutor"""  
+    try:
+        # Extract message data
+        user_input = message.get("input", "")
+        language = message.get("language", "english")
+        
+        # Get or create session (same as existing logic)
+        if chat_id not in ACTIVE_SESSIONS:
+            ACTIVE_SESSIONS[chat_id] = NursingTutor(chat_id)
+    
+        nursing_tutor = ACTIVE_SESSIONS[chat_id]
+        
+        # Send status update
+        await websocket.send_text(json.dumps({
+            "type": "status",
+            "status": "processing",
+            "message": "Processing your message..."
+        }))
+        
+        # Process message and stream responses
+        async for chunk in nursing_tutor.process_message(user_input, language):
+            # Parse the existing streaming format
+            try:
+                chunk_data = json.loads(chunk.strip())
+                
+                # Forward to WebSocket with type wrapper
+                await websocket.send_text(json.dumps({
+                    "type": "stream_chunk",
+                    "data": chunk_data
+                }))
+                
+            except json.JSONDecodeError:
+                # Handle non-JSON chunks
+                await websocket.send_text(json.dumps({
+                    "type": "stream_chunk",
+                    "data": {"answer_chunk": chunk.strip()}
+                }))
+        
+        # Send completion signal
+        await websocket.send_text(json.dumps({
+            "type": "stream_complete",
+            "message": "Response complete"
+        }))
+        
+    except Exception as e:
+        print(f"Error processing chat message: {e}")
+        await websocket.send_text(json.dumps({
+            "type": "error",
+            "message": f"Processing failed: {str(e)}"
+        }))
 
 # ============================================================================
 # MAIN CHAT ENDPOINT WITH TOOL CALLING
