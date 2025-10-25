@@ -284,6 +284,8 @@ async def chat_stream_response(request: StatelessChatRequest):
     # print("HIIIIISTORY", request.chat_history)
     user_language = LanguageDetector.detect_language(request.input)
     
+    nursing_tutor.session.user_language = user_language
+    
     # Process message and stream response
     return StreamingResponse(
         nursing_tutor.process_message(

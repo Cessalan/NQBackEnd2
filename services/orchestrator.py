@@ -1,10 +1,11 @@
 from langchain_openai import ChatOpenAI
 from tools.quiztools import NursingTools, set_session_context
 from models.session import PersistentSessionContext
-import json
 from typing import AsyncGenerator
 from datetime import datetime
 from tools.quiztools import search_documents,summarize_document,get_chat_context_from_db
+import json
+import asyncio
 
 class NursingTutor:
     """
@@ -160,24 +161,105 @@ class NursingTutor:
                                         "answer_chunk": chunk.content
                                     }) + "\n"
                         elif tool_name == "generate_study_sheet_stream":
-                            print("🎓 Study guide tool triggered")
-                            from tools.quiztools import generate_study_sheet_stream
+                            print("🎓 Study sheet tool triggered")
+                                                          
+                            topic = tool_args.get("topic")
+                              
+                            # status expected on the front-end to open the side panel and show the study sheet
+                            yield json.dumps({
+                                "status": "study_sheet_trigger",
+                                "topic": topic,
+                                "message": f"Creating study sheet about {topic}..."
+                            }) + "\n"
                             
-                            result = await generate_study_sheet_stream.ainvoke(tool_args)
-                            
-                            # Check if it's a study guide trigger
-                            if result.get("type") == "study_guide_trigger":
-                                print("triggering front-end interaction")
-                                # Send trigger to frontend
+                            if not topic:
                                 yield json.dumps({
-                                    "type": "study_guide_trigger",
-                                    "topic": result["topic"],
-                                    "num_sections": result.get("num_sections", 6),
-                                    "message": result["message"]
+                                    "status": "error", 
+                                    "message": "No topic specified for study sheet"
+                                }) + "\n"
+                                return
+                            
+                            print(f"📚 Generating study sheet for: {topic}")
+                            
+                            from services.studysheetstreamer import StudySheetStreamer
+                            streamer = StudySheetStreamer(self.session)
+                            
+                            # Get context
+                            context = await streamer.get_document_context(topic)
+                            
+                            # Generate outline
+                            yield json.dumps({
+                                "status": "study_sheet_analyzing",
+                                "message": "Analyzing documents..."
+                            }) + "\n"
+                            
+                            sections = await streamer.generate_dynamic_outline(topic, context, language)
+                            
+                            yield json.dumps({
+                                "status": "study_sheet_plan_ready",
+                                "sections": sections
+                            }) + "\n"
+                            
+                            # Create skeleton
+                            skeleton_html = streamer.create_collapsible_skeleton(topic, sections, language)
+                            
+                            yield json.dumps({
+                                "status": "study_sheet_html_skeleton",
+                                "html_content": skeleton_html
+                            }) + "\n"
+                            
+                            # Generate each section COMPLETELY (no word-by-word)
+                            current_html = skeleton_html
+                            current_progress = 15
+                            section_weight = 70 / len(sections)
+                            
+                            for i, section in enumerate(sections):
+                                # Section start
+                                yield json.dumps({
+                                    "status": "study_sheet_section_start",
+                                    "section_id": section["id"],
+                                    "section_title": section["title"],
+                                    "message": section["message"],
+                                    "progress": current_progress
                                 }) + "\n"
                                 
-                                # exit let the front-end iterate to create the study sheet now
-                                return      
+                                # Generate COMPLETE section (no streaming)
+                                section_html = await streamer.generate_rich_section_html(section, topic, context, language)
+                                
+                                # Replace placeholder
+                                placeholder = f"{{{{CONTENT_{section['id']}}}}}"
+                                current_html = current_html.replace(placeholder, section_html)
+                                
+                                # Update badge
+                                old_badge = f'<span class="badge badge-loading" id="badge-{section["id"]}">'
+                                new_badge = f'<span class="badge badge-loaded" id="badge-{section["id"]}">✓</span>'
+                                current_html = current_html.replace(old_badge, new_badge)
+                                
+                                current_progress += section_weight
+                                
+                                # Send update with complete section
+                                yield json.dumps({
+                                    "status": "study_sheet_content_update",
+                                    "html_content": current_html,
+                                    "progress": min(current_progress, 99)
+                                }) + "\n"
+                                
+                                # Section complete
+                                yield json.dumps({
+                                    "status": "study_sheet_section_complete",
+                                    "section_id": section["id"],
+                                    "progress": current_progress
+                                }) + "\n"
+                            
+                            # Final completion
+                            yield json.dumps({
+                                "status": "study_sheet_complete",
+                                "html_content": current_html,
+                                "progress": 100
+                            }) + "\n"
+                            
+                            return
+                                                        
                         if tool_name == "generate_quiz_stream":
                             print("🎯 Quiz tool called - checking for streaming")
                             # creates parameters we will need for the quizz, and start streaming
