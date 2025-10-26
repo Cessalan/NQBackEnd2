@@ -223,6 +223,19 @@ class NursingTutor:
                                     "progress": current_progress
                                 }) + "\n"
                                 
+                                
+                                # Get section-specific context
+                                section_context = await streamer.get_section_specific_context(
+                                    section_title=section["title"],
+                                    section_scope=section.get("scope", ""),
+                                    topic=topic
+                                )
+                                
+                                # Fallback if needed
+                                if not section_context:
+                                    print(f"⚠️ Using fallback context for: {section['title']}")
+                                    section_context = context[:8000]
+                                    
                                 # Generate COMPLETE section (no streaming)
                                 section_html = await streamer.generate_rich_section_html(section, topic, context, language)
                                 

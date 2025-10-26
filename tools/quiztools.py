@@ -1023,7 +1023,6 @@ def _shuffle_question_options(question: dict) -> dict:
     
     return question
 
-@tool
 async def load_vectorstore_from_firebase(session: PersistentSessionContext) -> Optional[FAISS]:
     """
     Loads vectorstore based on documents uploaded previously, 
@@ -1038,7 +1037,7 @@ async def load_vectorstore_from_firebase(session: PersistentSessionContext) -> O
         return session.vectorstore
     
     # Create cache key from session's documents
-    current_doc_hash = frozenset([doc.filename for doc in session.documents])
+    current_doc_hash = frozenset([doc.get("filename") for doc in session.documents])
     
     # Check if documents changed since last load
     if hasattr(session, '_last_doc_hash') and session._last_doc_hash == current_doc_hash:

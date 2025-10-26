@@ -165,22 +165,30 @@ class StudySheetStreamer:
         print(f"🎉 Study sheet generation complete!")
     
     async def generate_rich_section_html(
-        self, 
-        section: Dict, 
-        topic: str, 
-        context: str, 
-        language: str
+    self, 
+    section: Dict, 
+    topic: str, 
+    context: str, 
+    language: str
     ) -> str:
-        """Generate RICH, COLOR-CODED section HTML"""
+        """Generate section HTML using the scope to prevent repetition"""
+        
+        # Extract scope from section (this is the magic!)
+        section_scope = section.get('scope', f"Focus on {section['title']}")
         
         prompts = {
             "english": f"""
-            Generate comprehensive HTML content for the "{section['title']}" section 
+            Generate HTML content for the "{section['title']}" section 
             of a nursing study sheet about "{topic}".
             
-            Context from documents: {context[:4000]}
+            Document context: {context[:4000]}
             
-            CRITICAL: Use COLOR-CODED CARDS for different information types:
+            YOUR ASSIGNED SCOPE FOR THIS SECTION:
+            {section_scope}
+            
+            CRITICAL: You MUST stay within the scope above. Do not write about topics outside your assigned scope.
+            
+            USE COLOR-CODED CARDS (choose 2-4 cards that fit your scope):
             
             🔑 <div class="card card-blue"> - Key Concepts & Definitions
             ✅ <div class="card card-green"> - Clinical Applications & Nursing Actions
@@ -191,29 +199,23 @@ class StudySheetStreamer:
             🚨 <div class="card card-red"> - Emergency & Critical Situations
             💊 <div class="card card-teal"> - Medications & Pharmacology
             
-            Each card automatically gets an emoji from CSS. Structure:
+            Card structure:
             <div class="card card-COLOR">
-            <div class="card-title">Title Here</div>
-            <p>Content here...</p>
-            <ul>
-                <li>Point 1</li>
-                <li>Point 2</li>
-            </ul>
+            <div class="card-title">Title</div>
+            <p>Content...</p>
+            <ul><li>Point 1</li></ul>
             </div>
             
-            SPECIAL ELEMENTS:
+            SPECIAL ELEMENTS (use only when relevant to YOUR scope):
             
             Highlights:
-            - <span class="highlight">important term</span> (yellow)
-            - <span class="highlight-red">danger sign</span> (red)
-            - <span class="highlight-blue">key concept</span> (blue)
-            - <span class="highlight-green">positive</span> (green)
+            <span class="highlight">important term</span>
+            <span class="highlight-red">danger sign</span>
+            <span class="highlight-blue">key concept</span>
+            <span class="highlight-green">positive outcome</span>
             
             Lab Values:
-            <span class="lab-value">
-            <span class="value">7.35-7.45</span>
-            <span class="unit">pH</span>
-            </span>
+            <span class="lab-value"><span class="value">7.35-7.45</span> <span class="unit">pH</span></span>
             
             Dosages:
             <span class="dosage">2.5mg via nebulizer q4h PRN</span>
@@ -221,97 +223,67 @@ class StudySheetStreamer:
             Stats:
             <span class="stat-box stat-normal">SpO2: 95-100%</span>
             <span class="stat-box stat-abnormal">SpO2: <85%</span>
+            <span class="stat-box stat-warning">SpO2: 85-90%</span>
             
             Priority Levels:
-            <div class="priority-high">🚨 High Priority: Respiratory distress</div>
-            <div class="priority-medium">⚠️ Medium: Monitor vitals</div>
-            <div class="priority-low">ℹ️ Low: Lifestyle education</div>
+            <div class="priority-high">🚨 High Priority: [specific action]</div>
+            <div class="priority-medium">⚠️ Medium Priority: [specific action]</div>
+            <div class="priority-low">ℹ️ Low Priority: [specific action]</div>
             
-            Mnemonics (for assessment tools like SAMPLE, ABC):
+            Mnemonics (only if relevant):
             <div class="mnemonic">
-            <div class="mnemonic-title">SAMPLE Assessment</div>
+            <div class="mnemonic-title">ABC Assessment</div>
             <div class="mnemonic-letters">
-                <div class="mnemonic-letter">
-                <strong>S</strong> Symptoms
-                </div>
-                <div class="mnemonic-letter">
-                <strong>A</strong> Allergies
-                </div>
-                <div class="mnemonic-letter">
-                <strong>M</strong> Medications
-                </div>
-                <div class="mnemonic-letter">
-                <strong>P</strong> Past Medical History
-                </div>
-                <div class="mnemonic-letter">
-                <strong>L</strong> Last Oral Intake
-                </div>
-                <div class="mnemonic-letter">
-                <strong>E</strong> Events Leading
-                </div>
+                <div class="mnemonic-letter"><strong>A</strong> Airway</div>
+                <div class="mnemonic-letter"><strong>B</strong> Breathing</div>
+                <div class="mnemonic-letter"><strong>C</strong> Circulation</div>
             </div>
             </div>
             
-            STRUCTURE TEMPLATE:
+            EXAMPLE OUTPUT STRUCTURE:
             
-            <p>Brief introduction to the concept...</p>
+            <p>Brief introduction specific to this section's scope...</p>
             
-            <div class="card card-purple">
-            <div class="card-title">Pathophysiology</div>
-            <p>Explain disease process...</p>
-            </div>
-            
-            <div class="card card-orange">
-            <div class="card-title">Assessment Findings</div>
+            <div class="card card-appropriate-color">
+            <div class="card-title">Specific Topic from Scope</div>
+            <p>Detailed content...</p>
             <ul>
-                <li><span class="highlight-red">Primary symptom</span>: Description</li>
-                <li><span class="highlight">Key finding</span>: Description</li>
-                <li>Normal range: <span class="lab-value"><span class="value">120-160</span> <span class="unit">mEq/L</span></span></li>
+                <li>Point 1</li>
+                <li>Point 2</li>
             </ul>
             </div>
             
-            <div class="card card-yellow">
-            <div class="card-title">Critical Alert</div>
-            <p>Important warning...</p>
+            <div class="card card-appropriate-color">
+            <div class="card-title">Another Topic from Scope</div>
+            <p>More content...</p>
             </div>
             
-            <div class="card card-green">
-            <div class="card-title">Nursing Interventions</div>
-            <ul>
-                <li>Action 1</li>
-                <li>Action 2</li>
-            </ul>
-            </div>
+            REQUIREMENTS:
+            - Write 250-400 words
+            - Use 2-4 colored cards
+            - Choose card colors that match content type
+            - Stay 100% within your assigned scope
+            - Be clinically accurate and detailed
+            - Use professional nursing terminology
             
-            <div class="card card-teal">
-            <div class="card-title">Medications</div>
-            <p><strong>Drug Name</strong>: <span class="dosage">dose and route</span></p>
-            <ul>
-                <li>Indication</li>
-                <li>Side effects to monitor</li>
-            </ul>
-            </div>
-            
-            <div class="card card-pink">
-            <div class="card-title">Patient Education</div>
-            <p>Teaching points...</p>
-            </div>
-            
-            Make it comprehensive (300-500 words), clinically accurate, and visually engaging!
-            Use multiple card types per section.
             Return ONLY HTML - no markdown, no explanations, no code blocks.
             """,
             
             "french": f"""
-            Générez un contenu HTML complet pour la section "{section['title']}" 
+            Générez du contenu HTML pour la section "{section['title']}" 
             d'une fiche d'étude infirmière sur "{topic}".
             
-            Contexte des documents: {context[:4000]}
+            Contexte du document: {context[:4000]}
             
-            CRITIQUE: Utilisez des CARTES COLORÉES pour différents types d'informations:
+            VOTRE PORTÉE ASSIGNÉE POUR CETTE SECTION:
+            {section_scope}
+            
+            CRITIQUE: Vous DEVEZ rester dans la portée ci-dessus. N'écrivez pas sur des sujets hors de votre portée assignée.
+            
+            UTILISEZ DES CARTES COLORÉES (choisissez 2-4 cartes qui correspondent à votre portée):
             
             🔑 <div class="card card-blue"> - Concepts Clés & Définitions
-            ✅ <div class="card card-green"> - Applications Cliniques & Interventions Infirmières
+            ✅ <div class="card card-green"> - Applications Cliniques & Actions Infirmières
             ⚠️ <div class="card card-yellow"> - Avertissements & Alertes Critiques
             🧬 <div class="card card-purple"> - Physiopathologie & Processus de la Maladie
             🔍 <div class="card card-orange"> - Résultats d'Évaluation & Observations
@@ -319,29 +291,23 @@ class StudySheetStreamer:
             🚨 <div class="card card-red"> - Situations d'Urgence & Critiques
             💊 <div class="card card-teal"> - Médicaments & Pharmacologie
             
-            Chaque carte obtient automatiquement un emoji du CSS. Structure:
+            Structure des cartes:
             <div class="card card-COULEUR">
-            <div class="card-title">Titre Ici</div>
-            <p>Contenu ici...</p>
-            <ul>
-                <li>Point 1</li>
-                <li>Point 2</li>
-            </ul>
+            <div class="card-title">Titre</div>
+            <p>Contenu...</p>
+            <ul><li>Point 1</li></ul>
             </div>
             
-            ÉLÉMENTS SPÉCIAUX:
+            ÉLÉMENTS SPÉCIAUX (utilisez uniquement si pertinent à VOTRE portée):
             
             Surlignages:
-            - <span class="highlight">terme important</span> (jaune)
-            - <span class="highlight-red">signe de danger</span> (rouge)
-            - <span class="highlight-blue">concept clé</span> (bleu)
-            - <span class="highlight-green">positif</span> (vert)
+            <span class="highlight">terme important</span>
+            <span class="highlight-red">signe de danger</span>
+            <span class="highlight-blue">concept clé</span>
+            <span class="highlight-green">résultat positif</span>
             
             Valeurs de Laboratoire:
-            <span class="lab-value">
-            <span class="value">7,35-7,45</span>
-            <span class="unit">pH</span>
-            </span>
+            <span class="lab-value"><span class="value">7,35-7,45</span> <span class="unit">pH</span></span>
             
             Dosages:
             <span class="dosage">2,5mg par nébuliseur q4h PRN</span>
@@ -349,84 +315,49 @@ class StudySheetStreamer:
             Statistiques:
             <span class="stat-box stat-normal">SpO2: 95-100%</span>
             <span class="stat-box stat-abnormal">SpO2: <85%</span>
+            <span class="stat-box stat-warning">SpO2: 85-90%</span>
             
             Niveaux de Priorité:
-            <div class="priority-high">🚨 Priorité Élevée: Détresse respiratoire</div>
-            <div class="priority-medium">⚠️ Priorité Moyenne: Surveiller les signes vitaux</div>
-            <div class="priority-low">ℹ️ Priorité Basse: Éducation sur le mode de vie</div>
+            <div class="priority-high">🚨 Priorité Élevée: [action spécifique]</div>
+            <div class="priority-medium">⚠️ Priorité Moyenne: [action spécifique]</div>
+            <div class="priority-low">ℹ️ Priorité Basse: [action spécifique]</div>
             
-            Mnémoniques (pour les outils d'évaluation comme SAMPLE, ABC):
+            Mnémoniques (uniquement si pertinent):
             <div class="mnemonic">
-            <div class="mnemonic-title">Évaluation SAMPLE</div>
+            <div class="mnemonic-title">Évaluation ABC</div>
             <div class="mnemonic-letters">
-                <div class="mnemonic-letter">
-                <strong>S</strong> Symptômes
-                </div>
-                <div class="mnemonic-letter">
-                <strong>A</strong> Allergies
-                </div>
-                <div class="mnemonic-letter">
-                <strong>M</strong> Médicaments
-                </div>
-                <div class="mnemonic-letter">
-                <strong>P</strong> Passé Médical
-                </div>
-                <div class="mnemonic-letter">
-                <strong>L</strong> Dernière Prise Orale
-                </div>
-                <div class="mnemonic-letter">
-                <strong>E</strong> Événements Précédents
-                </div>
+                <div class="mnemonic-letter"><strong>A</strong> Voies Aériennes</div>
+                <div class="mnemonic-letter"><strong>B</strong> Respiration</div>
+                <div class="mnemonic-letter"><strong>C</strong> Circulation</div>
             </div>
             </div>
             
-            MODÈLE DE STRUCTURE:
+            STRUCTURE DE SORTIE EXEMPLE:
             
-            <p>Brève introduction au concept...</p>
+            <p>Brève introduction spécifique à la portée de cette section...</p>
             
-            <div class="card card-purple">
-            <div class="card-title">Physiopathologie</div>
-            <p>Expliquer le processus de la maladie...</p>
-            </div>
-            
-            <div class="card card-orange">
-            <div class="card-title">Manifestations Cliniques</div>
+            <div class="card card-couleur-appropriee">
+            <div class="card-title">Sujet Spécifique de la Portée</div>
+            <p>Contenu détaillé...</p>
             <ul>
-                <li><span class="highlight-red">Symptôme principal</span>: Description</li>
-                <li><span class="highlight">Résultat clé</span>: Description</li>
-                <li>Plage normale: <span class="lab-value"><span class="value">120-160</span> <span class="unit">mEq/L</span></span></li>
+                <li>Point 1</li>
+                <li>Point 2</li>
             </ul>
             </div>
             
-            <div class="card card-yellow">
-            <div class="card-title">Alerte Critique</div>
-            <p>Avertissement important...</p>
+            <div class="card card-couleur-appropriee">
+            <div class="card-title">Autre Sujet de la Portée</div>
+            <p>Plus de contenu...</p>
             </div>
             
-            <div class="card card-green">
-            <div class="card-title">Interventions Infirmières</div>
-            <ul>
-                <li>Action 1</li>
-                <li>Action 2</li>
-            </ul>
-            </div>
+            EXIGENCES:
+            - Écrivez 250-400 mots
+            - Utilisez 2-4 cartes colorées
+            - Choisissez des couleurs de carte correspondant au type de contenu
+            - Restez 100% dans votre portée assignée
+            - Soyez cliniquement précis et détaillé
+            - Utilisez une terminologie infirmière professionnelle
             
-            <div class="card card-teal">
-            <div class="card-title">Médicaments</div>
-            <p><strong>Nom du Médicament</strong>: <span class="dosage">dose et voie</span></p>
-            <ul>
-                <li>Indication</li>
-                <li>Effets secondaires à surveiller</li>
-            </ul>
-            </div>
-            
-            <div class="card card-pink">
-            <div class="card-title">Éducation du Patient</div>
-            <p>Points d'enseignement...</p>
-            </div>
-            
-            Rendez-le complet (300-500 mots), cliniquement précis et visuellement attrayant!
-            Utilisez plusieurs types de cartes par section.
             Retournez UNIQUEMENT du HTML - pas de markdown, pas d'explications, pas de blocs de code.
             """
         }
@@ -437,7 +368,7 @@ class StudySheetStreamer:
             response = await self.llm.ainvoke([{"role": "user", "content": prompt}])
             content = response.content.strip()
             
-            # Clean any markdown code blocks if LLM ignores instructions
+            # Clean any markdown code blocks
             if content.startswith("```html"):
                 content = content.split("```html")[1].split("```")[0].strip()
             elif content.startswith("```"):
@@ -446,7 +377,7 @@ class StudySheetStreamer:
             return content
             
         except Exception as e:
-            print(f"Error generating section: {e}")
+            print(f"❌ Error generating section {section['id']}: {e}")
             error_messages = {
                 "english": f"<p>Error generating content for {section['title']}</p>",
                 "french": f"<p>Erreur lors de la génération du contenu pour {section['title']}</p>"
@@ -454,6 +385,65 @@ class StudySheetStreamer:
             return error_messages.get(language, error_messages["english"])
     
    
+    async def get_section_specific_context(
+    self, 
+    section_title: str, 
+    section_scope: str, 
+    topic: str
+) -> str:
+        """
+        Query vectorstore for chunks SPECIFIC to this section's scope.
+        Called once per section during study sheet generation.
+        
+        Args:
+            section_title: e.g., "Heart Failure"
+            section_scope: The detailed scope string from generate_dynamic_outline
+            topic: Original user topic (e.g., "cardiovascular")
+            
+        Returns:
+            Focused context containing only relevant chunks for this section
+        """
+        try:
+            session = self.session
+            
+            # Ensure vectorstore is loaded
+            if session.vectorstore is None and session.documents:
+                from tools.quiztools import load_vectorstore_from_firebase
+                session.vectorstore = await load_vectorstore_from_firebase(session)
+                session.vectorstore_loaded = True
+            
+            if not session.vectorstore:
+                print(f"⚠️ No vectorstore available for section: {section_title}")
+                return ""
+            
+            # Create focused query from section title + scope preview
+            scope_preview = section_scope[:150]
+            focused_query = f"{section_title} {scope_preview}"
+            
+            # Get chunks most relevant to THIS section only
+            section_docs = session.vectorstore.similarity_search(
+                query=focused_query, 
+                k=150  # Get 150 chunks specific to this section
+            )
+            
+            # Join and limit
+            section_context = "\n\n".join([doc.page_content for doc in section_docs])
+            section_context = section_context[:8000]  # 8K chars per section
+            
+            # Diagnostic logging
+            print(f"📚 Section-specific context for '{section_title}':")
+            print(f"   - Query: {focused_query[:80]}...")
+            print(f"   - Chunks retrieved: {len(section_docs)}")
+            print(f"   - Characters: {len(section_context)}")
+            
+            return section_context
+            
+        except Exception as e:
+            print(f"❌ Error getting section context for '{section_title}': {e}")
+            import traceback
+            traceback.print_exc()
+            return ""
+    
     def create_collapsible_skeleton(
     self, 
     topic: str, 
@@ -1169,46 +1159,229 @@ class StudySheetStreamer:
         return html
     
     async def generate_dynamic_outline(self, topic: str, context: str, language: str) -> List[Dict]:
-        """Generate content-based outline in target language"""
+        """Generate content-based outline with detailed scope for each section"""
         
         prompts = {
             "english": f"""
-            Analyze this document content about "{topic}" and create 5-6 main sections 
-            for a comprehensive nursing study sheet. Focus on what's actually covered in the documents.
+            Analyze the document content about "{topic}" and create 3-6 main sections 
+            for a comprehensive nursing study sheet.
             
-            Document content: {context[:3000]}
+            Document content: {context[:4000]}
             
-            Return as JSON array with this exact format:
+            CRITICAL INSTRUCTIONS:
+            
+            1. Create sections based on what's ACTUALLY covered in the documents
+            2. Make section titles SPECIFIC to "{topic}" (e.g., "Cardiac Assessment in Heart Failure" not just "Assessment")
+            3. Each section MUST have a detailed "scope" that:
+            - Lists EXACTLY what topics to cover in that section
+            - Explicitly states what NOT to include (to avoid overlap with other sections)
+            - Is specific enough to prevent repetition
+            
+            SECTION TYPES TO CONSIDER (pick 4-6 that match the content):
+            - Overview/Introduction
+            - Pathophysiology/Disease Process
+            - Clinical Assessment
+            - Diagnostic Tests/Procedures
+            - Nursing Interventions/Care
+            - Medications/Pharmacology
+            - Treatment/Management
+            - Complications/Red Flags
+            - Patient Education
+            - Discharge Planning
+            
+            Return as JSON array with this EXACT format:
             [
-              {{"id": "overview", "title": "Overview and Introduction", "message": "Building overview section..."}},
-              {{"id": "pathophysiology", "title": "Pathophysiology and Disease Process", "message": "Analyzing disease mechanisms..."}},
-              {{"id": "assessment", "title": "Clinical Assessment", "message": "Compiling assessment criteria..."}},
-              {{"id": "interventions", "title": "Nursing Interventions", "message": "Detailing nursing care..."}},
-              {{"id": "management", "title": "Patient Management", "message": "Building management strategies..."}},
-              {{"id": "education", "title": "Patient Education", "message": "Creating education guidelines..."}}
+            {{
+                "id": "lowercase-hyphenated-id",
+                "title": "Specific Section Title Including Topic Name",
+                "message": "Action-oriented loading message...",
+                "scope": "DETAILED description of what to cover: List 3-5 specific topics to address in this section. Then explicitly state: DO NOT include [topics that belong in other sections]."
+            }}
             ]
             
-            Make section titles specific to the content (e.g., "Cardiac Assessment" not just "Assessment").
-            Focus on nursing-relevant sections: pathophysiology, assessment, interventions, management, education.
+            EXAMPLES:
+            
+            For COVID-19 study sheet:
+            [
+            {{
+                "id": "covid-overview",
+                "title": "Overview of COVID-19 Pandemic",
+                "message": "Building overview section...",
+                "scope": "Cover: SARS-CoV-2 virus introduction, global epidemiology, transmission routes, incubation period, and why COVID-19 matters in nursing. DO NOT include: detailed pathophysiology mechanisms, specific treatments, assessment findings, or nursing interventions."
+            }},
+            {{
+                "id": "covid-pathophysiology",
+                "title": "Pathophysiology of COVID-19",
+                "message": "Analyzing disease mechanisms...",
+                "scope": "Cover: viral entry via ACE2 receptors, immune system response, cytokine storm mechanism, progression to ARDS, and multi-organ effects. DO NOT include: assessment findings, vital sign parameters, treatments, medications, or nursing care actions."
+            }},
+            {{
+                "id": "respiratory-assessment",
+                "title": "Respiratory Assessment in COVID-19",
+                "message": "Compiling assessment criteria...",
+                "scope": "Cover: physical examination findings, respiratory rate and effort, oxygen saturation levels, auscultation findings, chest imaging results, and laboratory values (D-dimer, inflammatory markers). DO NOT include: disease mechanisms, treatment protocols, medications, or patient education."
+            }},
+            {{
+                "id": "nursing-interventions",
+                "title": "Nursing Interventions for COVID-19",
+                "message": "Detailing nursing care...",
+                "scope": "Cover: prone positioning techniques, oxygen therapy administration, isolation precautions, PPE usage, patient monitoring protocols, and comfort measures. DO NOT include: pathophysiology, medication details (unless administering), or patient teaching (that's in education section)."
+            }},
+            {{
+                "id": "covid-medications",
+                "title": "Pharmacological Management of COVID-19",
+                "message": "Analyzing medications...",
+                "scope": "Cover: antiviral medications (remdesivir), corticosteroids (dexamethasone), anticoagulation therapy, supportive medications, dosing regimens, side effects, and nursing considerations for administration. DO NOT include: disease mechanisms, assessment findings, or non-pharmacological interventions."
+            }},
+            {{
+                "id": "patient-education",
+                "title": "Patient Education on COVID-19",
+                "message": "Creating education guidelines...",
+                "scope": "Cover: isolation and quarantine instructions, symptom monitoring at home, when to seek emergency care, prevention measures (masking, hygiene), vaccination information, and discharge instructions. DO NOT include: detailed pathophysiology, nursing-specific interventions, or in-depth medication mechanisms."
+            }}
+            ]
+            
+            For Diabetes study sheet:
+            [
+            {{
+                "id": "diabetes-pathophysiology",
+                "title": "Pathophysiology of Diabetes Mellitus",
+                "message": "Analyzing glucose metabolism...",
+                "scope": "Cover: insulin function and pancreatic beta cells, Type 1 vs Type 2 mechanisms, glucose regulation, insulin resistance, and metabolic effects. DO NOT include: blood glucose monitoring techniques, insulin administration, medications, or dietary management."
+            }},
+            {{
+                "id": "glucose-monitoring",
+                "title": "Blood Glucose Monitoring and Management",
+                "message": "Compiling monitoring techniques...",
+                "scope": "Cover: fingerstick blood glucose testing, continuous glucose monitoring (CGM), target glucose ranges, interpretation of results, and documentation. DO NOT include: disease mechanisms, insulin types, dietary plans, or long-term complications."
+            }},
+            {{
+                "id": "insulin-therapy",
+                "title": "Insulin Administration and Management",
+                "message": "Detailing insulin procedures...",
+                "scope": "Cover: types of insulin (rapid, short, intermediate, long-acting), injection techniques, pen vs syringe, injection site rotation, timing of doses, and storage. DO NOT include: pathophysiology, oral medications, dietary management, or exercise guidance."
+            }}
+            ]
+            
+            REQUIREMENTS:
+            - Use lowercase, hyphenated IDs (e.g., "heart-failure-assessment", "wound-care-techniques")
+            - Include "{topic}" in section titles where appropriate
+            - Make scope VERY detailed (3-5 topics to cover + explicit exclusions)
+            - Create 4-6 sections (adjust based on document content)
+            - Messages should be action verbs (Analyzing, Compiling, Detailing, Building, Creating)
+            
+            Return ONLY the JSON array, no explanations or markdown.
             """,
             
             "french": f"""
-            Analysez ce contenu de document sur "{topic}" et créez 5-6 sections principales 
-            pour une fiche d'étude infirmière complète. Concentrez-vous sur ce qui est réellement couvert.
+            Analysez le contenu du document sur "{topic}" et créez 4-6 sections principales 
+            pour une fiche d'étude infirmière complète.
             
             Contenu du document: {context[:3000]}
             
-            Retournez en format JSON:
+            INSTRUCTIONS CRITIQUES:
+            
+            1. Créez des sections basées sur ce qui est RÉELLEMENT couvert dans les documents
+            2. Rendez les titres SPÉCIFIQUES à "{topic}" (ex: "Évaluation Cardiaque dans l'Insuffisance Cardiaque" pas juste "Évaluation")
+            3. Chaque section DOIT avoir un "scope" détaillé qui:
+            - Liste EXACTEMENT les sujets à couvrir dans cette section
+            - Indique explicitement ce qu'il NE FAUT PAS inclure (pour éviter les chevauchements)
+            - Est suffisamment spécifique pour prévenir la répétition
+            
+            TYPES DE SECTIONS À CONSIDÉRER (choisissez 4-6 selon le contenu):
+            - Aperçu/Introduction
+            - Physiopathologie/Processus de la Maladie
+            - Évaluation Clinique
+            - Tests Diagnostiques/Procédures
+            - Interventions/Soins Infirmiers
+            - Médicaments/Pharmacologie
+            - Traitement/Gestion
+            - Complications/Signaux d'Alarme
+            - Éducation du Patient
+            - Planification de Sortie
+            
+            Retournez en format JSON avec ce format EXACT:
             [
-              {{"id": "apercu", "title": "Aperçu et Introduction", "message": "Construction de l'aperçu..."}},
-              {{"id": "physiopathologie", "title": "Physiopathologie", "message": "Analyse des mécanismes..."}},
-              {{"id": "evaluation", "title": "Évaluation Clinique", "message": "Compilation des critères..."}},
-              {{"id": "interventions", "title": "Interventions Infirmières", "message": "Détails des soins..."}},
-              {{"id": "gestion", "title": "Gestion du Patient", "message": "Stratégies de gestion..."}},
-              {{"id": "education", "title": "Éducation du Patient", "message": "Lignes directrices..."}}
+            {{
+                "id": "id-en-minuscules-avec-tirets",
+                "title": "Titre de Section Spécifique Incluant le Sujet",
+                "message": "Message de chargement orienté action...",
+                "scope": "Description DÉTAILLÉE de ce qu'il faut couvrir: Listez 3-5 sujets spécifiques à aborder dans cette section. Puis indiquez explicitement: NE PAS inclure [sujets qui appartiennent à d'autres sections]."
+            }}
             ]
             
-            Rendez les titres spécifiques au contenu.
+            EXEMPLES:
+            
+            Pour fiche d'étude COVID-19:
+            [
+            {{
+                "id": "covid-apercu",
+                "title": "Aperçu de la Pandémie COVID-19",
+                "message": "Construction de l'aperçu...",
+                "scope": "Couvrir: introduction du virus SARS-CoV-2, épidémiologie mondiale, voies de transmission, période d'incubation, et importance pour les soins infirmiers. NE PAS inclure: mécanismes physiopathologiques détaillés, traitements spécifiques, résultats d'évaluation, ou interventions infirmières."
+            }},
+            {{
+                "id": "covid-physiopathologie",
+                "title": "Physiopathologie du COVID-19",
+                "message": "Analyse des mécanismes...",
+                "scope": "Couvrir: entrée virale via récepteurs ACE2, réponse du système immunitaire, mécanisme de tempête de cytokines, progression vers SDRA, et effets multi-organes. NE PAS inclure: résultats d'évaluation, paramètres de signes vitaux, traitements, médicaments, ou actions de soins infirmiers."
+            }},
+            {{
+                "id": "evaluation-respiratoire",
+                "title": "Évaluation Respiratoire dans COVID-19",
+                "message": "Compilation des critères...",
+                "scope": "Couvrir: résultats d'examen physique, fréquence et effort respiratoires, niveaux de saturation en oxygène, résultats d'auscultation, résultats d'imagerie thoracique, et valeurs de laboratoire (D-dimères, marqueurs inflammatoires). NE PAS inclure: mécanismes de la maladie, protocoles de traitement, médicaments, ou éducation du patient."
+            }},
+            {{
+                "id": "interventions-infirmieres",
+                "title": "Interventions Infirmières pour COVID-19",
+                "message": "Détails des soins...",
+                "scope": "Couvrir: techniques de positionnement ventral, administration d'oxygénothérapie, précautions d'isolement, utilisation d'EPI, protocoles de surveillance du patient, et mesures de confort. NE PAS inclure: physiopathologie, détails des médicaments (sauf administration), ou enseignement au patient (c'est dans la section éducation)."
+            }},
+            {{
+                "id": "medicaments-covid",
+                "title": "Gestion Pharmacologique du COVID-19",
+                "message": "Analyse des médicaments...",
+                "scope": "Couvrir: médicaments antiviraux (remdesivir), corticostéroïdes (dexaméthasone), thérapie anticoagulante, médicaments de soutien, schémas posologiques, effets secondaires, et considérations infirmières pour l'administration. NE PAS inclure: mécanismes de la maladie, résultats d'évaluation, ou interventions non pharmacologiques."
+            }},
+            {{
+                "id": "education-patient",
+                "title": "Éducation du Patient sur COVID-19",
+                "message": "Création des lignes directrices...",
+                "scope": "Couvrir: instructions d'isolement et de quarantaine, surveillance des symptômes à domicile, quand chercher des soins d'urgence, mesures de prévention (masques, hygiène), information sur la vaccination, et instructions de sortie. NE PAS inclure: physiopathologie détaillée, interventions spécifiques aux infirmières, ou mécanismes médicamenteux approfondis."
+            }}
+            ]
+            
+            Pour fiche d'étude Diabète:
+            [
+            {{
+                "id": "diabete-physiopathologie",
+                "title": "Physiopathologie du Diabète Sucré",
+                "message": "Analyse du métabolisme...",
+                "scope": "Couvrir: fonction de l'insuline et cellules bêta pancréatiques, mécanismes Type 1 vs Type 2, régulation du glucose, résistance à l'insuline, et effets métaboliques. NE PAS inclure: techniques de surveillance de la glycémie, administration d'insuline, médicaments, ou gestion diététique."
+            }},
+            {{
+                "id": "surveillance-glycemie",
+                "title": "Surveillance et Gestion de la Glycémie",
+                "message": "Compilation des techniques...",
+                "scope": "Couvrir: test de glycémie capillaire, surveillance continue du glucose (CGM), plages cibles de glucose, interprétation des résultats, et documentation. NE PAS inclure: mécanismes de la maladie, types d'insuline, plans diététiques, ou complications à long terme."
+            }},
+            {{
+                "id": "therapie-insuline",
+                "title": "Administration et Gestion de l'Insuline",
+                "message": "Détails des procédures...",
+                "scope": "Couvrir: types d'insuline (rapide, courte, intermédiaire, longue durée), techniques d'injection, stylo vs seringue, rotation des sites d'injection, moment des doses, et stockage. NE PAS inclure: physiopathologie, médicaments oraux, gestion diététique, ou conseils d'exercice."
+            }}
+            ]
+            
+            EXIGENCES:
+            - Utilisez des IDs en minuscules avec tirets (ex: "evaluation-insuffisance-cardiaque", "techniques-soins-plaies")
+            - Incluez "{topic}" dans les titres de section si approprié
+            - Rendez le scope TRÈS détaillé (3-5 sujets à couvrir + exclusions explicites)
+            - Créez 4-6 sections (ajustez selon le contenu du document)
+            - Les messages doivent être des verbes d'action (Analyse, Compilation, Détails, Construction, Création)
+            
+            Retournez UNIQUEMENT le tableau JSON, sans explications ni markdown.
             """
         }
         
@@ -1224,25 +1397,71 @@ class StudySheetStreamer:
             elif content.startswith("```"):
                 content = content.split("```")[1].split("```")[0]
             
+            content = content.strip()
+            
             sections = json.loads(content)
+            
+            # Validate sections have required fields
+            if not sections or len(sections) < 3:
+                print(f"⚠️ Generated outline too short ({len(sections)} sections), using fallback")
+                return self.get_fallback_sections(language)
+            
+            # Check if sections have scope field
+            for section in sections:
+                if 'scope' not in section:
+                    print(f"⚠️ Section '{section.get('title', 'unknown')}' missing scope field")
+                    section['scope'] = f"Focus on {section.get('title', 'this topic')}."
+            
+            print(f"✅ Generated {len(sections)} dynamic sections with scopes:")
+            for section in sections:
+                print(f"   - {section['title']}")
+                print(f"     Scope: {section['scope'][:80]}...")
+            
             return sections
             
         except Exception as e:
-            print(f"Error generating outline: {e}")
+            print(f"❌ Error generating outline: {e}")
             return self.get_fallback_sections(language)
-    
-    async def get_document_context(self, topic: str) -> str:
-        """Get document context using existing search tool"""
-        from tools.quiztools import search_documents
         
+    async def get_document_context(self, topic: str) -> str:
+        """Get document context - COMPREHENSIVE RETRIEVAL like quiz generation"""
         try:
-            search_result = await search_documents.ainvoke({
-                "query": topic,
-                "max_results": 10  # Increased from 8
-            })
-            return search_result.get("context", "")
+            session = self.session
+            
+            # Ensure vectorstore is loaded
+            if session.vectorstore is None and session.documents:
+                from tools.quiztools import load_vectorstore_from_firebase
+                session.vectorstore = await load_vectorstore_from_firebase(session)
+                session.vectorstore_loaded = True
+            
+            if session.vectorstore:
+                # MATCH QUIZ GENERATION APPROACH (line 768 in quiztools.py)
+                # Get up to 1000 chunks for comprehensive coverage
+                docs = session.vectorstore.similarity_search(query=topic, k=1000)
+                
+                # Join all chunks
+                full_text = "\n\n".join([doc.page_content for doc in docs])
+                
+                # Limit to reasonable size (20K chars = ~5K tokens)
+                context = full_text[:20000]
+                
+                # Diagnostic logging
+                print(f"📚 Document context retrieved (DIRECT METHOD):")
+                print(f"   - Query: {topic}")
+                print(f"   - Chunks retrieved: {len(docs)}")
+                print(f"   - Total characters: {len(full_text)}")
+                print(f"   - After truncation: {len(context)}")
+                print(f"   - First 500 chars: {context[:500]}")
+                
+                return context
+            else:
+                print("⚠️ No vectorstore available")
+                return ""
+                
         except Exception as e:
-            print(f"Error getting document context: {e}")
+            print(f"❌ Error getting document context: {e}")
+            import traceback
+            traceback.print_exc()
             return ""
     
     async def send_status(self, websocket, status: str, message: str):

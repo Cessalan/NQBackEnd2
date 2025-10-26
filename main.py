@@ -49,6 +49,7 @@ from langchain_community.document_loaders import (
     UnstructuredPowerPointLoader)
 
 from core.imageloader import OCRImageLoader
+from core.pdfloader import OCRPDFLoader, is_scanned_pdf
 
 # langchain
 from langchain.prompts import PromptTemplate
@@ -65,9 +66,15 @@ import json
 
 # to load documents
 def get_loader_for_file(path):
-    ext = os.path.splitext(path)[-1].lower()
-    if ext == ".pdf": # pdf file support
-        return PyPDFLoader(path)
+    ext = os.path.splitext(path)[-1].lower()        
+    if ext == ".pdf":# pdf file support
+        #Detect if PDF is scanned or text-based
+        if is_scanned_pdf(path):
+            print("📷 Detected scanned PDF - Using OCR")
+            return OCRPDFLoader(path)
+        else:
+            print("📄 Detected text-based PDF - Using standard loader")
+            return PyPDFLoader(path)
     elif ext == ".txt": # txt file support
         return TextLoader(path)
     elif ext == ".csv":  #excel support
@@ -258,44 +265,6 @@ async def process_chat_message(chat_id: str, message: dict, websocket: WebSocket
             "type": "error",
             "message": f"Processing failed: {str(e)}"
         }))
-
-# ============================================================================
-# MAIN CHAT ENDPOINT WITH TOOL CALLING
-# ============================================================================
-@app.post("/chat/stream")
-async def chat_stream_response(request: StatelessChatRequest):
-    """
-    Main chat endpoint - handles all conversations with tool calling
-    """ 
-    # Get or create session for this chat
-    if request.chat_id not in ACTIVE_SESSIONS:
-        ACTIVE_SESSIONS[request.chat_id] = NursingTutor(request.chat_id)
-        print(f"Created new session for chat_id: {request.chat_id}")
-    
-    # GET TUTOR FOR CURRENT SESSION
-    nursing_tutor = ACTIVE_SESSIONS[request.chat_id]
-    print(f"nursing tutor created")
-    
-    # Update session with documents if provided
-    if request.documents:
-        nursing_tutor.session.documents = request.documents
-    
-    #not using this anymore fetching directly from firebase
-    # print("HIIIIISTORY", request.chat_history)
-    user_language = LanguageDetector.detect_language(request.input)
-    
-    nursing_tutor.session.user_language = user_language
-    
-    # Process message and stream response
-    return StreamingResponse(
-        nursing_tutor.process_message(
-            # feed the tutor the user input
-            user_input=request.input,
-            # feed the tutor the language the user's browser
-            language=user_language
-        ),
-        media_type="application/json"
-    )
 
 # ============================================================================
 # SUPPORTING ENDPOINTS (keep your existing ones)
