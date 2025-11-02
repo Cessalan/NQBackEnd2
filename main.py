@@ -48,6 +48,11 @@ from langchain_community.document_loaders import (
     UnstructuredExcelLoader,
     UnstructuredPowerPointLoader)
 
+from fastapi import File, UploadFile, Form
+from typing import List
+from uuid import uuid4
+import mimetypes
+
 from core.imageloader import OCRImageLoader
 from core.pdfloader import OCRPDFLoader, is_scanned_pdf
 
@@ -61,6 +66,8 @@ import firebase_admin
 from firebase_admin import credentials,storage
 
 from core.language import LanguageDetector
+
+from services.vectorstore_manager import vectorstore_manager
 
 import json
 
@@ -142,7 +149,6 @@ app.add_middleware(
 # Global session storage
 ACTIVE_SESSIONS: Dict[str, NursingTutor] = {}
 
-
 # Connection manager for WebSocket connections
 class ConnectionManager:
     def __init__(self):
@@ -166,10 +172,8 @@ class ConnectionManager:
                 print(f"Error sending message to {chat_id}: {e}")
                 self.disconnect(chat_id)
 
-
 # Global connection manager
 manager = ConnectionManager()
-
 
 # WebSocket endpoint
 @app.websocket("/ws/{chat_id}")
@@ -212,14 +216,14 @@ async def handle_websocket_message(chat_id: str, message: dict, websocket: WebSo
             "type": "error",
             "message": f"Unknown message type: {message_type}"
         }))
-        
-        
+               
 async def process_chat_message(chat_id: str, message: dict, websocket: WebSocket):
     """Process chat messages through the existing NursingTutor"""  
     try:
         # Extract message data
         user_input = message.get("input", "")
-        language = message.get("language", "english")
+        language = await LanguageDetector.detect_language(user_input)
+        print(f"Input was entered in language: {language}")
         
         # Get or create session (same as existing logic)
         if chat_id not in ACTIVE_SESSIONS:
@@ -278,6 +282,8 @@ def get_temp_dir():
         # On Windows/Mac, use system default
         return tempfile.gettempdir()
 
+
+#UNUSED
 @app.post("/chat/embed")
 def embed_documents(request: DocumentsEmbedRequest): 
     try:
@@ -402,6 +408,578 @@ def embed_documents(request: DocumentsEmbedRequest):
         traceback.print_exc()
         return {"status": "error", "message": str(e)}
 
+
+@app.post("/chat/upload-files")
+async def upload_multiple_files(
+    files: List[UploadFile] = File(...),
+    chat_id: str = Form(...),
+    user_id: str = Form(...)
+):
+    """Upload multiple files and process in parallel."""
+    
+    # Read all files immediately
+    file_data_list = []
+    for file in files:
+        try:
+            file_bytes = await file.read()
+            file_data_list.append({
+                "filename": file.filename,
+                "content_type": file.content_type,
+                "bytes": file_bytes,
+                "size": len(file_bytes)
+            })
+            print(f"✅ Read file: {file.filename} ({len(file_bytes)} bytes)")
+        except Exception as read_error:
+            print(f"❌ Failed to read {file.filename}: {read_error}")
+            file_data_list.append({
+                "filename": file.filename,
+                "error": str(read_error)
+            })
+    
+    async def process_and_stream():
+        try:
+            if not file_data_list:
+                yield json.dumps({
+                    "type": "error",
+                    "message": "No files provided"
+                }) + "\n"
+                return
+            
+            # Check for read errors
+            failed_reads = [f for f in file_data_list if "error" in f]
+            if failed_reads:
+                for failed in failed_reads:
+                    yield json.dumps({
+                        "type": "file_error",
+                        "filename": failed["filename"],
+                        "message": f"Failed to read file: {failed['error']}"
+                    }) + "\n"
+            
+            # Get successfully read files
+            valid_files = [f for f in file_data_list if "bytes" in f]
+            
+            if not valid_files:
+                yield json.dumps({
+                    "type": "error",
+                    "message": "No valid files to process"
+                }) + "\n"
+                return
+            
+            yield json.dumps({
+                "type": "batch_start",
+                "total_files": len(valid_files),
+                "filenames": [f["filename"] for f in valid_files]
+            }) + "\n"
+            
+            # ========================================
+            # LOAD EXISTING VECTORSTORE IF NEEDED
+            # ========================================
+            yield json.dumps({
+                "type": "loading_existing_documents",
+                "message": "Reading existing documents..."
+            }) + "\n"
+            
+            await ensure_session_with_vectorstore(chat_id)
+            
+            # ========================================
+            # PROCESS FILES (EMBEDDING ONLY)
+            # ========================================
+            semaphore = asyncio.Semaphore(3)
+            
+            async def process_single_file_data(file_data):
+                async with semaphore:
+                    return await process_file_from_bytes(
+                        file_data["bytes"],
+                        file_data["filename"],
+                        chat_id,
+                        user_id
+                    )
+            
+            # Start all file processing tasks
+            tasks = [process_single_file_data(fd) for fd in valid_files]
+            
+            # Stream results as they complete
+            total_words = 0
+            completed_files = []
+            file_documents = {}  # filename -> documents
+            file_bytes_map = {}  # filename -> bytes (for background upload)
+            
+            for coro in asyncio.as_completed(tasks):
+                try:
+                    result = await coro
+                    
+                    # Extract updates, documents, and file bytes
+                    updates = result.get("updates", [])
+                    documents = result.get("documents", [])
+                    filename = result.get("filename", "unknown")
+                    file_bytes = result.get("file_bytes")
+                    
+                    print(f"🔍 Processing result for: {filename}")
+                    print(f"   Documents count: {len(documents)}")
+                    
+                    # Store for background upload
+                    if documents:
+                        file_documents[filename] = documents
+                    if file_bytes:
+                        file_bytes_map[filename] = file_bytes
+                    
+                    # Stream JSON updates to frontend
+                    for update in updates:
+                        if not isinstance(update, dict):
+                            continue
+                        
+                        yield json.dumps(update) + "\n"
+                        
+                        if update.get("type") == "file_complete":
+                            total_words += update.get("word_count", 0)
+                            completed_files.append(update.get("file_id"))
+                
+                except Exception as e:
+                    print(f"❌ Task error: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    yield json.dumps({
+                        "type": "file_error",
+                        "message": str(e)
+                    }) + "\n"
+            
+            # ========================================
+            # READY TO CHAT - USER CAN START IMMEDIATELY
+            # ========================================
+            yield json.dumps({
+                "type": "ready_to_chat",
+                "message": "Files processed! You can start asking questions.",
+                "total_files": len(valid_files),
+                "completed_files": len(completed_files),
+                "total_words": total_words
+            }) + "\n"
+            
+            # ========================================
+            # BACKGROUND: UPLOAD EVERYTHING
+            # ========================================
+            if chat_id in ACTIVE_SESSIONS:
+                session = ACTIVE_SESSIONS[chat_id]
+                if session.session.vectorstore:
+                    # Start background task (fire-and-forget with retry)
+                    asyncio.create_task(
+                        upload_everything_background(
+                            chat_id=chat_id,
+                            vectorstore=session.session.vectorstore,
+                            file_documents=file_documents,
+                            file_bytes_map=file_bytes_map
+                        )
+                    )
+            
+            # ========================================
+            # FINAL SUMMARY (IMMEDIATE)
+            # ========================================
+            yield json.dumps({
+                "type": "all_complete",
+                "total_files": len(valid_files),
+                "completed_files": len(completed_files),
+                "total_words": total_words,
+                "status": "success"
+            }) + "\n"
+            
+        except Exception as e:
+            print(f"❌ Batch processing error: {e}")
+            import traceback
+            traceback.print_exc()
+            yield json.dumps({
+                "type": "error",
+                "message": str(e)
+            }) + "\n"
+    
+    return StreamingResponse(
+        process_and_stream(),
+        media_type="application/x-ndjson"
+    )
+
+
+async def upload_everything_background(
+    chat_id: str,
+    vectorstore: FAISS,
+    file_documents: Dict[str, List[Document]],
+    file_bytes_map: Dict[str, bytes],
+    max_retries: int = 3
+):
+    """
+    Upload files and vectorstores to Firebase in the background.
+    Includes automatic retry on failure (silent).
+    """
+    retry_count = 0
+    
+    while retry_count < max_retries:
+        try:
+            print(f"🔄 Background upload starting for chat {chat_id} (attempt {retry_count + 1}/{max_retries})...")
+            
+            # ========================================
+            # UPLOAD FILES TO FIREBASE STORAGE
+            # ========================================
+            file_upload_tasks = []
+            for filename, file_bytes in file_bytes_map.items():
+                file_upload_tasks.append(
+                    firebase_upload_task_simple(file_bytes, filename, chat_id)
+                )
+            
+            # ========================================
+            # UPLOAD VECTORSTORES
+            # ========================================
+            vectorstore_results = await vectorstore_manager.upload_all_vectorstores(
+                chat_id=chat_id,
+                combined_vectorstore=vectorstore,
+                file_documents=file_documents
+            )
+            
+            # ========================================
+            # UPLOAD FILES IN PARALLEL
+            # ========================================
+            file_results = await asyncio.gather(*file_upload_tasks, return_exceptions=True)
+            
+            # Check results
+            file_failures = [r for r in file_results if isinstance(r, Exception)]
+            
+            if vectorstore_results["combined_success"] and len(file_failures) == 0:
+                print(f"✅ Background upload complete for chat {chat_id}")
+                return  # Success - exit
+            else:
+                print(f"⚠️ Background upload had issues (attempt {retry_count + 1})")
+                if not vectorstore_results["combined_success"]:
+                    print(f"   - Combined vectorstore failed")
+                if file_failures:
+                    print(f"   - {len(file_failures)} file uploads failed")
+                
+                # Retry
+                retry_count += 1
+                if retry_count < max_retries:
+                    wait_time = 2 ** retry_count  # Exponential backoff: 2, 4, 8 seconds
+                    print(f"   Retrying in {wait_time} seconds...")
+                    await asyncio.sleep(wait_time)
+        
+        except Exception as e:
+            print(f"❌ Background upload error (attempt {retry_count + 1}): {e}")
+            import traceback
+            traceback.print_exc()
+            
+            retry_count += 1
+            if retry_count < max_retries:
+                wait_time = 2 ** retry_count
+                print(f"   Retrying in {wait_time} seconds...")
+                await asyncio.sleep(wait_time)
+    
+    # All retries failed - log and give up (silent failure)
+    print(f"❌ Background upload failed for chat {chat_id} after {max_retries} attempts")
+    print(f"   User can still chat - vectorstore is in memory")
+
+
+async def firebase_upload_task_simple(file_bytes: bytes, filename: str, chat_id: str):
+    """Simple file upload to Firebase Storage (for background task)."""
+    try:
+        bucket = storage.bucket()
+        blob = bucket.blob(f"chats/{chat_id}/uploads/{filename}")
+        
+        blob.upload_from_string(
+            file_bytes,
+            content_type=get_content_type(filename)
+        )
+        
+        blob.make_public()
+        firebase_url = blob.public_url
+        
+        print(f"✅ Background: Uploaded {filename} to Firebase Storage")
+        return firebase_url
+        
+    except Exception as e:
+        print(f"❌ Background: Failed to upload {filename}: {e}")
+        raise
+
+async def process_file_from_bytes(file_bytes: bytes, filename: str, chat_id: str, user_id: str):
+    """Process a file from bytes and return list of progress updates."""
+    updates = []
+    file_id = str(uuid4())
+    temp_path = None
+    documents_for_vectorstore = []
+    
+    try:
+        file_size = len(file_bytes)
+        
+        updates.append({
+            "type": "file_start",
+            "file_id": file_id,
+            "filename": filename,
+            "size": file_size
+        })
+        
+        # Save to temp file
+        temp_path = await save_temp_file(file_bytes, filename)
+        
+        updates.append({
+            "type": "file_processing",
+            "file_id": file_id,
+            "stage": "saved_temp"
+        })
+        
+        # ========================================
+        # ONLY EMBEDDING NOW - NO FIREBASE UPLOAD
+        # ========================================
+        embedding_result = await embed_document_task(
+            temp_path, filename, chat_id, file_id, updates
+        )
+        
+        # Handle errors
+        if isinstance(embedding_result, Exception):
+            print(f"❌ Embedding error: {embedding_result}")
+            updates.append({
+                "type": "embedding_error",
+                "file_id": file_id,
+                "message": str(embedding_result)
+            })
+            embedding_result = {"word_count": 0, "chunks": 0, "documents": []}
+        
+        # Extract documents for vectorstore
+        documents_for_vectorstore = embedding_result.get("documents", [])
+        
+        # Final update - embedding complete
+        updates.append({
+            "type": "file_complete",
+            "file_id": file_id,
+            "filename": filename,
+            "word_count": embedding_result.get("word_count", 0),
+            "chunk_count": embedding_result.get("chunks", 0),
+            "status": "success"
+        })
+        
+        # Return both updates and documents + file_bytes for background upload
+        return {
+            "updates": updates,
+            "documents": documents_for_vectorstore,
+            "filename": filename,
+            "file_bytes": file_bytes  # ← Include for background upload
+        }
+        
+    except Exception as e:
+        print(f"❌ Error processing {filename}: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        updates.append({
+            "type": "file_error",
+            "file_id": file_id,
+            "filename": filename,
+            "message": str(e)
+        })
+        
+        return {
+            "updates": updates,
+            "documents": [],
+            "filename": filename,
+            "file_bytes": file_bytes
+        }
+    
+    finally:
+        # Clean up temp file
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+                print(f"✅ Cleaned up temp file: {temp_path}")
+            except Exception as cleanup_error:
+                print(f"⚠️ Failed to cleanup {temp_path}: {cleanup_error}")
+
+async def embed_document_task(temp_path: str, filename: str, chat_id: str, file_id: str, updates: list):
+    """Embed document and track progress."""
+    try:
+        updates.append({
+            "type": "embedding_start",
+            "file_id": file_id
+        })
+        
+        # Verify file exists
+        if not os.path.exists(temp_path):
+            raise FileNotFoundError(f"Temp file not found: {temp_path}")
+        
+        print(f"📄 Loading document: {filename}")
+        
+        # Load document
+        loader = get_loader_for_file(temp_path)
+        pages = loader.load()
+        
+        print(f"✅ Loaded {len(pages)} pages from {filename}")
+        
+        updates.append({
+            "type": "embedding_progress",
+            "file_id": file_id,
+            "stage": "loaded_pages",
+            "page_count": len(pages)
+        })
+        
+        # Extract and chunk text
+        text = "\n\n".join([p.page_content for p in pages])
+        word_count = len(text.split())
+        
+        print(f"📝 Extracted {word_count} words from {filename}")
+        
+        text_splitter = CharacterTextSplitter(
+            separator="\n",
+            chunk_size=1000,
+            chunk_overlap=200
+        )
+        chunks = text_splitter.split_text(text)
+        
+        print(f"✂️ Split into {len(chunks)} chunks")
+        
+        updates.append({
+            "type": "embedding_progress",
+            "file_id": file_id,
+            "stage": "chunked",
+            "chunk_count": len(chunks)
+        })
+        
+        # Create documents
+        documents = [
+            Document(page_content=chunk, metadata={"source": filename})
+            for chunk in chunks
+        ]
+        
+        print(f"🔤 Creating embeddings for {len(documents)} documents...")
+        
+        # Get embeddings
+        embeddings = OpenAIEmbeddings()
+        
+        # Get session (should already exist)
+        if chat_id not in ACTIVE_SESSIONS:
+            print(f"⚠️ No session found for {chat_id}, creating...")
+            ACTIVE_SESSIONS[chat_id] = NursingTutor(chat_id)
+        
+        session = ACTIVE_SESSIONS[chat_id]
+        
+        # Add to combined vectorstore
+        if session.session.vectorstore:
+            print(f"➕ Adding to existing vectorstore")
+            session.session.vectorstore.add_documents(documents)
+        else:
+            print(f"🆕 Creating new vectorstore")
+            session.session.vectorstore = FAISS.from_documents(documents, embeddings)
+        
+        print(f"✅ Embedding complete for {filename}")
+        
+        updates.append({
+            "type": "embedding_complete",
+            "file_id": file_id,
+            "word_count": word_count,
+            "chunks": len(documents)
+        })
+        
+        # Return documents for per-file vectorstore upload
+        return {
+            "word_count": word_count,
+            "chunks": len(documents),
+            "documents": documents  # ← Return documents for per-file upload
+        }
+        
+    except Exception as e:
+        print(f"❌ Embedding error for {filename}: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+
+async def firebase_upload_task(file_bytes, filename, chat_id, file_id, updates):
+    """Upload to Firebase - appends progress to updates list"""
+    try:
+        updates.append({
+            "type": "firebase_start",
+            "file_id": file_id
+        })
+        
+        bucket = storage.bucket()
+        blob = bucket.blob(f"chats/{chat_id}/uploads/{filename}")
+        
+        # Upload
+        blob.upload_from_string(
+            file_bytes,
+            content_type=get_content_type(filename)
+        )
+        
+        # Make public and get URL
+        blob.make_public()
+        firebase_url = blob.public_url
+        
+        updates.append({
+            "type": "firebase_complete",
+            "file_id": file_id,
+            "firebase_url": firebase_url
+        })
+        
+        return firebase_url
+        
+    except Exception as e:
+        print(f"Firebase upload error for {filename}: {e}")
+        raise
+         
+def get_content_type(filename: str) -> str:
+    """
+    Get MIME type from filename using Python's standard library.
+    
+    Args:
+        filename: Name of the file (e.g., "notes.pdf")
+    
+    Returns:
+        MIME type string (e.g., "application/pdf")
+    """
+    # Guess MIME type from filename
+    content_type, _ = mimetypes.guess_type(filename)
+    
+    # If unknown, default to generic binary
+    return content_type or 'application/octet-stream'
+
+async def save_temp_file(file_bytes: bytes, filename: str) -> str:
+    """
+    Save uploaded file bytes to a temporary file.
+    
+    Args:
+        file_bytes: The file content as bytes
+        filename: Original filename (used to get extension)
+    
+    Returns:
+        Path to the temporary file
+    """
+    temp_dir = get_temp_dir()
+    suffix = os.path.splitext(filename)[-1]  # Get file extension (.pdf, .docx, etc.)
+    
+    # Create a temporary file with the correct extension
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix, dir=temp_dir) as f:
+        f.write(file_bytes)
+        temp_path = f.name
+    
+    print(f"✅ Saved temp file: {temp_path}")
+    return temp_path
+
+async def ensure_session_with_vectorstore(chat_id: str):
+    """
+    Ensure session exists and has vectorstore loaded.
+    Shows "reading documents" message when downloading from Firebase.
+    """
+    
+    if chat_id in ACTIVE_SESSIONS:
+        print(f"✅ Session already exists for {chat_id}")
+        return ACTIVE_SESSIONS[chat_id]
+    
+    print(f"🆕 Creating new session for {chat_id}")
+    
+    # Create session
+    ACTIVE_SESSIONS[chat_id] = NursingTutor(chat_id)
+    
+    # Try to load existing vectorstore
+    print(f"📚 Checking for existing documents...")
+    vectorstore = await vectorstore_manager.load_combined_vectorstore_from_firebase(chat_id)
+    
+    if vectorstore:
+        ACTIVE_SESSIONS[chat_id].session.vectorstore = vectorstore
+        print(f"✅ Loaded existing vectorstore into session")
+    else:
+        print(f"📝 No existing vectorstore, will create new one")
+    
+    return ACTIVE_SESSIONS[chat_id]
+
 @app.post("/chat/generate-summary")
 async def generate_summary(request:SummaryRequest):
     
@@ -448,7 +1026,6 @@ async def generate_summary(request:SummaryRequest):
         media_type="application/json"
     )
  
-
 @app.post("/plan")
 async def create_plan(request: PlanRequest):
     from tools.quiztools import search_documents

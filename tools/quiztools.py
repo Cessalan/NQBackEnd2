@@ -491,6 +491,7 @@ async def summarize_document(
             "status": "failed"
         }
 
+
 async def _search_vectorstore_for_summary(
     filename: str, 
     chat_id: str, 
@@ -498,60 +499,251 @@ async def _search_vectorstore_for_summary(
     detail_level: str
 ) -> list:
     """
-    Search vector store for relevant chunks to create summary
-    This function has the list of documents uploaded by user, and if the file is not found , it will just summarize the last file
+    Search vector store for relevant chunks to create summary.
+    
+    CACHE-FIRST ARCHITECTURE:
+    1. Check in-memory session.vectorstore (FAST - 0ms)
+    2. Fallback to Firebase download if cache miss (SLOW - 500ms)
+    
+    Args:
+        filename: Requested file to summarize (may be empty)
+        chat_id: Chat session ID
+        query: Search query (usually empty for full doc summary)
+        detail_level: "brief" | "detailed" | "comprehensive"
+    
+    Returns:
+        List of chunk dicts: [{"content": str, "metadata": dict}]
     """
+    print("\n" + "="*80)
+    print("🔍 _search_vectorstore_for_summary CALLED")
+    print(f"   📄 filename: {filename}")
+    print(f"   💬 chat_id: {chat_id}")
+    print(f"   🔎 query: {query}")
+    print(f"   📊 detail_level: {detail_level}")
+    print("="*80)
+    
     try:
+        # ========================================
+        # STEP 1: Get session and determine file to summarize
+        # ========================================
+        print("\n📦 STEP 1: Retrieving session...")
+        session = get_session()
+        print(f"   ✅ Session retrieved: {session}")
+        
+        if not session.documents:
+            print("   ⚠️ WARNING: No documents in session!")
+            return []
+        
+        print(f"   📚 Total documents in session: {len(session.documents)}")
+        print(f"   📋 Document list: {[doc.get('filename') for doc in session.documents]}")
+        
+        # Get last uploaded file as default
+        lastfile = session.documents[-1]
+        print(f"\n   🗂️ Last file uploaded: {lastfile}")
+        
+        # Default to last file
+        fileToSummarize = lastfile['filename']
+        print(f"   📌 Default file to summarize: {fileToSummarize}")
+        
+        # Override if specific file requested and exists
+        is_requested_file_uploaded = any(doc.get('filename') == filename for doc in session.documents)
+        print(f"\n   🔍 Checking if requested file '{filename}' exists in uploads...")
+        print(f"   {'✅' if is_requested_file_uploaded else '❌'} Requested file found: {is_requested_file_uploaded}")
+        
+        if is_requested_file_uploaded:
+            fileToSummarize = filename
+            print(f"   🎯 Using requested file: {fileToSummarize}")
+        else:
+            print(f"   🔄 Falling back to last file: {fileToSummarize}")
+        
+        print(f"\n   ✅ FINAL DECISION: Will summarize '{fileToSummarize}'")
+        
+        # ========================================
+        # STEP 2: CHECK IN-MEMORY CACHE FIRST ⚡
+        # ========================================
+        print("\n" + "="*80)
+        print("⚡ STEP 2: Checking in-memory cache...")
+        print("="*80)
+        
+        if session.vectorstore:
+            print("   ✅ Cache HIT - Vectorstore found in memory!")
+            print(f"   📊 Vectorstore type: {type(session.vectorstore)}")
+            
+            try:
+                # Get document count (if supported)
+                print(f"   🔢 Attempting to count documents in cache...")
+                
+                # Perform similarity search with filter
+                print(f"\n   🔎 Searching cache for chunks from '{fileToSummarize}'...")
+                print(f"   🔍 Search params:")
+                print(f"      - query: '{query}' (empty = get all)")
+                print(f"      - k: 1000 (max chunks)")
+                print(f"      - filter: {{'source': '{fileToSummarize}'}}")
+                
+                docs = session.vectorstore.similarity_search(
+                    query="",  # Empty query = get all chunks
+                    k=1000,    # Get up to 1000 chunks
+                    filter={"source": fileToSummarize}
+                )
+                
+                print(f"   ✅ Search complete!")
+                print(f"   📦 Found {len(docs)} chunks in cache")
+                
+                if docs:
+                    # Log first chunk preview
+                    first_chunk_preview = docs[0].page_content[:100] + "..." if len(docs[0].page_content) > 100 else docs[0].page_content
+                    print(f"\n   📄 First chunk preview:")
+                    print(f"      Length: {len(docs[0].page_content)} chars")
+                    print(f"      Content: {first_chunk_preview}")
+                    print(f"      Metadata: {docs[0].metadata}")
+                    
+                    # Apply detail level limits
+                    print(f"\n   ✂️ Applying detail level limits...")
+                    chunk_limits = {
+                        "brief": 15000,
+                        "detailed": 20000,
+                        "comprehensive": 30000
+                    }
+                    
+                    limit = chunk_limits.get(detail_level, 20000)
+                    print(f"   📏 Detail level '{detail_level}' → limit: {limit} chars")
+                    
+                    # Combine all chunks
+                    print(f"   🔗 Combining {len(docs)} chunks...")
+                    full_text = "\n\n".join([doc.page_content for doc in docs])
+                    total_chars = len(full_text)
+                    print(f"   📊 Total combined text: {total_chars} chars")
+                    
+                    # Truncate if needed
+                    truncated_text = full_text[:limit]
+                    if len(truncated_text) < len(full_text):
+                        print(f"   ✂️ Truncated from {total_chars} to {len(truncated_text)} chars")
+                    else:
+                        print(f"   ✅ No truncation needed ({total_chars} < {limit})")
+                    
+                    result = [{"content": truncated_text, "metadata": {"source": fileToSummarize}}]
+                    
+                    print(f"\n   🎉 SUCCESS - Returning from CACHE")
+                    print(f"   📦 Result: 1 chunk with {len(truncated_text)} chars")
+                    print("="*80)
+                    
+                    return result
+                else:
+                    print(f"   ⚠️ No chunks found in cache for '{fileToSummarize}'")
+                    print(f"   🤔 This might mean:")
+                    print(f"      - File wasn't uploaded yet")
+                    print(f"      - Filename mismatch")
+                    print(f"      - Vectorstore doesn't have this file")
+                    print(f"   📥 Will try downloading from Firebase...")
+                    
+            except Exception as cache_error:
+                print(f"   ❌ Cache search failed: {cache_error}")
+                import traceback
+                traceback.print_exc()
+                print(f"   📥 Will try downloading from Firebase...")
+        else:
+            print("   ❌ Cache MISS - No vectorstore in memory")
+            print("   🤔 Possible reasons:")
+            print("      - First time accessing this session")
+            print("      - Vectorstore not loaded from Firebase yet")
+            print("      - Session was cleared")
+            print("   📥 Will download from Firebase...")
+        
+        # ========================================
+        # STEP 3: FALLBACK - DOWNLOAD FROM FIREBASE 🔥
+        # ========================================
+        print("\n" + "="*80)
+        print("📥 STEP 3: Downloading from Firebase (FALLBACK)")
+        print("="*80)
+        
         with tempfile.TemporaryDirectory() as tempdir:
-            # Use same pattern as your working code
+            print(f"   📁 Created temp directory: {tempdir}")
+            
             bucket = storage.bucket()
+            print(f"   🪣 Firebase bucket: {bucket.name}")
             
-            session = get_session()
+            # Construct Firebase paths
+            firebase_base = f"FileVectorStore/{chat_id}/{fileToSummarize}"
+            faiss_path_firebase = f"{firebase_base}/index.faiss"
+            pkl_path_firebase = f"{firebase_base}/index.pkl"
             
-            #get last filename uploaded by user
-            lastfile = session.documents[-1]
-            print("Last File Uploaded Obj", lastfile)
+            print(f"\n   🗺️ Firebase paths:")
+            print(f"      FAISS: {faiss_path_firebase}")
+            print(f"      PKL:   {pkl_path_firebase}")
             
-            #set it as the file we want to summarize by default
-            fileToSummarize = lastfile['filename']
-            
-            # but if there was a file specified during a request, and it is found in the file list
-            # summarize the file mentionned in the request
-            
-            is_requested_file_uploaded = any(doc.get('filename') == filename for doc in session.documents)
-            if(is_requested_file_uploaded):
-                fileToSummarize= filename
-          
-            print("filename we decided to summarize", fileToSummarize)
-            
-            faiss_blob = bucket.blob(f"FileVectorStore/{chat_id}/{fileToSummarize}/index.faiss")
-            pkl_blob = bucket.blob(f"FileVectorStore/{chat_id}/{fileToSummarize}/index.pkl")
-            
+            # Local paths
             faiss_path = os.path.join(tempdir, "index.faiss")
             pkl_path = os.path.join(tempdir, "index.pkl")
             
-            # Download files (same as your working code)
-            faiss_blob.download_to_filename(faiss_path)
-            pkl_blob.download_to_filename(pkl_path)
+            print(f"\n   💾 Local paths:")
+            print(f"      FAISS: {faiss_path}")
+            print(f"      PKL:   {pkl_path}")
             
-            # Load vector store (same as your working code)
+            # Get blobs
+            print(f"\n   🔍 Checking if files exist in Firebase...")
+            faiss_blob = bucket.blob(faiss_path_firebase)
+            pkl_blob = bucket.blob(pkl_path_firebase)
+            
+            faiss_exists = faiss_blob.exists()
+            pkl_exists = pkl_blob.exists()
+            
+            print(f"      FAISS exists: {faiss_exists}")
+            print(f"      PKL exists:   {pkl_exists}")
+            
+            if not faiss_exists or not pkl_exists:
+                print(f"\n   ❌ ERROR: Vectorstore files not found in Firebase!")
+                print(f"      This means the file was never uploaded or upload failed")
+                return []
+            
+            # Download files
+            print(f"\n   📥 Downloading FAISS file...")
+            faiss_blob.download_to_filename(faiss_path)
+            faiss_size = os.path.getsize(faiss_path)
+            print(f"      ✅ Downloaded: {faiss_size} bytes")
+            
+            print(f"\n   📥 Downloading PKL file...")
+            pkl_blob.download_to_filename(pkl_path)
+            pkl_size = os.path.getsize(pkl_path)
+            print(f"      ✅ Downloaded: {pkl_size} bytes")
+            
+            # Load vector store
+            print(f"\n   🔤 Loading vectorstore from downloaded files...")
             vectorstore = FAISS.load_local(
                 tempdir, 
                 OpenAIEmbeddings(), 
                 allow_dangerous_deserialization=True
             )
+            print(f"      ✅ Vectorstore loaded successfully")
+            print(f"      Type: {type(vectorstore)}")
             
-            # Get ALL chunks like your working code
+            # Search vectorstore
+            print(f"\n   🔎 Searching downloaded vectorstore...")
+            print(f"      - query: '{query}'")
+            print(f"      - k: 1000")
+            print(f"      - filter: {{'source': '{fileToSummarize}'}}")
+            
             docs = vectorstore.similarity_search(
                 query="", 
                 k=1000, 
                 filter={"source": fileToSummarize}
             )
             
+            print(f"      ✅ Found {len(docs)} chunks")
+            
             if not docs:
+                print(f"\n   ❌ No documents found with source '{fileToSummarize}'")
+                print(f"      This might mean a metadata mismatch")
                 return []
             
-            # Convert to your chunk format but limit based on detail level
+            # Log first chunk
+            first_chunk_preview = docs[0].page_content[:100] + "..." if len(docs[0].page_content) > 100 else docs[0].page_content
+            print(f"\n   📄 First chunk preview:")
+            print(f"      Length: {len(docs[0].page_content)} chars")
+            print(f"      Content: {first_chunk_preview}")
+            print(f"      Metadata: {docs[0].metadata}")
+            
+            # Apply limits
+            print(f"\n   ✂️ Applying detail level limits...")
             chunk_limits = {
                 "brief": 15000,
                 "detailed": 20000,
@@ -559,15 +751,41 @@ async def _search_vectorstore_for_summary(
             }
             
             limit = chunk_limits.get(detail_level, 20000)
-            full_text = "\n\n".join([doc.page_content for doc in docs])[:limit]
+            print(f"   📏 Detail level '{detail_level}' → limit: {limit} chars")
             
-            # Return as chunks for your streaming function
-            return [{"content": full_text, "metadata": {"source": filename}}]
+            # Combine chunks
+            print(f"   🔗 Combining {len(docs)} chunks...")
+            full_text = "\n\n".join([doc.page_content for doc in docs])
+            total_chars = len(full_text)
+            print(f"   📊 Total combined text: {total_chars} chars")
+            
+            # Truncate
+            truncated_text = full_text[:limit]
+            if len(truncated_text) < len(full_text):
+                print(f"   ✂️ Truncated from {total_chars} to {len(truncated_text)} chars")
+            else:
+                print(f"   ✅ No truncation needed")
+            
+            result = [{"content": truncated_text, "metadata": {"source": fileToSummarize}}]
+            
+            print(f"\n   🎉 SUCCESS - Returning from FIREBASE")
+            print(f"   📦 Result: 1 chunk with {len(truncated_text)} chars")
+            print("="*80)
+            
+            return result
             
     except Exception as e:
-        print(f"🔥 Vector store search error: {e}")
+        print("\n" + "="*80)
+        print(f"🔥 FATAL ERROR in _search_vectorstore_for_summary")
+        print("="*80)
+        print(f"   Error type: {type(e).__name__}")
+        print(f"   Error message: {e}")
+        print(f"\n   📋 Full traceback:")
+        import traceback
+        traceback.print_exc()
+        print("="*80)
         return []
-
+    
 def get_chat_vectorstore(
     chat_id: str, 
 ) -> FAISS:
@@ -764,16 +982,15 @@ async def stream_quiz_questions(
     
     # Get content based on source
     if source == "documents" and session.vectorstore:
-        # Get document content
         docs = session.vectorstore.similarity_search(query=topic, k=1000)
         full_text = "\n\n".join([doc.page_content for doc in docs])[:12000]
         content_context = f"Document content:\n{full_text}"
     else:
-        # Generate from scratch
-        content_context = f"General nursing knowledge about: {topic}"
+        content_context = f"""You are generating questions about: {topic}      
+            If this is a broad topic (like 'research design', 'pharmacology', 'cardiac care'), 
+            ensure you test diverse subtopics and concepts within that domain."""
     
-    
-    #track generate questions
+    # Track previously generated questions (for deduplication only)
     generated_questions = _extract_previous_questions(session=session, limit=30)
       
     # Generate questions one at a time
@@ -786,6 +1003,11 @@ async def stream_quiz_questions(
             "total": num_questions
         }
         
+        # 🎲 Simply pick a random letter for each question
+        random_target_letter = random.choice(['A', 'B', 'C', 'D'])
+        
+        print(f"🎲 Q{question_num}: Randomly assigned correct answer position = {random_target_letter}")
+        
         # Generate single question
         question_data = await _generate_single_question(
             content=content_context,
@@ -793,102 +1015,133 @@ async def stream_quiz_questions(
             difficulty=difficulty,
             question_num=question_num,
             language=session.user_language,
-            questions_to_avoid=generated_questions
+            questions_to_avoid=generated_questions,
+            target_letter=random_target_letter  # 🎲 Random assignment
         )
         
         if question_data:
-            #Append to list for next iteration
             generated_questions.append(question_data['question'])
-            # Yield complete question
+            
+            # Extract answer for logging
+            answer = question_data['answer']
+            answer_letter = answer[0] if answer else 'A'
+            
+            print(f"✅ Q{question_num} generated - Correct answer: {answer_letter}")
+            
             yield {
                 "status": "question_ready",
                 "question": question_data,
                 "index": question_num - 1
             }
     
-    # Final completion
     yield {
         "status": "quiz_complete",
         "total_generated": num_questions
     }
-
-
 async def _generate_single_question(
     content: str,
     topic: str,
     difficulty: str,
     question_num: int,
     language: str,
-    questions_to_avoid:list = None
+    questions_to_avoid: list = None,
+    target_letter: str = None  # 🎲 Randomly assigned letter
 ) -> dict:
     """
     Generate ONE complete quiz question using LLM.
     Returns fully-formed question object.
     """
     
+    # Defensive defaults
+    if questions_to_avoid is None:
+        questions_to_avoid = []
+    
+    # Build question deduplication text
     if questions_to_avoid:
         avoid_text = "\n".join([f"- {q}" for q in questions_to_avoid])
     else:
-        avoid_text = "None - this is the first question in this quiz"
-        
+        avoid_text = "None - this is the first question"
+    
+    # Build instruction for answer placement
+    if target_letter:
+        answer_instruction = f"""
+        CRITICAL REQUIREMENT - CORRECT ANSWER POSITION:
+        You MUST make option **{target_letter})** the correct answer for this question.
+
+        Design your question and options so that {target_letter} is the most appropriate clinical response.
+        - All 4 options should be plausible
+        - But {target_letter} should be the BEST choice based on evidence-based practice
+        - The other options should be reasonable but less optimal or incorrect
+        """
+    else:
+        answer_instruction = "You can choose any option (A, B, C, or D) as the correct answer."
+    
+    print(f"\n{'='*60}")
+    print(f"Generating Question {question_num}")
+    print(f"Target answer position: {target_letter}")
+    print(f"{'='*60}\n")
+    
     prompt = PromptTemplate(
-        input_variables=["content", "topic", "difficulty", "question_num", "language", "questions_to_avoid"],
+        input_variables=["content", "topic", "difficulty", "question_num", "language", 
+                        "questions_to_avoid", "answer_instruction"],
         template="""
-        You are a {language}-speaking nursing quiz generator.
+        You are a {language}-speaking nursing quiz generator creating NCLEX-style questions.
 
         Generate **EXACTLY ONE high-quality multiple choice question** about: {topic}
-        
+
         Difficulty: {difficulty}
         Question number: {question_num}
-        
-        CRITICAL - DO NOT repeat or rephrase these questions ALREADY IN THIS QUIZ:
+
+        {answer_instruction}
+
+        CRITICAL - DO NOT repeat these questions:
         {questions_to_avoid}
-        
+
         Context:
         {content}
 
         Requirements:
         - Test critical thinking and clinical judgment
-        - Create a COMPLETELY NEW question testing a DIFFERENT concept/scenario than the ones above
-        - Use realistic nursing scenarios
-        - Create 4 plausible options (A-D)
-        - Provide detailed rationale
-        - Use clear {language}
+        - Create a COMPLETELY NEW question testing a DIFFERENT concept/scenario
+        - Use realistic nursing scenarios with specific patient details (age, condition, symptoms)
+        - Create 4 plausible options (A-D) where ALL options could seem reasonable to a novice
+        - The correct answer should be the BEST choice based on evidence-based practice
+        - Provide detailed rationale explaining WHY the correct answer is right AND why each other option is wrong
+        - Reference options by their letters (A, B, C, D) in your justification
 
         📤 Return ONLY valid JSON (no markdown):
         {{
-            "question": "Question text in {language}",
+            "question": "Detailed clinical scenario in {language}",
             "options": [
-                "A) Option 1",
-                "B) Option 2", 
-                "C) Option 3",
-                "D) Option 4"
+                "A) First option",
+                "B) Second option", 
+                "C) Third option",
+                "D) Fourth option"
             ],
-            "answer": "B) Option 2",
-            "justification": "Detailed explanation in {language}",
+            "answer": "X) The correct option",
+            "justification": "Explain why the correct answer is best, then explain why each incorrect option (reference by letter) is less appropriate. Example: 'Option X is correct because [clinical reasoning]. Option A is incorrect because... Option C would not address... Option D is contraindicated because...'",
             "metadata": {{
                 "sourceLanguage": "{language}",
                 "topic": "{topic}",
-                "category": "nursing_category",
+                "category": "nursing",
                 "difficulty": "{difficulty}",
-                "correctAnswerIndex": 1,
+                "correctAnswerIndex": 0,
                 "sourceDocument": "conversational_generation",
-                "keywords": ["keyword1", "keyword2"]
+                "keywords": ["relevant", "keywords"]
             }}
         }}
 
-        📌 Guidelines:
+        📌 Quality Guidelines:
         - Evidence-based nursing practice
-        - Realistic patient scenarios
-        - Focus on nursing interventions
-        - Age-appropriate conditions
+        - Realistic scenarios with specific details
+        - Test application and analysis, not just recall
+        - All options should be grammatically parallel
         """
-    )
+     )
 
-    llm = ChatOpenAI(model="gpt-4o", temperature=0.4)
+    llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
     chain = prompt | llm | StrOutputParser()
-
-    print("Questions to avoid:", avoid_text);
+    
     try:
         result = await chain.ainvoke({
             "content": content,
@@ -896,25 +1149,35 @@ async def _generate_single_question(
             "difficulty": difficulty,
             "question_num": question_num,
             "language": language,
-            "questions_to_avoid": avoid_text
+            "questions_to_avoid": avoid_text,
+            "answer_instruction": answer_instruction
         })
         
         # Clean and parse
-        cleaned = result.strip().strip("```json").strip("```")
+        cleaned = result.strip().strip("```json").strip("```").strip()
         parsed_question = json.loads(cleaned)
         
-        # ✅ NEW: Shuffle options to randomize correct answer position
-        parsed_question = _shuffle_question_options(parsed_question)
+        # Extract correct answer index
+        answer = parsed_question.get('answer', '')
+        if answer:
+            answer_letter = answer[0]  # Extract 'A' from "A) ..."
+            answer_index = ord(answer_letter) - ord('A')  # A=0, B=1, C=2, D=3
+            
+            if 'metadata' in parsed_question:
+                parsed_question['metadata']['correctAnswerIndex'] = answer_index
         
         return parsed_question
         
     except json.JSONDecodeError as e:
         print(f"❌ Failed to parse question {question_num}: {e}")
+        if 'result' in locals():
+            print(f"Raw output: {result[:500]}...")
         return None
     except Exception as e:
         print(f"❌ Error generating question {question_num}: {e}")
+        import traceback
+        traceback.print_exc()
         return None
-
 
 def _extract_previous_questions(session: PersistentSessionContext, limit: int = 15) -> list:
     """
@@ -952,76 +1215,84 @@ def _extract_previous_questions(session: PersistentSessionContext, limit: int = 
     return previous_questions[-limit:]
 
 
-def _shuffle_question_options(question: dict) -> dict:
+
     """
-    Shuffle options to randomize correct answer position.
-    Updates both 'answer' and 'correctAnswerIndex' accordingly.
+    Replace option letter references in justification text.
+    
+    Example:
+        text: "Option A is incorrect because... Option B is correct..."
+        mapping: {'A': 'C', 'B': 'A'}
+        result: "Option C is incorrect because... Option A is correct..."
     
     Args:
-        question: Parsed question dict with options and answer
+        text: The justification text with option references
+        letter_mapping: Dictionary mapping old letters to new letters
         
     Returns:
-        Question dict with shuffled options and updated answer/index
+        Text with updated option letters
     """
     
-    if not question.get('options') or not question.get('answer'):
-        return question
+    # We need to replace in a way that doesn't cause collisions
+    # Strategy: Use temporary placeholders first
     
-    # Extract the letter labels (A, B, C, D)
-    options = question['options']
+    # Step 1: Replace with temporary placeholders
+    temp_mapping = {
+        'A': '__TEMP_A__',
+        'B': '__TEMP_B__',
+        'C': '__TEMP_C__',
+        'D': '__TEMP_D__'
+    }
     
-    # Find current correct answer
-    correct_answer_text = question['answer']
+    result = text
     
-    # Extract the actual answer text (remove the letter prefix like "A) ")
-    correct_text = correct_answer_text.split(') ', 1)[1] if ') ' in correct_answer_text else correct_answer_text
-    
-    # Find which option contains the correct answer
-    old_correct_index = -1
-    option_texts = []
-    
-    for i, opt in enumerate(options):
-        # Extract text without letter prefix
-        text = opt.split(') ', 1)[1] if ') ' in opt else opt
-        option_texts.append(text)
+    # Replace "Option A", "option A", etc. with temporary placeholders
+    for old_letter in ['A', 'B', 'C', 'D']:
+        # Match various formats: "Option A", "option A", "Options A", etc.
+        patterns = [
+            f"Option {old_letter}",
+            f"option {old_letter}",
+            f"Options {old_letter}",
+            f"options {old_letter}",
+        ]
         
-        if text == correct_text or opt == correct_answer_text:
-            old_correct_index = i
+        for pattern in patterns:
+            result = result.replace(pattern, pattern.replace(old_letter, temp_mapping[old_letter]))
     
-    if old_correct_index == -1:
-        print(f"⚠️ Warning: Could not find correct answer in options")
-        return question
+    # Step 2: Replace temporary placeholders with new letters
+    for old_letter, new_letter in letter_mapping.items():
+        temp = temp_mapping[old_letter]
+        result = result.replace(temp, new_letter)
     
-    # Create list of tuples (text, is_correct)
-    options_data = [(text, i == old_correct_index) for i, text in enumerate(option_texts)]
+    return result
+
+
+def _extract_answer_concept(answer: str, topic: str) -> str:
+    """
+    Extract the key concept from the correct answer.
     
-    # Shuffle the options
-    random.shuffle(options_data)
+    Examples:
+    - "B) Randomized controlled trial" → "Randomized controlled trial"
+    - "A) Descriptive design" → "Descriptive design"
     
-    # Rebuild options with new letter labels
-    letters = ['A', 'B', 'C', 'D']
-    new_options = []
-    new_correct_index = -1
-    new_answer = ""
-    
-    for i, (text, is_correct) in enumerate(options_data):
-        new_option = f"{letters[i]}) {text}"
-        new_options.append(new_option)
+    Args:
+        answer: The correct answer string (e.g., "B) Randomized controlled trial")
+        topic: The quiz topic for context
         
-        if is_correct:
-            new_correct_index = i
-            new_answer = new_option
+    Returns:
+        The core concept being tested
+    """
+    # Remove the letter prefix (A), B), C), D))
+    if ') ' in answer:
+        concept = answer.split(') ', 1)[1]
+    else:
+        concept = answer
     
-    # Update question with shuffled data
-    question['options'] = new_options
-    question['answer'] = new_answer
+    # Clean up common patterns
+    concept = concept.strip()
     
-    if 'metadata' in question:
-        question['metadata']['correctAnswerIndex'] = new_correct_index
-    
-    print(f"🔀 Shuffled options: correct answer moved from position {old_correct_index} to {new_correct_index}")
-    
-    return question
+    return concept
+
+
 
 async def load_vectorstore_from_firebase(session: PersistentSessionContext) -> Optional[FAISS]:
     """

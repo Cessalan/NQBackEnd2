@@ -1133,8 +1133,7 @@ class StudySheetStreamer:
     <body>
     <div class="container">
         <div class="header">
-        <h1>📚 {topic}</h1>
-        <p>Comprehensive Nursing Study Guide</p>
+            <h1>📚 {topic}</h1>
         </div>
         {sections_combined}
     </div>

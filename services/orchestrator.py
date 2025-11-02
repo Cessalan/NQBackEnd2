@@ -5,7 +5,6 @@ from typing import AsyncGenerator
 from datetime import datetime
 from tools.quiztools import search_documents,summarize_document,get_chat_context_from_db
 import json
-import asyncio
 
 class NursingTutor:
     """
@@ -272,7 +271,7 @@ class NursingTutor:
                             }) + "\n"
                             
                             return
-                                                        
+                                                       
                         if tool_name == "generate_quiz_stream":
                             print("🎯 Quiz tool called - checking for streaming")
                             # creates parameters we will need for the quizz, and start streaming
@@ -419,7 +418,7 @@ class NursingTutor:
                                     "answer_chunk": f"Error: {result['error']}"
                                 }) + "\n"
             else:
-                print("NO TOOLS USED, STRAIGHT RESPONSE")
+                print("===NO TOOLS USED, STRAIGHT RESPONSE=====")
                 
                 response_content = ""
             
@@ -472,6 +471,10 @@ class NursingTutor:
                                 if the user asks for more inform him/her of the limit and confirm before proceeding the trigger the tool
         - generate_study_sheet_stream: When the user explicitly asks for a study sheet or a guide  OR when they ask for previous/old study sheets, basically, if the intent is to create or modify a study sheet
         - summarize_document: When they want document summaries
+        
+        CRITICAL LANGUAGE RULE:
+        - When extracting the 'topic' parameter for any tool, you MUST preserve the topic 
+        in the SAME LANGUAGE as the user's message
         
         Guidelines:
         - Always provide rationales for answers (WHY, not just WHAT)
