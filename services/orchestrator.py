@@ -439,6 +439,16 @@ class NursingTutor:
                 "timestamp": datetime.now().isoformat()
             })
             
+            # create prompt suggestions based on the context
+            suggestions = await self._generate_dynamic_suggestions()
+            
+            # send them to the user
+            if suggestions:
+                yield json.dumps({
+                    "status": "suggested_prompts",
+                    "suggestions": suggestions
+                }) + "\n"
+
             # Final response status
             yield json.dumps({
                 "status": "complete"
@@ -582,4 +592,51 @@ class NursingTutor:
         except Exception as e:
             yield f"Error generating summary: {str(e)}"
             
-            
+    async def _generate_dynamic_suggestions(self) -> list:
+        """Generate contextual suggestions; skip if not needed."""
+        try:
+            # ✅ OPTIMIZATION: Only run after tool use or every 3 messages
+            if len(self.session.message_history) % 3 != 0:
+                return []
+
+            recent_msgs = self.session.message_history[-6:]
+            context_snippet = "\n".join(
+                [f"{m['role']}: {m['content'][:200]}" for m in recent_msgs if 'content' in m]
+            )  # ✅ Limit per-message length
+
+            last_tools = [t.get("tool") for t in getattr(self.session, "tool_calls", [])[-3:]]
+            last_tool_used = last_tools[-1] if last_tools else "none"
+
+            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.6)
+
+            system_prompt = (
+                "Generate 3–5 short, actionable next-step prompts for a nursing student. "
+                "Focus on deepening understanding, exploring related topics, or self-assessment. "
+                f"Respond in {self.session.user_language}. Return ONLY a JSON array of strings."
+            )
+
+            response = await llm.ainvoke([
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"CONTEXT:\n{context_snippet}\n\nLAST TOOL: {last_tool_used}"}
+            ])
+
+            # ✅ ROBUST PARSING
+            import json
+            suggestions = json.loads(response.content)
+            if isinstance(suggestions, list):
+                # ✅ DEDUPLICATION (cache last suggestions in session)
+                prev = getattr(self.session, "last_suggestions", [])
+                new_suggestions = [s for s in suggestions[:5] if s not in prev]
+                self.session.last_suggestions = new_suggestions
+                return new_suggestions
+
+        except json.JSONDecodeError as e:
+            print(f"⚠️ JSON parse error in suggestions: {e}")
+            # Fallback: split by lines
+            suggestions = [s.strip("-• ") for s in response.content.split("\n") if s.strip()]
+            return suggestions[:5]
+        except Exception as e:
+            print(f"⚠️ Suggestions failed: {e}")
+            return []
+
+        return []

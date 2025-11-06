@@ -986,7 +986,8 @@ async def stream_quiz_questions(
         full_text = "\n\n".join([doc.page_content for doc in docs])[:12000]
         content_context = f"Document content:\n{full_text}"
     else:
-        content_context = f"""You are generating questions about: {topic}      
+        content_context = f"""You are generating questions about: {topic}
+      
             If this is a broad topic (like 'research design', 'pharmacology', 'cardiac care'), 
             ensure you test diverse subtopics and concepts within that domain."""
     
@@ -1083,61 +1084,68 @@ async def _generate_single_question(
     
     prompt = PromptTemplate(
         input_variables=["content", "topic", "difficulty", "question_num", "language", 
-                        "questions_to_avoid", "answer_instruction"],
-        template="""
-        You are a {language}-speaking nursing quiz generator creating NCLEX-style questions.
+                    "questions_to_avoid", "answer_instruction"],
+    template="""
+    You are a {language}-speaking nursing quiz generator creating NCLEX-style questions.
 
-        Generate **EXACTLY ONE high-quality multiple choice question** about: {topic}
+    Generate **EXACTLY ONE high-quality multiple choice question** about: {topic}
 
-        Difficulty: {difficulty}
-        Question number: {question_num}
+    Difficulty: {difficulty}
+    Question number: {question_num}
 
-        {answer_instruction}
+    {answer_instruction}
 
-        CRITICAL - DO NOT repeat these questions:
-        {questions_to_avoid}
+    CRITICAL - DO NOT repeat these questions:
+    {questions_to_avoid}
 
-        Context:
-        {content}
+    Context:
+    {content}
 
-        Requirements:
-        - Test critical thinking and clinical judgment
-        - Create a COMPLETELY NEW question testing a DIFFERENT concept/scenario
-        - Use realistic nursing scenarios with specific patient details (age, condition, symptoms)
-        - Create 4 plausible options (A-D) where ALL options could seem reasonable to a novice
-        - The correct answer should be the BEST choice based on evidence-based practice
-        - Provide detailed rationale explaining WHY the correct answer is right AND why each other option is wrong
-        - Reference options by their letters (A, B, C, D) in your justification
+    Requirements:
+    - Test critical thinking and clinical judgment
+    - Create a COMPLETELY NEW question testing a DIFFERENT concept/scenario
+    - Use realistic nursing scenarios with specific patient details (age, condition, symptoms)
+    - Create 4 plausible options (A-D) where ALL options could seem reasonable to a novice
+    - The correct answer should be the BEST choice based on evidence-based practice
 
-        📤 Return ONLY valid JSON (no markdown):
-        {{
-            "question": "Detailed clinical scenario in {language}",
-            "options": [
-                "A) First option",
-                "B) Second option", 
-                "C) Third option",
-                "D) Fourth option"
-            ],
-            "answer": "X) The correct option",
-            "justification": "Explain why the correct answer is best, then explain why each incorrect option (reference by letter) is less appropriate. Example: 'Option X is correct because [clinical reasoning]. Option A is incorrect because... Option C would not address... Option D is contraindicated because...'",
-            "metadata": {{
-                "sourceLanguage": "{language}",
-                "topic": "{topic}",
-                "category": "nursing",
-                "difficulty": "{difficulty}",
-                "correctAnswerIndex": 0,
-                "sourceDocument": "conversational_generation",
-                "keywords": ["relevant", "keywords"]
-            }}
+    📤 Return ONLY valid JSON (no markdown wrapper):
+    {{
+        "question": "Detailed clinical scenario in {language}",
+        "options": [
+            "A) First option",
+            "B) Second option", 
+            "C) Third option",
+            "D) Fourth option"
+        ],
+        "answer": "X) The correct option",
+        "justification": "Use this EXACT format with html:
+
+        <strong> Option X is correct </strong> because [1-2 sentences explaining why this is the BEST evidence-based choice]. 
+        <br><br>
+
+        <strong> Option A is incorrect </strong> [1 sentence explaining the clinical flaw]. <br>
+
+        <strong> Option B is incorrect </strong> because [1 sentence explaining the clinical flaw].  <br>
+
+        <strong> Option C is incorrect </strong>  because [1 sentence explaining the clinical flaw].  <br> ",
+        "metadata": {{
+            "sourceLanguage": "{language}",
+            "topic": "{topic}",
+            "category": "nursing",
+            "difficulty": "{difficulty}",
+            "correctAnswerIndex": 0,
+            "sourceDocument": "conversational_generation",
+            "keywords": ["relevant", "keywords"]
         }}
+    }}
 
-        📌 Quality Guidelines:
-        - Evidence-based nursing practice
-        - Realistic scenarios with specific details
-        - Test application and analysis, not just recall
-        - All options should be grammatically parallel
-        """
-     )
+    📌 Formatting Rules (CRITICAL):
+    - Use **bold** for every "Option X is..." statement
+    - Maintain parallel structure (all start the same way)
+    - Keep each explanation to 1-2 sentences
+    - Test application and analysis, not just recall
+    """
+)
 
     llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
     chain = prompt | llm | StrOutputParser()
