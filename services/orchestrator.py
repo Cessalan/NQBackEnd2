@@ -141,10 +141,7 @@ class NursingTutor:
                                 ):
                                     yield json.dumps({
                                         "answer_chunk": chunk
-                                    }) + "\n"
-                                    
-                                return
-                                
+                                    }) + "\n"  
                             else:
                                 # Handle error from tool
                                 yield json.dumps({
@@ -442,6 +439,8 @@ class NursingTutor:
             # create prompt suggestions based on the context
             suggestions = await self._generate_dynamic_suggestions()
             
+            print( f"PROMPTS SUGGESTIONS CREATED: {suggestions}")
+            
             # send them to the user
             if suggestions:
                 yield json.dumps({
@@ -512,11 +511,24 @@ class NursingTutor:
         # TOOL-USE INFERENCE RULES
         ---
 
-        1.  **Required Argument Focus:** When a tool requires a parameter (like 'topic' for 'generate_study_sheet_stream'), you MUST find the value for that parameter, base on the context (conversation, quizzes, summaries) provided.
+        1. **Intent-First Approach:** Only call a tool when the user's message contains 
+        clear intent for that specific action. Never infer tool use just because 
+        parameters are available.
 
-        2.  **Context Extraction:** If the user requests a study guide immediately following a detailed discussion, a summary, or a displayed chunk of information, you MUST use the **primary subject** of that immediately preceding content as the **required 'topic' argument**.
-
-        3.  **Fallback:** ONLY if the conversation is new or the topic is completely ambiguous (e.g., "Hi, what tools do you have?"), ask the user for the topic."
+        2. **Study Sheet Triggers (must contain action verb + intent):**
+        - "Make/create/generate/build a study sheet for [topic]"
+        - "I need a study guide on [topic]"
+        - "Based on [quiz/summary], make me a study sheet"
+        
+        3. **Default Behavior for Bare Topics:**
+        - If user enters just a topic name (e.g., "skeletal system"):
+            * First, use search_documents to find relevant materials
+            * If no documents exist, provide a brief educational response
+            * Never automatically create a study sheet
+        
+        4. **Ambiguity Handling:**
+        - If uncertain, ask: "Would you like me to (a) search your materials, 
+            (b) create a study sheet, or (c) quiz you on this topic?"
 
         Current session:
         - Conversation so far {self.session.message_history if self.session.message_history else "no conversation yet"}
@@ -593,50 +605,484 @@ class NursingTutor:
             yield f"Error generating summary: {str(e)}"
             
     async def _generate_dynamic_suggestions(self) -> list:
-        """Generate contextual suggestions; skip if not needed."""
+        """
+        Generate pedagogically intelligent, high-impact suggestions that:
+        1. Are outcome-oriented and goal-focused
+        2. Only reference available resources
+        3. Form a coherent learning pathway
+        """
         try:
-            # ✅ OPTIMIZATION: Only run after tool use or every 3 messages
-            if len(self.session.message_history) % 3 != 0:
-                return []
-
-            recent_msgs = self.session.message_history[-6:]
-            context_snippet = "\n".join(
-                [f"{m['role']}: {m['content'][:200]}" for m in recent_msgs if 'content' in m]
-            )  # ✅ Limit per-message length
-
+            # ========================================
+            # PHASE 1: Build Rich Context
+            # ========================================
+            recent_msgs = self.session.message_history[-8:]
+            
+            # Get conversation context
+            context_snippet = "\n".join([
+                f"{m['role']}: {m['content'][:150]}" 
+                for m in recent_msgs if 'content' in m
+            ])[-1000:]
+            
+            # Analyze tool usage
             last_tools = [t.get("tool") for t in getattr(self.session, "tool_calls", [])[-3:]]
-            last_tool_used = last_tools[-1] if last_tools else "none"
+            
+            # Assess available resources
+            has_documents = bool(self.session.documents)
+            document_names = [doc.get("filename", "") for doc in (self.session.documents or [])]
+            
+            has_quiz_history = bool(getattr(self.session, "quizzes", []))
+            quiz_performance = self._analyze_quiz_performance() if has_quiz_history else None
+            
+            recent_topics = self._extract_recent_quiz_topics() if has_quiz_history else []
+            
+            # Extract current topic from last message
+            last_msg = recent_msgs[-1].get("content", "") if recent_msgs else ""
+            current_topic = self._extract_current_topic(last_msg, recent_topics)
+            
+            # ========================================
+            # PHASE 2: Create High-Impact System Prompt
+            # ========================================
+            
+            # Build resource-aware tool list
+            available_tools = self._build_available_tools_list(has_documents)
+            
+            system_prompt = f"""You are a nursing education AI helping students achieve specific learning outcomes.
 
-            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.6)
+            Your role: Suggest 4-5 HIGH-IMPACT next actions that:
+            - Are goal-oriented and outcome-focused
+            - Lead to measurable learning gains
+            - Form a coherent progression toward mastery
+            - Are immediately actionable
 
-            system_prompt = (
-                "Generate 3–5 short, actionable next-step prompts for a nursing student. "
-                "Focus on deepening understanding, exploring related topics, or self-assessment. "
-                f"Respond in {self.session.user_language}. Return ONLY a JSON array of strings."
-            )
+            {available_tools}
+
+            **CRITICAL RULES:**
+
+            1. **Be Specific and Outcome-Oriented**
+            ❌ BAD: "Search my notes for information"
+            ✅ GOOD: "What are the 3 main causes of acute respiratory distress?"
+            
+            ❌ BAD: "Quiz me on cardiac care"
+            ✅ GOOD: "Test my ability to identify arrhythmias from ECG patterns"
+            
+            ❌ BAD: "Create a study guide"
+            ✅ GOOD: "Build a step-by-step guide for performing wound assessments"
+
+            2. **Focus on Learning Goals**
+            - Identify what the student needs to MASTER
+            - Target specific skills, not vague topics
+            - Include clinical application when relevant
+
+            3. **Make It Action-Oriented**
+            Each suggestion should clearly state:
+            - What skill/knowledge will be gained
+            - What specific outcome to expect
+            - How it advances their competency
+
+            4. **Pedagogical Strategy**
+            - After explanation → Test understanding with specific scenarios
+            - After quiz → Review weak areas with targeted questions
+            - After reading → Apply knowledge to clinical situations
+            - Mix recall and application questions
+
+            **Response Format:**
+            Return ONLY a JSON array of 4-5 strings in {self.session.user_language}.
+            Each must be specific, actionable, and outcome-focused.
+
+            Examples of HIGH-IMPACT suggestions:
+
+            English:
+            [
+            "Test my ability to calculate dopamine drip rates for different patient weights",
+            "What are the priority nursing interventions for a patient in septic shock?",
+            "Quiz me on identifying heart failure vs COPD based on assessment findings",
+            "Walk me through the step-by-step process of inserting a Foley catheter"
+            ]
+
+            French:
+            [
+            "Teste ma capacité à calculer les débits de perfusion de dopamine selon le poids",
+            "Quelles sont les interventions infirmières prioritaires en cas de choc septique?",
+            "Fais-moi un quiz pour différencier l'insuffisance cardiaque de la MPOC",
+            "Guide-moi étape par étape dans l'insertion d'une sonde vésicale"
+            ]
+
+            Spanish:
+            [
+            "Prueba mi capacidad para calcular tasas de goteo de dopamina según peso",
+            "¿Cuáles son las intervenciones prioritarias en shock séptico?",
+            "Hazme un quiz para diferenciar insuficiencia cardíaca de EPOC",
+            "Guíame paso a paso en la inserción de sonda Foley"
+            ]
+            """
+
+            # ========================================
+            # PHASE 3: Build Context Message
+            # ========================================
+            
+            context_parts = [f"**Recent Conversation:**\n{context_snippet}"]
+            
+            if current_topic:
+                context_parts.append(f"\n**Current Topic:** {current_topic}")
+            
+            if last_tools:
+                context_parts.append(f"\n**Recent Actions:** {', '.join(last_tools)}")
+            
+            if has_documents:
+                context_parts.append(f"\n**Student Has Uploaded:** {', '.join(document_names[:3])}")
+            
+            if quiz_performance:
+                context_parts.append(f"\n**Recent Quiz Results:** {quiz_performance}")
+            
+            if recent_topics:
+                context_parts.append(f"\n**Recently Studied:** {', '.join(recent_topics)}")
+            
+            context_message = "\n".join(context_parts)
+            
+            # ========================================
+            # PHASE 4: Generate Suggestions
+            # ========================================
+            
+            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
+            
+            response = await llm.ainvoke([
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"""{context_message}
+
+    Generate 4-5 HIGH-IMPACT, outcome-oriented suggestions that will most effectively advance this student's learning.
+
+    Focus on:
+    - Specific skills or knowledge gaps to address
+    - Clinical application of concepts just discussed
+    - Progressive complexity based on their performance
+    - Actionable next steps with clear learning outcomes
+
+    Remember: Be specific, goal-oriented, and immediately useful."""}
+            ])
+            
+            # ========================================
+            # PHASE 5: Parse and Return
+            # ========================================
+            
+            import json
+            
+            try:
+                suggestions = json.loads(response.content)
+            except json.JSONDecodeError:
+                print(f"⚠️ JSON parse failed, attempting cleanup")
+                cleaned = response.content.strip().strip("```json").strip("```").strip()
+                try:
+                    suggestions = json.loads(cleaned)
+                except:
+                    print(f"⚠️ JSON parsing failed, extracting lines")
+                    lines = [line.strip().strip('"-,[]') for line in response.content.split('\n') if line.strip()]
+                    suggestions = [line for line in lines if len(line) > 15 and not line.startswith('{')][:5]
+            
+            if not isinstance(suggestions, list):
+                print(f"⚠️ Response not a list: {suggestions}")
+                return []
+            
+            # Cleanup: remove empty/short strings
+            cleaned_suggestions = [
+                s.strip() for s in suggestions 
+                if isinstance(s, str) and len(s.strip()) > 15  # Longer minimum for quality
+            ][:5]
+            
+            # Store for context
+            self.session.last_suggestions = cleaned_suggestions
+            
+            return cleaned_suggestions
+            
+        except Exception as e:
+            print(f"⚠️ Suggestion generation failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+
+
+    def _build_available_tools_list(self, has_documents: bool) -> str:
+        """
+        Build a resource-aware list of available tools.
+        Only mention document-related tools if student has uploaded files.
+        """
+        
+        if has_documents:
+            return """**Available Tools (use ONLY these):**
+
+    1. **search_documents** - Find specific information in uploaded materials
+    Use for: "What does my textbook say about [specific clinical question]?"
+    Example: "How do my notes explain the pathophysiology of diabetic ketoacidosis?"
+
+    2. **generate_quiz** - Test knowledge with specific questions
+    Use for: "Test my ability to [specific skill/knowledge]"
+    Example: "Quiz me on differentiating types of shock based on hemodynamic parameters"
+
+    3. **summarize_document** - Extract key information from uploaded files
+    Use for: "What are the main takeaways about [topic] from my document?"
+    Example: "Summarize the priority interventions for stroke patients from my notes"
+
+    4. **generate_study_sheet** - Create comprehensive learning guides
+    Use for: "Build a step-by-step guide for [clinical skill/concept]"
+    Example: "Create a systematic approach to respiratory assessment"
+
+    5. **ask_questions** - Get detailed explanations on specific topics
+    Use for: "Explain [specific concept] with clinical examples"
+    Example: "What are the key differences between Type 1 and Type 2 respiratory failure?"
+    """
+        else:
+            return """**Available Tools (use ONLY these):**
+
+    1. **generate_quiz** - Test knowledge with specific questions
+    Use for: "Test my ability to [specific skill/knowledge]"
+    Example: "Quiz me on differentiating types of shock based on hemodynamic parameters"
+
+    2. **generate_study_sheet** - Create comprehensive learning guides
+    Use for: "Build a step-by-step guide for [clinical skill/concept]"
+    Example: "Create a systematic approach to respiratory assessment"
+
+    3. **ask_questions** - Get detailed explanations on specific topics
+    Use for: "Explain [specific concept] with clinical examples"
+    Example: "What are the key differences between Type 1 and Type 2 respiratory failure?"
+
+    NOTE: Student has NOT uploaded any documents yet. DO NOT suggest searching or summarizing files.
+    """
+
+
+    def _extract_current_topic(self, last_msg: str, recent_topics: list) -> str:
+        """
+        Extract the main topic being discussed.
+        Priority: last message > recent quiz topics
+        """
+        
+        # Try to extract from last message
+        msg_lower = last_msg.lower()
+        
+        # Medical keywords that might indicate topic
+        medical_terms = [
+            "cardiac", "respiratory", "renal", "neuro", "diabetes", "sepsis",
+            "shock", "heart failure", "COPD", "asthma", "pneumonia",
+            "medications", "pharmacology", "dosage", "IV", "catheter"
+        ]
+        
+        for term in medical_terms:
+            if term in msg_lower:
+                return term
+        
+        # Fallback to recent quiz topics
+        if recent_topics:
+            return recent_topics[0]
+        
+        # Extract from question patterns
+        if "what" in msg_lower or "how" in msg_lower or "explain" in msg_lower:
+            # Try to grab the noun phrase after the question word
+            words = last_msg.split()
+            if len(words) > 3:
+                return " ".join(words[-5:])  # Last few words often contain the topic
+        
+        return None
+
+
+    def _analyze_quiz_performance(self) -> str:
+        """Analyze recent quiz results to inform suggestions."""
+        try:
+            recent_quizzes = getattr(self.session, "quizzes", [])[-3:]
+            
+            if not recent_quizzes:
+                return None
+            
+            total_questions = 0
+            total_correct = 0
+            weak_topics = []
+            
+            for quiz in recent_quizzes:
+                quiz_data = quiz.get("quiz_data", {})
+                
+                if isinstance(quiz_data, dict):
+                    questions = quiz_data.get("quiz", [])
+                else:
+                    questions = quiz_data
+                
+                for q in questions:
+                    if not isinstance(q, dict):
+                        continue
+                    
+                    total_questions += 1
+                    
+                    user_sel = q.get("userSelection", {})
+                    if user_sel.get("isCorrect"):
+                        total_correct += 1
+                    else:
+                        topic = q.get("metadata", {}).get("topic", "")
+                        if topic and topic not in weak_topics:
+                            weak_topics.append(topic)
+            
+            if total_questions == 0:
+                return None
+            
+            accuracy = int((total_correct / total_questions) * 100)
+            summary = f"{accuracy}% accuracy ({total_correct}/{total_questions})"
+            
+            if weak_topics:
+                summary += f", weak areas: {', '.join(weak_topics[:2])}"
+            
+            return summary
+            
+        except Exception as e:
+            print(f"⚠️ Quiz analysis failed: {e}")
+            return None
+
+
+    def _extract_recent_quiz_topics(self) -> list:
+        """Extract topics from recent quizzes."""
+        try:
+            recent_quizzes = getattr(self.session, "quizzes", [])[-2:]
+            topics = set()
+            
+            for quiz in recent_quizzes:
+                quiz_data = quiz.get("quiz_data", {})
+                
+                if isinstance(quiz_data, dict):
+                    questions = quiz_data.get("quiz", [])
+                else:
+                    questions = quiz_data
+                
+                for q in questions:
+                    if isinstance(q, dict):
+                        topic = q.get("metadata", {}).get("topic", "")
+                        if topic:
+                            topics.add(topic)
+            
+            return list(topics)[:3]
+            
+        except Exception as e:
+            print(f"⚠️ Topic extraction failed: {e}")
+            return []
+    
+    
+async def generate_post_upload_suggestions(session, file_insights: dict) -> list:
+        """
+        Generate intelligent, file-content-aware suggestions after upload.
+        Follows same high-impact principles as _generate_dynamic_suggestions.
+        
+        Args:
+            session: NursingTutor session with user_language
+            file_insights: Dict of {filename: {topics, concepts, document_type}}
+        
+        Returns:
+            List of 4-5 outcome-oriented suggestions
+        """
+        try:
+            if not file_insights:
+                return []
+            
+            # Aggregate insights from all files
+            all_topics = []
+            all_concepts = []
+            doc_types = []
+            filenames = list(file_insights.keys())
+            
+            for filename, insights in file_insights.items():
+                if insights:
+                    all_topics.extend(insights.get("topics", []))
+                    all_concepts.extend(insights.get("concepts", []))
+                    doc_type = insights.get("document_type", "")
+                    if doc_type:
+                        doc_types.append(doc_type)
+            
+            # Deduplicate
+            unique_topics = list(set(all_topics))[:5]
+            unique_concepts = list(set(all_concepts))[:10]
+            
+            # Build context
+            context_parts = [
+                f"**Files Just Uploaded:** {', '.join(filenames)}",
+                f"**Main Topics:** {', '.join(unique_topics)}",
+                f"**Key Concepts:** {', '.join(unique_concepts[:5])}"
+            ]
+            
+            if doc_types:
+                context_parts.append(f"**Document Types:** {', '.join(set(doc_types))}")
+            
+            context = "\n".join(context_parts)
+            
+            # Use same system prompt structure as _generate_dynamic_suggestions
+            
+            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
+            
+            system_prompt = f"""You are a nursing education AI helping students achieve specific learning outcomes.
+
+            The student just uploaded study materials. Generate 4-5 HIGH-IMPACT suggestions based on the file content.
+
+            **Available Tools:**
+            1. search_documents - Find specific information in uploaded materials
+            2. generate_quiz - Test knowledge with specific questions
+            3. summarize_document - Extract key information
+            4. generate_study_sheet - Create comprehensive guides
+            5. ask_questions - Get detailed explanations
+
+            **CRITICAL RULES:**
+
+            1. **Be Specific and Outcome-Oriented**
+            ❌ BAD: "Search my notes for information"
+            ✅ GOOD: "What are the 3 main causes of acute respiratory distress in my document?"
+            
+            ❌ BAD: "Quiz me on cardiac care"
+            ✅ GOOD: "Test my ability to identify the 6 arrhythmia types covered in Chapter 3"
+            
+            ❌ BAD: "Summarize my document"
+            ✅ GOOD: "What are the priority interventions for stroke patients from my notes?"
+
+            2. **Reference Specific File Content**
+            - Mention specific topics/concepts from the uploaded files
+            - Target clinical skills or procedures mentioned in documents
+            - Make suggestions immediately actionable
+
+            3. **Focus on Learning Goals**
+            - What skill/knowledge will be gained?
+            - What specific outcome to expect?
+            - How does it advance their competency?
+
+            **Response Format:**
+            Return ONLY a JSON array of 4-5 strings in {session.session.user_language}.
+
+            Examples (English):
+            [
+            "Quiz me on the 5 types of shock covered in this document",
+            "What are the key differences between the cardiac medications listed?",
+            "Test my understanding of the ECG interpretation guidelines from my notes",
+            "Summarize the priority nursing interventions for sepsis from my file"
+            ]
+
+            Examples (French):
+            [
+            "Fais-moi un quiz sur les 5 types de choc abordés dans ce document",
+            "Quelles sont les différences clés entre les médicaments cardiaques listés?",
+            "Teste ma compréhension des directives d'interprétation ECG de mes notes",
+            "Résume les interventions infirmières prioritaires pour la septicémie"
+            ]
+            """
 
             response = await llm.ainvoke([
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"CONTEXT:\n{context_snippet}\n\nLAST TOOL: {last_tool_used}"}
+                {"role": "user", "content": f"{context}\n\nGenerate 4-5 specific, outcome-oriented suggestions based on this uploaded content."}
             ])
-
-            # ✅ ROBUST PARSING
-            import json
-            suggestions = json.loads(response.content)
+            
+            # Parse
+            try:
+                suggestions = json.loads(response.content.strip().strip("```json").strip("```"))
+            except:
+                # Fallback parsing
+                print(f"⚠️ JSON parse failed, attempting line extraction")
+                lines = [line.strip().strip('"-,[]') for line in response.content.split('\n') if line.strip()]
+                suggestions = [line for line in lines if len(line) > 15 and not line.startswith('{')][:5]
+            
             if isinstance(suggestions, list):
-                # ✅ DEDUPLICATION (cache last suggestions in session)
-                prev = getattr(self.session, "last_suggestions", [])
-                new_suggestions = [s for s in suggestions[:5] if s not in prev]
-                self.session.last_suggestions = new_suggestions
-                return new_suggestions
-
-        except json.JSONDecodeError as e:
-            print(f"⚠️ JSON parse error in suggestions: {e}")
-            # Fallback: split by lines
-            suggestions = [s.strip("-• ") for s in response.content.split("\n") if s.strip()]
-            return suggestions[:5]
-        except Exception as e:
-            print(f"⚠️ Suggestions failed: {e}")
+                return suggestions[:5]
+            
             return []
-
-        return []
+            
+        except Exception as e:
+            print(f"⚠️ Post-upload suggestion generation failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return []

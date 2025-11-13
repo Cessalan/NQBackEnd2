@@ -180,14 +180,12 @@ async def generate_study_sheet_stream(
     """
     Generate a comprehensive, interactive study guide with progressive loading.
     
-    Use this tool when the user wants:
-    - "Explain [topic] to me"
-    - "Teach me about [topic]"  
-    - "Create a study guide for [topic]"
-    - "I want to learn [topic]"
-    - "Break down [topic] for me"
-    - Comprehensive explanations or tutorials
-    
+    Use this tool ONLY when the user explicitly asks for a study sheet on certain subject or for specific goal:
+    - "Make me a study sheet for[topic]"
+    - "Fais moi une fuille d'etude sur[topic]" 
+    - "Based on the last quiz, make me a study sheet based on my results"
+    - "Make me a study sheet based on my files"  
+
     DO NOT use for:
     - Simple questions like "What is X?" (use search_documents instead)
     - Quiz generation (use generate_quiz)

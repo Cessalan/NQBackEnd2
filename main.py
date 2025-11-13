@@ -71,6 +71,72 @@ from services.vectorstore_manager import vectorstore_manager
 
 import json
 
+# Custom PowerPoint loader that doesn't need NLTK
+class SimplePowerPointLoader:
+    """Lightweight PowerPoint loader using python-pptx directly."""
+    def __init__(self, file_path: str):
+        self.file_path = file_path
+    
+    def load(self):
+        """Extract text from PowerPoint slides."""
+        try:
+            from pptx import Presentation
+            from pptx.enum.shapes import MSO_SHAPE_TYPE
+        except ImportError:
+            raise ImportError("python-pptx is required. Install: pip install python-pptx")
+        
+        prs = Presentation(self.file_path)
+        documents = []
+        
+        for slide_num, slide in enumerate(prs.slides, start=1):
+            text_content = []
+            
+            # Extract text from all shapes in the slide
+            for shape in slide.shapes:
+                # Regular text shapes
+                if hasattr(shape, "text") and shape.text.strip():
+                    text_content.append(shape.text.strip())
+                
+                # Handle tables - use shape_type to check safely
+                if shape.shape_type == MSO_SHAPE_TYPE.TABLE:
+                    try:
+                        table = shape.table
+                        for row in table.rows:
+                            row_text = " | ".join(
+                                cell.text.strip() for cell in row.cells if cell.text.strip()
+                            )
+                            if row_text:
+                                text_content.append(row_text)
+                    except Exception as e:
+                        print(f"⚠️ Failed to extract table: {e}")
+                        continue
+                
+                # Handle grouped shapes (recursively extract text)
+                if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                    try:
+                        for sub_shape in shape.shapes:
+                            if hasattr(sub_shape, "text") and sub_shape.text.strip():
+                                text_content.append(sub_shape.text.strip())
+                    except Exception as e:
+                        print(f"⚠️ Failed to extract grouped shape: {e}")
+                        continue
+            
+            # Create document if there's content
+            if text_content:
+                page_content = "\n\n".join(text_content)
+                doc = Document(
+                    page_content=page_content,
+                    metadata={
+                        "source": os.path.basename(self.file_path),
+                        "page": slide_num,
+                        "total_slides": len(prs.slides)
+                    }
+                )
+                documents.append(doc)
+        
+        print(f"✅ Extracted text from {len(documents)} slides")
+        return documents
+
 # to load documents
 def get_loader_for_file(path):
     ext = os.path.splitext(path)[-1].lower()        
@@ -91,7 +157,7 @@ def get_loader_for_file(path):
     elif ext in [".xls", ".xlsx"]: #excel support
         return UnstructuredExcelLoader(path) 
     elif ext in [".ppt", ".pptx"]: # power point support
-        return UnstructuredPowerPointLoader(path)
+        return SimplePowerPointLoader(path)
     elif ext in [".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp",".heic"]:  # Add image support
         print("Extracting text from image")
         return OCRImageLoader(path)
@@ -283,137 +349,12 @@ def get_temp_dir():
         return tempfile.gettempdir()
 
 
-#UNUSED
-@app.post("/chat/embed")
-def embed_documents(request: DocumentsEmbedRequest): 
-    try:
-        if request.documents:
-            all_chunks = []
-            text_splitter = CharacterTextSplitter(separator="\n", chunk_size=1000, chunk_overlap=200)
-            word_count = 0
-            
-            for doc in request.documents:
-                print(f"📄 Processing: {doc.filename}")
-                
-                response = requests.get(doc.source)
-                print(f"✅ Downloaded {doc.filename}")
-                
-                suffix = os.path.splitext(doc.filename)[-1].lower()
-                
-                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as f:
-                    f.write(response.content)
-                    temp_path = f.name
-                
-                try:
-                    loader = get_loader_for_file(temp_path)  
-                    print(f"✅ Loader created for {doc.filename}")
-                    
-                    pages = loader.load()                   
-                    print(f"✅ Loaded {len(pages)} pages from {doc.filename}")
-                    
-                    text = "\n\n".join([p.page_content for p in pages])
-                    print(f"✅ Extracted {len(text)} characters from {doc.filename}")
-                    
-                    word_count += len(text.split())
-                    chunks = text_splitter.split_text(text)
-                    
-                    file_chunks = []
-                    
-                    for chunk in chunks:
-                        # ✅ FIXED: Use proper Document class
-                        chunk_doc = Document(
-                            page_content=chunk,
-                            metadata={"source": doc.filename}
-                        )
-                        
-                        file_chunks.append(chunk_doc)
-                        all_chunks.append(chunk_doc)
-                    
-                    print(f"✅ Created {len(file_chunks)} chunks for {doc.filename}")
-                    
-                    # Upload file-specific vectorstore
-                    with tempfile.TemporaryDirectory(dir=get_temp_dir()) as tempdir:
-                        print(f"📤 Creating file-specific vectorstore for {doc.filename}")
-                        
-                        file_vectorstore = FAISS.from_documents(
-                            file_chunks,
-                            embedding=OpenAIEmbeddings()
-                        )
-                        file_vectorstore.save_local(tempdir)
-                        
-                        bucket = storage.bucket()
-                        
-                        blob_faiss_file = bucket.blob(
-                            f"FileVectorStore/{request.chatId}/{doc.filename}/index.faiss"
-                        )
-                        blob_faiss_file.upload_from_filename(
-                            os.path.join(tempdir, "index.faiss")
-                        )
-                        
-                        blob_pkl_file = bucket.blob(
-                            f"FileVectorStore/{request.chatId}/{doc.filename}/index.pkl"
-                        )
-                        blob_pkl_file.upload_from_filename(
-                            os.path.join(tempdir, "index.pkl")
-                        )
-                        
-                        print(f"✅ Uploaded file-specific vectorstore for {doc.filename}")
-                    
-                except Exception as e:
-                    print(f"❌ Failed to process {doc.filename}: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    continue
-                    
-                finally:
-                    try:
-                        os.unlink(temp_path)
-                        print(f"🗑️ Cleaned up temp file for {doc.filename}")
-                    except Exception as cleanup_error:
-                        print(f"⚠️ Cleanup failed: {cleanup_error}")
-            
-            # Chat-level vectorstore
-            print(f"📤 Creating chat-level vectorstore with {len(all_chunks)} total chunks")
-            
-            with tempfile.TemporaryDirectory(dir=get_temp_dir()) as tempdir:
-                chat_vectorstore = FAISS.from_documents(
-                    all_chunks,
-                    embedding=OpenAIEmbeddings()
-                )
-                chat_vectorstore.save_local(tempdir)
-
-                bucket = storage.bucket()
-                
-                blob_faiss_chat = bucket.blob(f"vectorstores/{request.chatId}/index.faiss")
-                blob_faiss_chat.upload_from_filename(os.path.join(tempdir, "index.faiss"))
-
-                blob_pkl_chat = bucket.blob(f"vectorstores/{request.chatId}/index.pkl")
-                blob_pkl_chat.upload_from_filename(os.path.join(tempdir, "index.pkl"))
-                
-                print(f"✅ Uploaded chat-level vectorstore")
-            
-            print(f"✅✅✅ EMBED COMPLETE - Total words: {word_count}")
-            
-            return {
-                "status": "success",
-                "word-count": word_count,
-                "firebase_path": f"vectorstores/{request.chatId}/"
-            }
-            
-        return {"status": "no_documents"}
-        
-    except Exception as e:
-        print(f"🔥🔥🔥 ERROR: {e}")
-        import traceback
-        traceback.print_exc()
-        return {"status": "error", "message": str(e)}
-
-
 @app.post("/chat/upload-files")
 async def upload_multiple_files(
     files: List[UploadFile] = File(...),
     chat_id: str = Form(...),
-    user_id: str = Form(...)
+    user_id: str = Form(...),
+    language: str = Form(...),
 ):
     """Upload multiple files and process in parallel."""
     
@@ -484,7 +425,7 @@ async def upload_multiple_files(
             # ========================================
             # PROCESS FILES (EMBEDDING ONLY)
             # ========================================
-            semaphore = asyncio.Semaphore(3)
+            semaphore = asyncio.Semaphore(15)
             
             async def process_single_file_data(file_data):
                 async with semaphore:
@@ -508,20 +449,38 @@ async def upload_multiple_files(
                 try:
                     result = await coro
                     
-                    # Extract updates, documents, and file bytes
+                    # Extract updates, documents, insights, and file bytes
                     updates = result.get("updates", [])
                     documents = result.get("documents", [])
+                    insights = result.get("insights")  # ← NEW
                     filename = result.get("filename", "unknown")
                     file_bytes = result.get("file_bytes")
+                    
+                    print(f"🔍 DEBUG: insights type = {type(insights)}")  # ← ADD THIS
+                    print(f"🔍 DEBUG: insights value = {insights}") 
                     
                     print(f"🔍 Processing result for: {filename}")
                     print(f"   Documents count: {len(documents)}")
                     
-                    # Store for background upload
+                    if insights:
+                        print(f"   Insights extracted from upload: {len(insights.get('topics', []))} topics")
+                    
+                    # Store documents for background upload
                     if documents:
                         file_documents[filename] = documents
                     if file_bytes:
                         file_bytes_map[filename] = file_bytes
+                    
+                    # ========================================
+                    # 🆕 STORE INSIGHTS IN SESSION
+                    # ========================================
+                    if insights and chat_id in ACTIVE_SESSIONS:
+                        session = ACTIVE_SESSIONS[chat_id]
+                        #update the session language using the front-end browser language when uploading
+                        session.session.user_language = language 
+                        if not hasattr(session.session, "file_insights"):
+                            session.session.file_insights = {}
+                        session.session.file_insights[filename] = insights
                     
                     # Stream JSON updates to frontend
                     for update in updates:
@@ -542,7 +501,58 @@ async def upload_multiple_files(
                         "type": "file_error",
                         "message": str(e)
                     }) + "\n"
+                
             
+            # ========================================
+            # Build Suggestions after user uploads
+            # ========================================
+
+            if chat_id in ACTIVE_SESSIONS:
+                session = ACTIVE_SESSIONS[chat_id]
+                file_insights = getattr(session.session, "file_insights", {})
+                
+                print(f"🔍 DEBUG: file_insights keys = {list(file_insights.keys())}")
+                print(f"🔍 DEBUG: file_insights content = {file_insights}")
+                
+                if file_insights:
+                    print(f"📝 Generating post-upload suggestions for {len(file_insights)} files...")
+                    try:
+                        from services.orchestrator import generate_post_upload_suggestions
+                        suggestions = await generate_post_upload_suggestions(
+                            session=session,
+                            file_insights=file_insights
+                        )
+                        
+                        if suggestions:
+                            # 🆕 SAVE DIRECTLY TO FIREBASE (instead of just yielding)
+                            try:
+                                from firebase_admin import firestore
+                                db = firestore.client()
+                                
+                                suggestion_message = {
+                                    "role": "assistant",
+                                    "type": "suggested_prompts",
+                                    "suggestions": suggestions,
+                                    "timestamp": firestore.SERVER_TIMESTAMP,
+                                    "isStreaming": False
+                                }
+                                
+                                # Save to Firestore
+                                db.collection('chats').document(chat_id).collection('messages').add(suggestion_message)
+                                print(f"✅ Saved {len(suggestions)} suggestions to Firebase")
+                                
+                            except Exception as firebase_error:
+                                print(f"⚠️ Firebase save failed: {firebase_error}")
+                                # Still yield for fallback
+                                yield json.dumps({
+                                    "type": "suggested_prompts",
+                                    "suggestions": suggestions
+                                }) + "\n"
+                            
+                        else:
+                            print(f"chatID :{chat_id} FOUND, insights:{file_insights}, but no suggestions")
+                    except Exception as e:
+                        print(f"⚠️ Suggestion generation failed: {e}")
             # ========================================
             # READY TO CHAT - USER CAN START IMMEDIATELY
             # ========================================
@@ -595,7 +605,6 @@ async def upload_multiple_files(
         media_type="application/x-ndjson"
     )
 
-
 async def upload_everything_background(
     chat_id: str,
     vectorstore: FAISS,
@@ -617,6 +626,7 @@ async def upload_everything_background(
             # UPLOAD FILES TO FIREBASE STORAGE
             # ========================================
             file_upload_tasks = []
+            
             for filename, file_bytes in file_bytes_map.items():
                 file_upload_tasks.append(
                     firebase_upload_task_simple(file_bytes, filename, chat_id)
@@ -671,6 +681,102 @@ async def upload_everything_background(
     print(f"❌ Background upload failed for chat {chat_id} after {max_retries} attempts")
     print(f"   User can still chat - vectorstore is in memory")
 
+async def extract_file_insights_from_text(
+    text: str, 
+    filename: str, 
+    chat_id: str, 
+    file_id: str, 
+    updates: list
+) -> dict:
+    """
+    Extract key topics and concepts from document text using random sampling.
+    Runs in parallel with embedding for speed.
+    
+    Args:
+        text: Full document text
+        filename: Name of the file
+        chat_id: Chat ID
+        file_id: File ID for progress updates
+        updates: List to append progress updates to
+    
+    Returns:
+        Dict with topics, concepts, and document_type
+    """
+    try:
+        updates.append({
+            "type": "insight_extraction_start",
+            "file_id": file_id
+        })
+        
+        # Sample random sections for fast analysis
+        text_length = len(text)
+        
+        if text_length < 5000:
+            # Small file - use all text
+            sample_text = text
+        else:
+            # Large file - sample 3 random sections (1000 chars each)
+            import random
+            samples = []
+            for _ in range(3):
+                start_pos = random.randint(0, max(0, text_length - 1000))
+                samples.append(text[start_pos:start_pos + 1000])
+            sample_text = "\n\n---\n\n".join(samples)
+        
+        # Use GPT-4o-mini for fast, cheap analysis                
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
+        
+        prompt = f"""Analyze this nursing/medical document excerpt and extract key information.
+
+        Document: {filename}
+        Content sample:
+        {sample_text[:2000]}
+
+        Identify:
+        1. Main topics (3-5 broad themes)
+        2. Specific concepts (5-10 specific medical/nursing terms or procedures)
+        3. Document type (textbook, lecture notes, clinical guide, reference, etc.)
+
+        Return ONLY valid JSON:
+        {{
+        "topics": ["topic1", "topic2", "topic3"],
+        "concepts": ["concept1", "concept2", ...],
+        "document_type": "type"
+        }}
+        """
+        
+        response = await llm.ainvoke([
+            {"role": "system", "content": "You extract key information from medical documents. Return only valid JSON."},
+            {"role": "user", "content": prompt}
+        ])
+        
+        # Parse response
+        try:
+            insights = json.loads(response.content.strip().strip("```json").strip("```"))
+        except json.JSONDecodeError:
+            print(f"⚠️ Failed to parse insights JSON for {filename}")
+            insights = {
+                "topics": ["medical content"],
+                "concepts": [],
+                "document_type": "document"
+            }
+        
+        print(f"✅ Extracted insights from {filename}:")
+        print(f"   Topics: {insights.get('topics', [])}")
+        print(f"   Concepts: {insights.get('concepts', [])[:3]}...")
+        
+        updates.append({
+            "type": "insight_extraction_complete",
+            "file_id": file_id,
+            "topics": insights.get("topics", []),
+            "concepts": insights.get("concepts", [])
+        })
+        
+        return insights
+        
+    except Exception as e:
+        print(f"⚠️ Insight extraction failed for {filename}: {e}")
+        return None
 
 async def firebase_upload_task_simple(file_bytes: bytes, filename: str, chat_id: str):
     """Simple file upload to Firebase Storage (for background task)."""
@@ -739,6 +845,9 @@ async def process_file_from_bytes(file_bytes: bytes, filename: str, chat_id: str
         # Extract documents for vectorstore
         documents_for_vectorstore = embedding_result.get("documents", [])
         
+        # 3. Extract insights
+        insights = embedding_result.get("insights")
+        
         # Final update - embedding complete
         updates.append({
             "type": "file_complete",
@@ -754,7 +863,8 @@ async def process_file_from_bytes(file_bytes: bytes, filename: str, chat_id: str
             "updates": updates,
             "documents": documents_for_vectorstore,
             "filename": filename,
-            "file_bytes": file_bytes  # ← Include for background upload
+            "file_bytes": file_bytes,  # ← Include for background upload
+            "insights": insights 
         }
         
     except Exception as e:
@@ -786,7 +896,7 @@ async def process_file_from_bytes(file_bytes: bytes, filename: str, chat_id: str
                 print(f"⚠️ Failed to cleanup {temp_path}: {cleanup_error}")
 
 async def embed_document_task(temp_path: str, filename: str, chat_id: str, file_id: str, updates: list):
-    """Embed document and track progress."""
+    """Embed document and extract insights in parallel."""
     try:
         updates.append({
             "type": "embedding_start",
@@ -812,12 +922,22 @@ async def embed_document_task(temp_path: str, filename: str, chat_id: str, file_
             "page_count": len(pages)
         })
         
-        # Extract and chunk text
+        # Extract text
         text = "\n\n".join([p.page_content for p in pages])
         word_count = len(text.split())
         
         print(f"📝 Extracted {word_count} words from {filename}")
         
+        # ========================================
+        # 🆕 START INSIGHT EXTRACTION IN PARALLEL
+        # ========================================
+        insight_task = asyncio.create_task(
+            extract_file_insights_from_text(text, filename, chat_id, file_id, updates)
+        )
+        
+        # ========================================
+        # CONTINUE WITH EMBEDDING (PARALLEL)
+        # ========================================
         text_splitter = CharacterTextSplitter(
             separator="\n",
             chunk_size=1000,
@@ -845,7 +965,7 @@ async def embed_document_task(temp_path: str, filename: str, chat_id: str, file_
         # Get embeddings
         embeddings = OpenAIEmbeddings()
         
-        # Get session (should already exist)
+        # Get session
         if chat_id not in ACTIVE_SESSIONS:
             print(f"⚠️ No session found for {chat_id}, creating...")
             ACTIVE_SESSIONS[chat_id] = NursingTutor(chat_id)
@@ -869,11 +989,21 @@ async def embed_document_task(temp_path: str, filename: str, chat_id: str, file_
             "chunks": len(documents)
         })
         
-        # Return documents for per-file vectorstore upload
+        # ========================================
+        # 🆕 WAIT FOR INSIGHTS (SHOULD BE READY)
+        # ========================================
+        try:
+            insights = await asyncio.wait_for(insight_task, timeout=5.0)
+        except asyncio.TimeoutError:
+            print(f"⚠️ Insight extraction timed out for {filename}")
+            insights = None
+        
+        # Return documents + insights
         return {
             "word_count": word_count,
             "chunks": len(documents),
-            "documents": documents  # ← Return documents for per-file upload
+            "documents": documents,
+            "insights": insights  # ← Include insights
         }
         
     except Exception as e:
@@ -881,6 +1011,7 @@ async def embed_document_task(temp_path: str, filename: str, chat_id: str, file_
         import traceback
         traceback.print_exc()
         raise
+
 
 async def firebase_upload_task(file_bytes, filename, chat_id, file_id, updates):
     """Upload to Firebase - appends progress to updates list"""
