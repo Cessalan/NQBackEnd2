@@ -294,6 +294,8 @@ async def process_chat_message(chat_id: str, message: dict, websocket: WebSocket
         # Get or create session (same as existing logic)
         if chat_id not in ACTIVE_SESSIONS:
             ACTIVE_SESSIONS[chat_id] = NursingTutor(chat_id)
+            # Still reload insights in case new files were uploaded
+            await ACTIVE_SESSIONS[chat_id].load_file_insights_from_firebase() 
     
         nursing_tutor = ACTIVE_SESSIONS[chat_id]
         
@@ -433,7 +435,8 @@ async def upload_multiple_files(
                         file_data["bytes"],
                         file_data["filename"],
                         chat_id,
-                        user_id
+                        user_id,
+                        language  # Pass browser language
                     )
             
             # Start all file processing tasks
@@ -502,6 +505,101 @@ async def upload_multiple_files(
                         "message": str(e)
                     }) + "\n"
                 
+            
+            # ========================================
+            # Generate Upload Summary (1-2 sentences)
+            # ========================================
+            if chat_id in ACTIVE_SESSIONS:
+                session = ACTIVE_SESSIONS[chat_id]
+                file_insights = getattr(session.session, "file_insights", {})
+                
+                if file_insights:
+                    try:
+                        # Aggregate all insights
+                        all_topics = []
+                        all_doc_types = []
+                        
+                        for filename, insights in file_insights.items():
+                            if insights:
+                                all_topics.extend(insights.get("topics", []))
+                                doc_type = insights.get("document_type", "")
+                                if doc_type:
+                                    all_doc_types.append(doc_type)
+                        
+                        # Deduplicate
+                        unique_topics = list(set(all_topics))
+                        unique_doc_types = list(set(all_doc_types))
+                        
+                        # Generate summary with LLM
+                        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.5)
+                        
+                        
+                        summary_prompt = f"""Generate a brief 1-2 sentence summary about what these uploaded documents contain.
+
+                        Files: {len(file_insights)} document(s)
+                        Topics found: {', '.join(unique_topics)}
+                        Document types: {', '.join(unique_doc_types) if unique_doc_types else 'various'}
+
+                        Write a natural, conversational summary that tells the student what content was found.
+                        Examples:
+                        - "I found materials about cardiac pharmacology and arrhythmia management."
+                        - "Les documents sur la pharmacologie cardiaque et la gestion des arythmies."
+                        
+                        REQUIREMEMT: The content must be in the language{language}
+
+                        Return ONLY the summary text, nothing else."""
+                        
+                        summary_response = await llm.ainvoke([
+                            {"role": "user", "content": summary_prompt}
+                        ])
+                        
+                        upload_summary = summary_response.content.strip()
+                        
+                        # Yield summary to frontend
+                        yield json.dumps({
+                            "type": "upload_summary",
+                            "summary": upload_summary,
+                            "file_count": len(valid_files),
+                            "filenames": [f["filename"] for f in valid_files]
+                        }) + "\n"
+                        
+                        print(f"📝 Generated upload summary: {upload_summary}")
+                        
+                        
+                        title_prompt = f"""Generate a short, descriptive chat title in 3 to 6 words based on these uploaded study materials.
+
+                       
+                        Topics Found: {', '.join(unique_topics) if unique_topics else 'medical content'}
+                        Document Types: {', '.join(unique_doc_types) if unique_doc_types else 'study materials'}
+
+                        Requirements:
+                        - Be concise and clear
+                        - Focus on the main topic/subject area
+                        - Max 6 words
+                        - Make it specific to the content (e.g., "Cardiac Pharmacology Notes", "NCLEX Respiratory Review")
+                        - Write in {language}
+
+                        Return ONLY the title, no quotes or extra text."""
+                        
+                        title_response = await llm.ainvoke([
+                            {"role": "user", "content": title_prompt}
+                        ])
+                        
+                        chat_title = title_response.content.strip().replace('"', '').replace("'", "")
+                        
+                        # Update Firebase chat document with new title
+                        from firebase_admin import firestore
+                        db = firestore.client()
+                        
+                        db.collection('chats').document(chat_id).update({
+                            'title': chat_title,
+                            'updatedAt': firestore.SERVER_TIMESTAMP
+                        })
+                        
+                        print(f"✅ Auto-generated and saved chat title: '{chat_title}'")
+                        
+                    except Exception as summary_error:
+                        print(f"⚠️ Summary generation failed: {summary_error}")
             
             # ========================================
             # Build Suggestions after user uploads
@@ -605,6 +703,9 @@ async def upload_multiple_files(
         media_type="application/x-ndjson"
     )
 
+# ============================================================================
+# HELPERS FOR FILE UPLOAD START
+# ============================================================================
 async def upload_everything_background(
     chat_id: str,
     vectorstore: FAISS,
@@ -686,7 +787,8 @@ async def extract_file_insights_from_text(
     filename: str, 
     chat_id: str, 
     file_id: str, 
-    updates: list
+    updates: list,
+    language: str = "english"
 ) -> dict:
     """
     Extract key topics and concepts from document text using random sampling.
@@ -698,6 +800,7 @@ async def extract_file_insights_from_text(
         chat_id: Chat ID
         file_id: File ID for progress updates
         updates: List to append progress updates to
+        language: Browser language for localized insights
     
     Returns:
         Dict with topics, concepts, and document_type
@@ -705,7 +808,8 @@ async def extract_file_insights_from_text(
     try:
         updates.append({
             "type": "insight_extraction_start",
-            "file_id": file_id
+            "file_id": file_id,
+            "filename": filename
         })
         
         # Sample random sections for fast analysis
@@ -726,7 +830,8 @@ async def extract_file_insights_from_text(
         # Use GPT-4o-mini for fast, cheap analysis                
         llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
         
-        prompt = f"""Analyze this nursing/medical document excerpt and extract key information.
+        # Determine response language        
+        prompt = f"""Analyze this nursing/medical document excerpt and extract key information in {language}.
 
         Document: {filename}
         Content sample:
@@ -737,7 +842,7 @@ async def extract_file_insights_from_text(
         2. Specific concepts (5-10 specific medical/nursing terms or procedures)
         3. Document type (textbook, lecture notes, clinical guide, reference, etc.)
 
-        Return ONLY valid JSON:
+        Return ONLY valid JSON with content in this language {language}:
         {{
         "topics": ["topic1", "topic2", "topic3"],
         "concepts": ["concept1", "concept2", ...],
@@ -746,7 +851,7 @@ async def extract_file_insights_from_text(
         """
         
         response = await llm.ainvoke([
-            {"role": "system", "content": "You extract key information from medical documents. Return only valid JSON."},
+            {"role": "system", "content": f"You extract key information from medical documents. Return only valid JSON with all content {language}."},
             {"role": "user", "content": prompt}
         ])
         
@@ -755,21 +860,26 @@ async def extract_file_insights_from_text(
             insights = json.loads(response.content.strip().strip("```json").strip("```"))
         except json.JSONDecodeError:
             print(f"⚠️ Failed to parse insights JSON for {filename}")
+            default_topic = "contenu médical" if language.lower() in ["fr", "french", "français"] else "medical content"
+            default_type = "document"
             insights = {
-                "topics": ["medical content"],
+                "topics": [default_topic],
                 "concepts": [],
-                "document_type": "document"
+                "document_type": default_type
             }
         
         print(f"✅ Extracted insights from {filename}:")
         print(f"   Topics: {insights.get('topics', [])}")
         print(f"   Concepts: {insights.get('concepts', [])[:3]}...")
         
+        # Stream insight batch to frontend
         updates.append({
-            "type": "insight_extraction_complete",
+            "type": "insight_batch",
             "file_id": file_id,
+            "filename": filename,
             "topics": insights.get("topics", []),
-            "concepts": insights.get("concepts", [])
+            "concepts": insights.get("concepts", [])[:5],  # Limit to 5 for UX
+            "document_type": insights.get("document_type", "")
         })
         
         return insights
@@ -799,7 +909,7 @@ async def firebase_upload_task_simple(file_bytes: bytes, filename: str, chat_id:
         print(f"❌ Background: Failed to upload {filename}: {e}")
         raise
 
-async def process_file_from_bytes(file_bytes: bytes, filename: str, chat_id: str, user_id: str):
+async def process_file_from_bytes(file_bytes: bytes, filename: str, chat_id: str, user_id: str, language: str = "english"):
     """Process a file from bytes and return list of progress updates."""
     updates = []
     file_id = str(uuid4())
@@ -829,7 +939,7 @@ async def process_file_from_bytes(file_bytes: bytes, filename: str, chat_id: str
         # ONLY EMBEDDING NOW - NO FIREBASE UPLOAD
         # ========================================
         embedding_result = await embed_document_task(
-            temp_path, filename, chat_id, file_id, updates
+            temp_path, filename, chat_id, file_id, updates, language
         )
         
         # Handle errors
@@ -895,7 +1005,7 @@ async def process_file_from_bytes(file_bytes: bytes, filename: str, chat_id: str
             except Exception as cleanup_error:
                 print(f"⚠️ Failed to cleanup {temp_path}: {cleanup_error}")
 
-async def embed_document_task(temp_path: str, filename: str, chat_id: str, file_id: str, updates: list):
+async def embed_document_task(temp_path: str, filename: str, chat_id: str, file_id: str, updates: list, language: str = "english"):
     """Embed document and extract insights in parallel."""
     try:
         updates.append({
@@ -932,7 +1042,7 @@ async def embed_document_task(temp_path: str, filename: str, chat_id: str, file_
         # 🆕 START INSIGHT EXTRACTION IN PARALLEL
         # ========================================
         insight_task = asyncio.create_task(
-            extract_file_insights_from_text(text, filename, chat_id, file_id, updates)
+            extract_file_insights_from_text(text, filename, chat_id, file_id, updates, language)
         )
         
         # ========================================
@@ -993,7 +1103,7 @@ async def embed_document_task(temp_path: str, filename: str, chat_id: str, file_
         # 🆕 WAIT FOR INSIGHTS (SHOULD BE READY)
         # ========================================
         try:
-            insights = await asyncio.wait_for(insight_task, timeout=5.0)
+            insights = await asyncio.wait_for(insight_task, timeout=20.0)
         except asyncio.TimeoutError:
             print(f"⚠️ Insight extraction timed out for {filename}")
             insights = None
@@ -1011,7 +1121,6 @@ async def embed_document_task(temp_path: str, filename: str, chat_id: str, file_
         import traceback
         traceback.print_exc()
         raise
-
 
 async def firebase_upload_task(file_bytes, filename, chat_id, file_id, updates):
     """Upload to Firebase - appends progress to updates list"""
@@ -1110,6 +1219,10 @@ async def ensure_session_with_vectorstore(chat_id: str):
         print(f"📝 No existing vectorstore, will create new one")
     
     return ACTIVE_SESSIONS[chat_id]
+
+# ============================================================================
+# HELPERS FOR FILE UPLOAD END
+# ============================================================================
 
 @app.post("/chat/generate-summary")
 async def generate_summary(request:SummaryRequest):

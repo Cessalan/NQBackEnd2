@@ -529,6 +529,7 @@ class NursingTutor:
         4. **Ambiguity Handling:**
         - If uncertain, ask: "Would you like me to (a) search your materials, 
             (b) create a study sheet, or (c) quiz you on this topic?"
+       - For quiz creation using the generate_quiz_stream tool, prioritize using the student's uploaded documents and the UPLOADED FILE INSIGHTS below
 
         Current session:
         - Conversation so far {self.session.message_history if self.session.message_history else "no conversation yet"}
@@ -536,9 +537,92 @@ class NursingTutor:
         - Quizzes previously done {self.session.quizzes if self.session.quizzes else "no quiz done yet"}
         - file name of the last file uploaded {self.session.documents[-1]["filename"]if self.session.documents else "no documents uploaded yet"}, if you are unsure about which file the user is talking about always use this one
         - file name of the last file you had an interaction with {self.session.name_last_document_used if self.session.name_last_document_used else " no file yet"}
-        - Language preference: {self.session.user_language}"""
+        - Language preference: {self.session.user_language}
+         UPLOADED FILE INSIGHTS:
+        {self._format_file_insights()}
+        """
 
-                  
+    async def load_file_insights_from_firebase(self):
+        """
+        Load file insights from upload_loading messages stored in Firebase.
+        These insights were saved when files were uploaded.
+        """
+        try:
+            from firebase_admin import firestore
+            db = firestore.client()
+            
+            chat_id = self.session.chat_id
+            
+            # Get all messages for this chat
+            messages_ref = db.collection("chats").document(chat_id).collection("messages")
+            
+            # Query for upload_loading messages that have insights
+            query = messages_ref.where("type", "==", "upload_loading")
+            docs = query.stream()
+            
+            # Initialize file_insights dict
+            if not hasattr(self.session, 'file_insights'):
+                self.session.file_insights = {}
+            
+            insights_loaded = 0
+            
+            for doc in docs:
+                data = doc.to_dict()
+                insights_list = data.get('insights', [])
+                
+                if insights_list:
+                    for insight in insights_list:
+                        filename = insight.get('filename')
+                        if filename:
+                            self.session.file_insights[filename] = {
+                                'topics': insight.get('topics', []),
+                                'concepts': insight.get('concepts', []),
+                                'document_type': insight.get('documentType', 'unknown')
+                            }
+                            insights_loaded += 1
+            
+            if insights_loaded > 0:
+                print(f"✅ Loaded {insights_loaded} file insights from Firebase")
+                print(f"   Files: {list(self.session.file_insights.keys())}")
+            else:
+                print(f"📝 No file insights found in Firebase for {chat_id}")
+                
+        except Exception as e:
+            print(f"⚠️ Failed to load file insights from Firebase: {e}")
+            import traceback
+            traceback.print_exc()
+       
+    def _format_file_insights(self) -> str:
+        """Format file insights for inclusion in system prompt"""
+        file_insights = getattr(self.session, 'file_insights', {})
+        
+        if not file_insights:
+            return "No file insights available yet."
+        
+        formatted = []
+        for filename, insights in file_insights.items():
+            if not insights:
+                continue
+                
+            # Get short filename (remove chat ID prefix)
+            short_name = filename.split('_uploads_')[-1] if '_uploads_' in filename else filename
+            
+            topics = insights.get('topics', [])
+            concepts = insights.get('concepts', [])
+            doc_type = insights.get('document_type', 'unknown')
+            
+            insight_str = f"• {short_name} ({doc_type})"
+            if topics:
+                insight_str += f"\n  Topics: {', '.join(topics[:3])}"
+            if concepts:
+                insight_str += f"\n  Key concepts: {', '.join(concepts[:5])}"
+            
+            formatted.append(insight_str)
+        
+        if not formatted:
+            return "No file insights available yet."
+        
+        return "\n".join(formatted)      
     # Streaming function that works with chunks
     @staticmethod
     async def stream_document_summary(
