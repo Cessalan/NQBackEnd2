@@ -1447,14 +1447,259 @@ async def load_vectorstore_from_firebase(session: PersistentSessionContext) -> O
 # TOOL COLLECTION CLASS (Updated)
 # ============================================================================
 
+@tool
+async def analyze_last_quiz_and_generate_practice(
+    last_quiz_data: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Analyze the student's last quiz performance and generate a targeted practice quiz.
+
+    This tool should be used when a student expresses intent to practice their weak areas,
+    improve on topics they struggled with, or wants more practice based on previous quiz results.
+
+    The tool will:
+    1. Analyze quiz performance (score, weak topics, patterns)
+    2. Generate an empathetic, performance-appropriate message
+    3. Create a targeted quiz focusing on weak areas
+
+    Args:
+        last_quiz_data: Complete quiz data including questions, answers, topics, and user selections
+
+    Returns:
+        Streaming generator that yields empathetic message chunks and quiz questions
+
+    Example user intents that should trigger this tool:
+    - "I want to practice my weak areas"
+    - "Help me improve on topics I struggled with"
+    - "I need more practice on what I got wrong"
+    - "Practice weak topics"
+    """
+    session = get_session()
+
+    try:
+        # Extract quiz data
+        questions = last_quiz_data.get('questions', [])
+
+        if not questions:
+            yield {
+                "status": "error",
+                "message": "No quiz data available to analyze. Please complete a quiz first."
+            }
+            return
+
+        # Analyze performance
+        total_questions = len(questions)
+        correct_count = sum(1 for q in questions if q.get('userSelection', {}).get('isCorrect', False))
+        percentage = round((correct_count / total_questions) * 100) if total_questions > 0 else 0
+
+        # Analyze topic performance
+        topic_performance = {}
+        for q in questions:
+            topic = q.get('topic', 'General')
+            if topic not in topic_performance:
+                topic_performance[topic] = {'total': 0, 'correct': 0, 'questions': []}
+
+            topic_performance[topic]['total'] += 1
+            topic_performance[topic]['questions'].append(q)
+
+            if q.get('userSelection', {}).get('isCorrect', False):
+                topic_performance[topic]['correct'] += 1
+
+        # Calculate topic percentages and identify weak topics
+        weak_topics = []
+        topic_details = []
+
+        for topic, perf in topic_performance.items():
+            topic_pct = round((perf['correct'] / perf['total']) * 100) if perf['total'] > 0 else 0
+            topic_details.append(f"{topic}: {perf['correct']}/{perf['total']} ({topic_pct}%)")
+
+            if topic_pct < 60:  # Weak topic threshold
+                weak_topics.append({
+                    'name': topic,
+                    'percentage': topic_pct,
+                    'correct': perf['correct'],
+                    'total': perf['total']
+                })
+
+        # Generate empathetic message based on performance
+        empathetic_message = _generate_performance_message(
+            percentage=percentage,
+            correct=correct_count,
+            total=total_questions,
+            weak_topics=weak_topics,
+            language=session.user_language
+        )
+
+        print(f"📊 Quiz Analysis: {percentage}% ({correct_count}/{total_questions})")
+        print(f"📌 Weak Topics: {', '.join([t['name'] for t in weak_topics]) if weak_topics else 'None'}")
+        print(f"💬 Empathetic Message: {empathetic_message[:100]}...")
+
+        # PHASE 1: Stream empathetic message
+        yield {
+            "status": "empathetic_message_start",
+            "message": "Understanding your learning needs..."
+        }
+
+        words = empathetic_message.split()
+        current_text = ""
+
+        for i, word in enumerate(words):
+            current_text += word + " "
+
+            # Stream in chunks of 4 words for smooth UX
+            if (i + 1) % 4 == 0 or i == len(words) - 1:
+                yield {
+                    "status": "empathetic_message_chunk",
+                    "chunk": current_text.strip(),
+                    "progress": int((i + 1) / len(words) * 100)
+                }
+
+        yield {
+            "status": "empathetic_message_complete",
+            "full_message": empathetic_message
+        }
+
+        # PHASE 2: Determine quiz parameters based on weak topics
+        if weak_topics:
+            # Focus on weakest topics
+            target_topics = ', '.join([t['name'] for t in weak_topics[:3]])  # Max 3 topics
+            difficulty = "easy" if percentage < 50 else "medium"
+            num_questions = 5
+        else:
+            # No weak topics - challenge with harder questions on all topics
+            target_topics = ', '.join(topic_performance.keys())
+            difficulty = "hard"
+            num_questions = 5
+
+        print(f"🎯 Generating practice quiz: {num_questions} {difficulty} questions on {target_topics}")
+
+        # PHASE 3: Call generate_quiz_stream to signal quiz generation with empathetic message
+        # This will be picked up by the orchestrator which will handle streaming via stream_quiz_questions
+        source_preference = "documents" if session.documents else "scratch"
+
+        # Call the generate_quiz_stream tool to get the signal
+        quiz_signal = await generate_quiz_stream(
+            topic=target_topics,
+            difficulty=difficulty,
+            num_questions=num_questions,
+            source_preference=source_preference,
+            empathetic_message=empathetic_message  # Pass the empathetic message we generated
+        )
+
+        # Return the signal for orchestrator to handle
+        yield quiz_signal
+
+    except Exception as e:
+        print(f"❌ Error in analyze_last_quiz_and_generate_practice: {str(e)}")
+        yield {
+            "status": "error",
+            "message": f"Failed to analyze quiz and generate practice: {str(e)}"
+        }
+
+
+def _generate_performance_message(
+    percentage: int,
+    correct: int,
+    total: int,
+    weak_topics: List[Dict[str, Any]],
+    language: str = "en-US"
+) -> str:
+    """
+    Generate performance-appropriate empathetic message.
+
+    Args:
+        percentage: Overall score percentage
+        correct: Number of correct answers
+        total: Total questions
+        weak_topics: List of weak topic dictionaries
+        language: User's language preference
+
+    Returns:
+        Empathetic message string
+    """
+    is_french = language == "fr"
+
+    # Build topic mention
+    if weak_topics:
+        if is_french:
+            topic_names = ', '.join([t['name'] for t in weak_topics[:2]])
+            topic_mention = f"particulièrement sur {topic_names}"
+        else:
+            topic_names = ', '.join([t['name'] for t in weak_topics[:2]])
+            topic_mention = f"particularly with {topic_names}"
+    else:
+        topic_mention = ""
+
+    # Performance-based empathetic messages
+    if percentage < 50:
+        # Struggling - Maximum empathy and encouragement
+        if is_french:
+            return f"""Je comprends que cela peut être difficile d'obtenir {correct} sur {total} ({percentage}%), {topic_mention}. C'est tout à fait normal de rencontrer des défis lors de l'apprentissage de nouveaux concepts médicaux - beaucoup d'étudiants passent par là.
+
+Ce qui est important, c'est que vous prenez l'initiative de pratiquer davantage. Cela montre une vraie détermination. Nous allons travailler ensemble sur ces concepts, étape par étape. Je vais commencer avec des questions plus accessibles pour renforcer votre confiance, puis progressivement augmenter la difficulté.
+
+Vous êtes capable de maîtriser cela. Allons-y ensemble!"""
+        else:
+            return f"""I understand it can be challenging to score {correct} out of {total} ({percentage}%), {topic_mention}. It's completely normal to struggle with new medical concepts - many nursing students experience this.
+
+What matters is that you're taking the initiative to practice more. That shows real dedication to your learning. We'll work through these concepts together, step by step. I'll start with more approachable questions to build your confidence, then gradually increase the difficulty.
+
+You've got this. Let's do it together!"""
+
+    elif percentage < 70:
+        # Making progress - Encouragement with gentle push
+        if is_french:
+            return f"""Bon travail! Vous avez obtenu {correct} sur {total} ({percentage}%). Vous avez déjà saisi les bases, ce qui est excellent. Maintenant, concentrons-nous sur l'amélioration {topic_mention}.
+
+Avec un peu plus de pratique ciblée, vous allez rapidement progresser. Je vais vous donner des questions qui vous aideront à combler ces lacunes spécifiques.
+
+Vous êtes sur la bonne voie - continuons à construire sur ce que vous savez déjà!"""
+        else:
+            return f"""Good work! You scored {correct} out of {total} ({percentage}%). You've already grasped the fundamentals, which is excellent. Now let's focus on improving {topic_mention}.
+
+With some targeted practice, you'll see rapid progress. I'll give you questions that will help fill in these specific gaps.
+
+You're on the right track - let's build on what you already know!"""
+
+    elif percentage < 85:
+        # Doing well - Positive reinforcement with challenge
+        if is_french:
+            return f"""Excellent progrès! {correct} sur {total} ({percentage}%) montre une solide compréhension. Vous maîtrisez bien la plupart des concepts. Maintenant, perfectionnons ensemble {topic_mention} pour atteindre l'excellence.
+
+Je vais vous proposer des questions un peu plus avancées pour affiner votre compréhension et vous préparer à tout ce que l'NCLEX pourrait vous lancer.
+
+Vous êtes prêt pour le challenge - montrons ce que vous savez faire!"""
+        else:
+            return f"""Excellent progress! {correct} out of {total} ({percentage}%) shows solid understanding. You're mastering most of the concepts. Now let's perfect {topic_mention} together to reach excellence.
+
+I'll give you some more advanced questions to refine your understanding and prepare you for anything the NCLEX might throw at you.
+
+You're ready for the challenge - let's show what you can do!"""
+
+    else:
+        # Exceptional - High praise with expert-level challenge
+        if is_french:
+            return f"""Impressionnant! {correct} sur {total} ({percentage}%) - vous démontrez une maîtrise exceptionnelle! Mais je sais que vous visez la perfection. Peaufinons encore {topic_mention if topic_mention else 'tous les domaines'} avec des questions de niveau expert.
+
+Ces questions seront vraiment stimulantes - conçues pour tester même les meilleurs étudiants. Êtes-vous prêt à viser les 100%?
+
+Montrez-moi votre excellence!"""
+        else:
+            return f"""Impressive! {correct} out of {total} ({percentage}%) - you're demonstrating exceptional mastery! But I know you're aiming for perfection. Let's refine {topic_mention if topic_mention else 'all areas'} even further with expert-level questions.
+
+These questions will be truly challenging - designed to test even the best students. Ready to aim for 100%?
+
+Let's see your excellence shine!"""
+
+
 class NursingTools:
-    """Collection of tools for the nursing tutor - Updated for LangChain integration""" 
+    """Collection of tools for the nursing tutor - Updated for LangChain integration"""
     # pass context to the constructor
     def __init__(self, session: PersistentSessionContext):
         self.session = session
         # Set global session context for tools to access
         set_session_context(session)
-    
+
     # return list of tools I have
     def get_tools(self):
         """Return list of tools for LangChain binding"""

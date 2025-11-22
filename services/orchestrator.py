@@ -271,6 +271,8 @@ class NursingTutor:
                                                        
                         if tool_name == "generate_quiz_stream":
                             print("🎯 Quiz tool called - checking for streaming")
+                            print(f"📋 Tool arguments received from LLM: {tool_args}")
+                            print(f"🔍 Empathetic message in args: {tool_args.get('empathetic_message', 'NOT FOUND')}")
                             # creates parameters we will need for the quizz, and start streaming
                             from tools.quiztools import generate_quiz_stream
                             result = await generate_quiz_stream.ainvoke(tool_args)
@@ -358,7 +360,8 @@ class NursingTutor:
                                             "quiz_data": all_questions,
                                             "total_generated": chunk.get("total_generated")
                                         }) + "\n"
-                                                        
+
+
                     except Exception as e:
                         print(f"🔥 Tool execution error: {e}")
                         tool_results.append({"error": str(e)})
@@ -514,22 +517,91 @@ class NursingTutor:
         - When extracting the 'topic' parameter for any tool, you MUST preserve the topic
         in the SAME LANGUAGE as the user's message
 
-        EMPATHETIC QUIZ GENERATION:
-        - When a user message contains BOTH an empathetic/understanding text AND a quiz generation request, extract BOTH parts:
-          1. The empathetic portion (e.g., "I understand it can be hard, but don't get discouraged...")
-          2. The quiz request details (topic, number of questions, difficulty)
-        - Pass the empathetic portion as the 'empathetic_message' parameter to generate_quiz_stream
-        - Example user message structure:
-          "I understand it can be hard, but don't get discouraged. We'll work on this together. Here are the areas I'm struggling with: [topic details].
+        INTELLIGENT PRACTICE MODE - Analyzing Quiz and Generating Targeted Practice:
+
+        When user wants to "practice weak areas", "practice more", "improve on weak topics" based on their last quiz:
+
+        STEP 1: ANALYZE THE QUIZ DATA
+        - Find "Last quiz data (for intelligent practice mode):" in the Current session above
+        - The quiz data contains questions with topics and userSelection (isCorrect field)
+        - Calculate: total questions, correct answers, percentage score
+        - Identify weak topics: topics where user got questions wrong or struggled
+
+        STEP 2: GENERATE EMPATHETIC MESSAGE
+        - Create a performance-appropriate empathetic message based on score:
+          * < 50%: Maximum encouragement, focus on small steps, very supportive tone
+          * 50-69%: Balanced encouragement, acknowledge progress, supportive guidance
+          * 70-84%: Positive reinforcement, focus on refinement and mastery
+          * 85%+: Strong celebration, challenge with harder material
+
+        - Message should:
+          * Acknowledge their specific score (X out of Y questions, Z%)
+          * Mention specific weak topics they struggled with
+          * Be warm, understanding, and encouraging
+          * Be 2-4 sentences in the user's language
+
+        STEP 3: CALL generate_quiz_stream TOOL
+        - Use the generate_quiz_stream tool with these parameters:
+          * topic: comma-separated list of weak topics (max 3)
+          * difficulty: "easy" if < 50%, "medium" if 50-84%, "hard" if 85%+
+          * num_questions: 5
+          * source_preference: "auto"
+          * empathetic_message: the empathetic message you generated in Step 2
+
+        EXAMPLE:
+        If quiz shows 60% on "Medication Safety" and "Fall Prevention":
+        {{
+          "topic": "Medication Safety, Fall Prevention",
+          "difficulty": "medium",
+          "num_questions": 5,
+          "source_preference": "auto",
+          "empathetic_message": "I see you scored 60% (3/5) on your last quiz, particularly with Medication Safety and Fall Prevention. It's completely normal to find these topics challenging - they're complex areas that many nursing students work hard to master. Let's practice together with some focused questions to help strengthen your understanding!"
+        }}
+
+        EMPATHETIC QUIZ GENERATION - CRITICAL EXTRACTION RULE:
+        - When a user message contains BOTH empathetic/understanding text AND a quiz generation request,
+          you MUST extract the empathetic portion and pass it as the 'empathetic_message' parameter
+
+        - EXAMPLE 1 - User message:
+          "I understand it can be hard, but don't get discouraged. We'll work on this together.
+           Here are the areas I'm struggling with: Immobility Complications (0/1 correct - 0%), Respiratory Care (0/1 correct - 0%).
+
            Can you help me improve? Please create a targeted 5-question practice quiz that:
            1. Focuses specifically on these weak areas
            2. Starts with easier questions to build my confidence
-           ..."
-        - In this case, extract:
-          * empathetic_message: The understanding/encouragement text before the explicit quiz request
-          * topic: The specific weak areas mentioned
-          * num_questions: The requested number of questions
-          * difficulty: The difficulty level (if mentioned, otherwise use "medium")
+           3. Gradually increases in difficulty
+           4. Includes detailed, encouraging explanations for each answer
+
+           I really want to understand these concepts. Help me progress step by step."
+
+        - For this message, you MUST call generate_quiz_stream with:
+          {{
+            "topic": "Immobility Complications, Respiratory Care",
+            "num_questions": 5,
+            "difficulty": "easy",
+            "empathetic_message": "I understand it can be hard, but don't get discouraged. We'll work on this together. Here are the areas I'm struggling with: Immobility Complications (0/1 correct - 0%), Respiratory Care (0/1 correct - 0%)."
+          }}
+
+        - EXTRACTION RULES:
+          * empathetic_message: Extract the FIRST paragraph(s) that contain understanding/encouragement
+                                (usually everything before "Can you help me improve?" or "Please create")
+          * topic: Extract the specific weak areas/topics mentioned
+          * num_questions: Extract from the quiz request (e.g., "5-question" → 5)
+          * difficulty: Infer from context ("build confidence"/"easier" → "easy", "challenge" → "hard")
+
+        - If you see phrases like "I understand", "don't get discouraged", "we'll work together",
+          "I'm struggling with", this is a STRONG SIGNAL to extract empathetic_message
+
+        EMPATHETIC MESSAGE TONE REQUIREMENTS:
+        - The empathetic_message should be warm, supportive, and genuinely understanding
+        - Use encouraging language that validates the student's feelings
+        - Be specific and personal (not generic placeholders)
+        - Examples of good empathetic messages:
+          * "I can see you're working hard on these challenging topics. It's completely normal to struggle with medication safety - many nursing students find this difficult at first. Let's tackle this together with some targeted practice."
+          * "You're making great progress! Scoring 67% shows you've already grasped the fundamentals. Now let's fine-tune your understanding of patient communication with some focused questions."
+          * "I understand it can feel overwhelming when certain topics don't click right away. The fact that you're seeking targeted practice shows real dedication to your learning. We'll work through this step by step."
+        - Avoid generic phrases like "I'm here to help" or "Let's get started"
+        - Match the tone to the student's performance level (struggling vs improving vs excelling)
         
         Guidelines:
         - Always provide rationales for answers (WHY, not just WHAT)
@@ -580,11 +652,14 @@ class NursingTutor:
         Current session:
         - Conversation so far {self.session.message_history if self.session.message_history else "no conversation yet"}
         - Student has {"documents uploaded" if self.session.documents else "no documents"}
-        - Quizzes previously done {self.session.quizzes if self.session.quizzes else "no quiz done yet"}
         - file name of the last file uploaded {self.session.documents[-1]["filename"]if self.session.documents else "no documents uploaded yet"}, if you are unsure about which file the user is talking about always use this one
         - file name of the last file you had an interaction with {self.session.name_last_document_used if self.session.name_last_document_used else " no file yet"}
         - Language preference: {self.session.user_language}
-         UPLOADED FILE INSIGHTS:
+
+        Last quiz data (for intelligent practice mode):
+        {self._format_last_quiz_for_extraction()}
+
+        UPLOADED FILE INSIGHTS:
         {self._format_file_insights()}
         """
 
@@ -638,6 +713,167 @@ class NursingTutor:
             import traceback
             traceback.print_exc()
        
+    def _format_last_quiz_for_extraction(self) -> str:
+        """Format last quiz data for LLM extraction - fetch from Firebase for freshness"""
+        try:
+            # Fetch latest quiz directly from Firebase to ensure freshness
+            from firebase_admin import firestore
+            db = firestore.client()
+
+            chat_id = self.session.chat_id
+            print(f"🔍 Fetching last quiz for chat_id: {chat_id}")
+
+            # Query messages ordered by timestamp descending (no where clause to avoid index requirement)
+            messages_ref = db.collection("chats").document(chat_id).collection("messages")
+            messages_query = messages_ref.order_by("timestamp", direction=firestore.Query.DESCENDING).limit(50)
+
+            # Stream messages and filter for messages with quizData in Python
+            quiz_message = None
+            messages_checked = 0
+            for doc in messages_query.stream():
+                messages_checked += 1
+                message_data = doc.to_dict()
+
+                # Check if message has quizData field (not just type == 'quiz')
+                if 'quizData' in message_data:
+                    quiz_data = message_data.get('quizData')
+
+                    # quizData can be either:
+                    # 1. Array directly: [{ question: ..., options: ..., answer: ..., userSelection: {...} }]
+                    # 2. Object with questions key: { questions: [...] }
+
+                    questions = None
+                    if isinstance(quiz_data, list):
+                        # Frontend format: quizData is array directly
+                        questions = quiz_data
+                        print(f"🔍 Found quizData as array (length: {len(questions)})")
+                    elif isinstance(quiz_data, dict) and 'questions' in quiz_data:
+                        # Backend format: quizData is object with questions key
+                        questions = quiz_data.get('questions', [])
+                        print(f"🔍 Found quizData as dict with questions (length: {len(questions)})")
+
+                    if questions and len(questions) > 0:
+                        quiz_message = message_data
+                        print(f"✅ Found quiz message in Firebase (ID: {doc.id}, checked {messages_checked} messages, {len(questions)} questions)")
+                        break
+
+            if not quiz_message:
+                print(f"📝 No quiz with quizData found in Firebase (checked {messages_checked} messages)")
+                return "null (no quiz completed yet)"
+
+            # Extract quiz data - handle both formats
+            quiz_data = quiz_message.get('quizData')
+            if isinstance(quiz_data, list):
+                # Frontend format: quizData is the array directly
+                questions = quiz_data
+            elif isinstance(quiz_data, dict):
+                # Backend format: quizData has questions key
+                questions = quiz_data.get('questions', [])
+            else:
+                questions = []
+
+            if not questions:
+                print("📝 Quiz found but has no questions")
+                print(f"🔍 Quiz message structure: {list(quiz_message.keys())}")
+                print(f"🔍 quizData type: {type(quiz_data)}")
+                print(f"🔍 quizData content: {quiz_data}")
+                return "null (last quiz had no questions)"
+
+            print(f"✅ Loaded last quiz from Firebase: {len(questions)} questions")
+
+            # Print first question for verification
+            if questions:
+                print(f"🔍 First question preview: {questions[0].get('question', 'N/A')[:100]}...")
+
+            # Clean questions data to remove Firebase-specific types (DatetimeWithNanoseconds, etc.)
+            import json
+            from datetime import datetime
+
+            def clean_firebase_data(obj):
+                """Recursively clean Firebase objects to make them JSON serializable"""
+                if isinstance(obj, dict):
+                    return {k: clean_firebase_data(v) for k, v in obj.items()}
+                elif isinstance(obj, list):
+                    return [clean_firebase_data(item) for item in obj]
+                elif hasattr(obj, 'isoformat'):  # DatetimeWithNanoseconds, datetime, etc.
+                    return obj.isoformat()
+                else:
+                    return obj
+
+            cleaned_questions = clean_firebase_data(questions)
+
+            # Return complete quiz data as JSON string for LLM to extract
+            quiz_json = json.dumps({"questions": cleaned_questions}, indent=2)
+            print(f"📤 Returning quiz JSON (length: {len(quiz_json)} chars)")
+            return quiz_json
+
+        except Exception as e:
+            print(f"❌ Error fetching quiz from Firebase: {e}")
+            import traceback
+            traceback.print_exc()
+
+            # Fallback to session quizzes if Firebase fetch fails
+            try:
+                if self.session.quizzes and len(self.session.quizzes) > 0:
+                    print("⚠️ Falling back to session quizzes")
+                    last_quiz = self.session.quizzes[-1]
+                    if isinstance(last_quiz, dict):
+                        quiz_data = last_quiz.get('quiz_data', {})
+                        questions = quiz_data.get('questions', []) if isinstance(quiz_data, dict) else []
+                        if questions:
+                            import json
+                            return json.dumps({"questions": questions}, indent=2)
+            except:
+                pass
+
+            return "null (error fetching quiz data)"
+
+    def _format_last_quiz_summary(self) -> str:
+        """Format last quiz summary for LLM analysis - lightweight version"""
+        if not self.session.quizzes or len(self.session.quizzes) == 0:
+            return "No quiz completed yet"
+
+        # Get only the last quiz
+        last_quiz = self.session.quizzes[-1]
+        quiz_data = last_quiz.get('quiz_data', {})
+        questions = quiz_data.get('questions', [])
+
+        if not questions:
+            return "Last quiz had no questions"
+
+        # Analyze performance
+        total = len(questions)
+        correct = sum(1 for q in questions if q.get('userSelection', {}).get('isCorrect', False))
+        incorrect = total - correct
+        percentage = round((correct / total) * 100) if total > 0 else 0
+
+        # Extract topics and performance
+        topic_performance = {}
+        for q in questions:
+            topic = q.get('topic', 'General')
+            if topic not in topic_performance:
+                topic_performance[topic] = {'total': 0, 'correct': 0}
+            topic_performance[topic]['total'] += 1
+            if q.get('userSelection', {}).get('isCorrect', False):
+                topic_performance[topic]['correct'] += 1
+
+        # Format topic breakdown
+        topic_breakdown = []
+        weak_topics = []
+        for topic, perf in topic_performance.items():
+            topic_pct = round((perf['correct'] / perf['total']) * 100) if perf['total'] > 0 else 0
+            topic_breakdown.append(f"{topic}: {perf['correct']}/{perf['total']} ({topic_pct}%)")
+            if topic_pct < 60:
+                weak_topics.append(topic)
+
+        summary = f"Score: {correct}/{total} ({percentage}%)"
+        if topic_breakdown:
+            summary += f" | Topics: {', '.join(topic_breakdown)}"
+        if weak_topics:
+            summary += f" | Weak areas: {', '.join(weak_topics)}"
+
+        return summary
+
     def _format_file_insights(self) -> str:
         """Format file insights for inclusion in system prompt"""
         file_insights = getattr(self.session, 'file_insights', {})
