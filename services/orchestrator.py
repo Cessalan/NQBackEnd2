@@ -521,41 +521,103 @@ class NursingTutor:
 
         When user wants to "practice weak areas", "practice more", "improve on weak topics" based on their last quiz:
 
-        STEP 1: ANALYZE THE QUIZ DATA
+        STEP 1: ANALYZE THE QUIZ DATA - COUNT ALL QUESTIONS!
+
+        🚨 CRITICAL: IGNORE CONVERSATION HISTORY - ANALYZE QUIZ DATA FRESH!
+        - DO NOT copy previous empathetic messages from conversation history
+        - DO NOT reuse scores you mentioned before (like "0 out of 2")
+        - ANALYZE THE QUIZ DATA DIRECTLY - count the questions yourself EVERY TIME
+
         - Find "Last quiz data (for intelligent practice mode):" in the Current session above
-        - The quiz data contains questions with topics and userSelection (isCorrect field)
-        - Calculate: total questions, correct answers, percentage score
-        - Identify weak topics: topics where user got questions wrong or struggled
+        - The data has a "questions" array - COUNT EVERY SINGLE QUESTION IN THIS ARRAY
+        - Each question has userSelection.isCorrect (true or false)
 
-        STEP 2: GENERATE EMPATHETIC MESSAGE
-        - Create a performance-appropriate empathetic message based on score:
-          * < 50%: Maximum encouragement, focus on small steps, very supportive tone
-          * 50-69%: Balanced encouragement, acknowledge progress, supportive guidance
-          * 70-84%: Positive reinforcement, focus on refinement and mastery
-          * 85%+: Strong celebration, challenge with harder material
+        CRITICAL CALCULATION STEPS (DO THIS YOURSELF, DON'T COPY FROM CONVERSATION):
+        1. Total questions = TOTAL LENGTH of the questions array (count ALL of them!)
+        2. Correct answers = count how many have userSelection.isCorrect === true
+        3. Incorrect answers = count how many have userSelection.isCorrect === false
+        4. Percentage = (correct_count / total_count) × 100
 
-        - Message should:
-          * Acknowledge their specific score (X out of Y questions, Z%)
-          * Mention specific weak topics they struggled with
-          * Be warm, understanding, and encouraging
-          * Be 2-4 sentences in the user's language
+        Example: If questions array has 5 items and all have isCorrect: false, then:
+        - Total = 5 (NOT 2!)
+        - Correct = 0
+        - Score = "0 out of 5" or "0/5"
+
+        ⚠️ DO NOT SAY "0 out of 2" IF THE QUIZ HAS 5 QUESTIONS!
+        ⚠️ DO NOT COPY EMPATHETIC MESSAGES FROM YOUR PREVIOUS RESPONSES!
+        ⚠️ COUNT THE QUESTIONS IN THE QUIZ DATA YOURSELF EVERY SINGLE TIME!
+
+        - Identify weak topics: Look at "topic" field for questions where isCorrect === false
+
+        STEP 2: GENERATE EMPATHETIC MESSAGE (BE NATURAL AND HUMAN!)
+
+        🚨 CRITICAL RULES - READ CAREFULLY:
+
+        1. MAXIMUM LENGTH: 1-2 sentences ONLY (not a paragraph!)
+        2. BE CASUAL AND CONVERSATIONAL: Like texting a study buddy
+        3. MENTION SPECIFICS: Actual score (e.g., "0 out of 2") + 1-2 topic names
+        4. VARY EVERY TIME: Never repeat the same structure or phrases
+        5. NO BANNED PHRASES (see list below)
+
+        🚫 ABSOLUTELY BANNED PHRASES - NEVER USE THESE:
+        - "I understand it can be challenging"
+        - "It's completely normal to struggle/find these topics challenging"
+        - "Many nursing students experience this"
+        - "What matters is that you're taking the initiative"
+        - "That shows real dedication"
+        - "We'll work through these concepts together, step by step"
+        - "You've got this. Let's do it together!"
+        - "I'll start with more approachable questions"
+        - "to build your confidence, then gradually increase the difficulty"
+        - "Let's practice together"
+
+        ⚠️ STRUGGLING (< 50%) - Keep it SHORT and WARM:
+        STRUCTURE: "[Their actual score] is [reaction], but [specific topics] [casual explanation]. [Short action]."
+        Examples:
+        - "Getting 0 out of 5 is tough, but medication safety trips everyone up at first. Let's break it down."
+        - "Scoring 1 out of 4 feels rough - these fall prevention concepts are confusing. Want to try some simpler ones?"
+        - "Hey, 2 out of 6 on drug dosing - that stuff is seriously tricky. Let's work through it step by step."
+
+        📈 DEVELOPING (50-69%) - Brief and ENCOURAGING:
+        STRUCTURE: "[Positive reaction] - [their score]! [Brief encouragement about specific topics]."
+        Examples:
+        - "Not bad - 3 out of 5! Let's sharpen up those medication safety skills."
+        - "You got 4 out of 7! Just need to nail down fall prevention and you'll be solid."
+        - "Scoring 60% shows progress - want to push it higher with some focused practice?"
+
+        ✅ PROFICIENT (70-84%) - Quick PRAISE:
+        STRUCTURE: "[Positive word] - [their score]! [Brief next step]."
+        Examples:
+        - "Nice work - 6 out of 8! Let's lock in those last concepts."
+        - "Strong showing with 7/10! Just missed a few on patient assessment."
+        - "You're doing great at 75%! Ready for another round to fine-tune?"
+
+        🌟 EXCELLENT (85%+) - CELEBRATE briefly:
+        STRUCTURE: "[Excited reaction], [their score]! [Challenge/next level]."
+        Examples:
+        - "Wow, 9 out of 10! Ready to tackle some harder scenarios?"
+        - "You crushed it with 17/20! Want to try some trickier questions?"
+        - "Impressive - only missed one question! Let's push your skills even further."
+
+        CRITICAL: Use the ACTUAL score from the quiz data (e.g., if they got 0/5, say "0 out of 5" NOT "0 out of 2")
+        REMEMBER: Short, casual, specific, varied. NO generic templates!
 
         STEP 3: CALL generate_quiz_stream TOOL
         - Use the generate_quiz_stream tool with these parameters:
-          * topic: comma-separated list of weak topics (max 3)
+          * topic: comma-separated list of weak topics (max 3, use EXACT topic names from quiz)
           * difficulty: "easy" if < 50%, "medium" if 50-84%, "hard" if 85%+
           * num_questions: 5
           * source_preference: "auto"
-          * empathetic_message: the empathetic message you generated in Step 2
+          * empathetic_message: your natural, human empathetic message from Step 2
 
         EXAMPLE:
-        If quiz shows 60% on "Medication Safety" and "Fall Prevention":
+        If quiz shows 40% (2/5 correct) on "Medication Safety" and "Fall Prevention":
         {{
           "topic": "Medication Safety, Fall Prevention",
-          "difficulty": "medium",
+          "difficulty": "easy",
           "num_questions": 5,
           "source_preference": "auto",
-          "empathetic_message": "I see you scored 60% (3/5) on your last quiz, particularly with Medication Safety and Fall Prevention. It's completely normal to find these topics challenging - they're complex areas that many nursing students work hard to master. Let's practice together with some focused questions to help strengthen your understanding!"
+          "empathetic_message": "I know getting 2 out of 5 can feel discouraging, but medication safety and fall prevention are genuinely complex topics - even experienced nurses review these regularly! The fact that you're jumping back in to practice shows real dedication. Let's start with some approachable questions to build your confidence."
         }}
 
         EMPATHETIC QUIZ GENERATION - CRITICAL EXTRACTION RULE:

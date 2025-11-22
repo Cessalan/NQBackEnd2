@@ -45,7 +45,6 @@ def get_session() -> PersistentSessionContext:
     return _CURRENT_SESSION
 
 
-
 def load_files_for_chat(chat_id: str) -> List[Dict[str, Any]]:
     """
     Retrieves a list of all files uploaded for a specific chat from Firebase Storage,
@@ -170,8 +169,6 @@ async def generate_study_sheet(user_request: str) -> Dict[str, Any]:
             "message": f"Study sheet generation failed: {str(e)}"
         }
 
-
-
 @tool
 async def generate_study_sheet_stream(
     topic: str,
@@ -206,7 +203,6 @@ async def generate_study_sheet_stream(
         "num_sections": num_sections,
         "message": f"I'll create a comprehensive study guide about {topic}."
     }
-
 
 async def _get_study_sheet_content(session: PersistentSessionContext) -> str:
     """Get content from uploaded documents for study sheet generation"""
@@ -1386,8 +1382,6 @@ def _extract_answer_concept(answer: str, topic: str) -> str:
     concept = concept.strip()
     
     return concept
-
-
 
 async def load_vectorstore_from_firebase(session: PersistentSessionContext) -> Optional[FAISS]:
     """
