@@ -274,54 +274,82 @@ class NursingTutor:
                             # creates parameters we will need for the quizz, and start streaming
                             from tools.quiztools import generate_quiz_stream
                             result = await generate_quiz_stream.ainvoke(tool_args)
-                            
+
                             # Check if tool signaled streaming intent
                             if result.get("status") == "quiz_streaming_initiated":
-                                
+
                                 print("🌊 Starting quiz streaming from orchestrator")
-                                
+
                                 metadata = result.get("metadata", {})
-                                
+                                empathetic_message = metadata.get("empathetic_message")
+
                                 # Import streaming function
                                 from tools.quiztools import stream_quiz_questions
-                                
+
                                 # Track questions for final save
                                 all_questions = []
-                                
-                                # Stream questions one by one
+
+                                # Stream questions one by one (with optional empathetic message)
                                 async for chunk in stream_quiz_questions(
                                     topic=metadata.get("topic"),
                                     difficulty=metadata.get("difficulty"),
                                     num_questions=metadata.get("num_questions"),
                                     source=metadata.get("source"),
-                                    session=self.session
+                                    session=self.session,
+                                    empathetic_message=empathetic_message  # Pass empathetic message
                                 ):
-                                    if chunk.get("status") == "generating":
-                                        
+                                    # Handle empathetic message streaming
+                                    if chunk.get("status") == "empathetic_message_start":
+                                        print("💬 Empathetic message streaming started")
+                                        yield json.dumps({
+                                            "status": "empathetic_message_start",
+                                            "type": "quiz",
+                                            "message": chunk.get("message")
+                                        }) + "\n"
+
+                                    elif chunk.get("status") == "empathetic_message_chunk":
+                                        # Stream empathetic message chunks
+                                        yield json.dumps({
+                                            "status": "empathetic_message_chunk",
+                                            "type": "quiz",
+                                            "chunk": chunk.get("chunk"),
+                                            "progress": chunk.get("progress")
+                                        }) + "\n"
+
+                                    elif chunk.get("status") == "empathetic_message_complete":
+                                        print("✅ Empathetic message complete")
+                                        yield json.dumps({
+                                            "status": "empathetic_message_complete",
+                                            "type": "quiz",
+                                            "full_message": chunk.get("full_message")
+                                        }) + "\n"
+
+                                    elif chunk.get("status") == "generating":
+
                                         value ={ "status": "quiz_generating",
                                             "current": chunk.get("current"),
                                             "type":"quiz",
                                             "total": chunk.get("total"),
                                             "message": f"Génération question {chunk.get('current')} sur {chunk.get('total')}..."}
-                                        
+
                                         print("GENERATING", value)
                                         # Send progress update
                                         yield json.dumps(value) + "\n"
-                                    
+
                                     elif chunk.get("status") == "question_ready":
                                         # Send complete question to frontend
                                         question = chunk.get("question")
                                         all_questions.append(question)
-                                        
+
                                         value = { "status": "quiz_question",
                                             "question": question,
                                             "type":"quiz",
                                             "index": chunk.get("index"),
                                             "total_so_far": len(all_questions)}
-                                        
+
                                         print("READY",value)
                                         yield json.dumps(value) + "\n"
-                                    
+
                                     elif chunk.get("status") == "quiz_complete":
                                         # Send completion signal with all questions
                                         yield json.dumps({
@@ -476,14 +504,32 @@ class NursingTutor:
 
         Available tools:
         - search_documents: Search student's uploaded materials
-        - generate_quiz_stream: Create practice questions on any topic, this has a maximum limit of 15 questions, 
+        - generate_quiz_stream: Create practice questions on any topic, this has a maximum limit of 15 questions,
                                 if the user asks for more inform him/her of the limit and confirm before proceeding the trigger the tool
+                                **SPECIAL FEATURE**: Supports empathetic quiz generation with the 'empathetic_message' parameter
         - generate_study_sheet_stream: When the user explicitly asks for a study sheet or a guide  OR when they ask for previous/old study sheets, basically, if the intent is to create or modify a study sheet
         - summarize_document: When they want document summaries
-        
+
         CRITICAL LANGUAGE RULE:
-        - When extracting the 'topic' parameter for any tool, you MUST preserve the topic 
+        - When extracting the 'topic' parameter for any tool, you MUST preserve the topic
         in the SAME LANGUAGE as the user's message
+
+        EMPATHETIC QUIZ GENERATION:
+        - When a user message contains BOTH an empathetic/understanding text AND a quiz generation request, extract BOTH parts:
+          1. The empathetic portion (e.g., "I understand it can be hard, but don't get discouraged...")
+          2. The quiz request details (topic, number of questions, difficulty)
+        - Pass the empathetic portion as the 'empathetic_message' parameter to generate_quiz_stream
+        - Example user message structure:
+          "I understand it can be hard, but don't get discouraged. We'll work on this together. Here are the areas I'm struggling with: [topic details].
+           Can you help me improve? Please create a targeted 5-question practice quiz that:
+           1. Focuses specifically on these weak areas
+           2. Starts with easier questions to build my confidence
+           ..."
+        - In this case, extract:
+          * empathetic_message: The understanding/encouragement text before the explicit quiz request
+          * topic: The specific weak areas mentioned
+          * num_questions: The requested number of questions
+          * difficulty: The difficulty level (if mentioned, otherwise use "medium")
         
         Guidelines:
         - Always provide rationales for answers (WHY, not just WHAT)

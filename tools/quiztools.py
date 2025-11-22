@@ -890,50 +890,52 @@ async def search_documents(query: str, max_results: int = 3) -> Dict[str, Any]:
 
 @tool
 async def generate_quiz_stream(
-    topic: str, 
-    difficulty: str = "medium", 
+    topic: str,
+    difficulty: str = "medium",
     num_questions: int = 4,
-    source_preference: str = "auto"
+    source_preference: str = "auto",
+    empathetic_message: str = None
 ) -> Dict[str, Any]:
     """
     Generate a nursing quiz for the student.
-    
+
     Use this when students request practice questions, want to test their knowledge,
     or need NCLEX-style questions on specific topics.
-    
+
     Args:
         topic: Subject area (e.g., "pharmacology", "cardiac care", "NCLEX prep")
         difficulty: Question difficulty ("easy", "medium", "hard")
         num_questions: Number of questions to generate (1-50, default: 4)
         source_preference: "documents" (from uploads), "scratch" (general), or "auto"
-    
+        empathetic_message: Optional empathetic understanding text to show before quiz (for targeted practice)
+
     Returns:
         Dictionary signaling quiz streaming should begin
     """
-    
+
     print("🎯 QUIZ TOOL: Initiating streaming quiz generation")
-    
+
     try:
         session = get_session()
-         
+
         # Normalize difficulty
         difficulty_map = {
             "facile": "easy", "easy": "easy",
             "moyen": "medium", "medium": "medium", "normal": "medium",
             "difficile": "hard", "hard": "hard", "challenging": "hard"
         }
-        
+
         normalized_difficulty = difficulty_map.get(difficulty.lower(), difficulty)
-        
+
         # Determine source
         if source_preference == "auto":
             source = "documents" if session.documents else "scratch"
         else:
             source = source_preference
-        
+
         # Validate num_questions
         num_questions = max(1, min(15, num_questions))
-        
+
         # Record tool call
         session.tool_calls.append({
             "tool": "generate_quiz_stream",
@@ -942,9 +944,10 @@ async def generate_quiz_stream(
             "difficulty": normalized_difficulty,
             "num_questions": num_questions,
             "source": source,
-            "status": "streaming_initiated"
+            "status": "streaming_initiated",
+            "has_empathetic_message": bool(empathetic_message)
         })
-        
+
         # 🔥 KEY CHANGE: Return signal to orchestrator to handle streaming
         return {
             "status": "quiz_streaming_initiated",
@@ -953,11 +956,12 @@ async def generate_quiz_stream(
                 "difficulty": normalized_difficulty,
                 "num_questions": num_questions,
                 "source": source,
-                "language": session.user_language
+                "language": session.user_language,
+                "empathetic_message": empathetic_message  # Pass empathetic message to orchestrator
             },
             "message": f"Starting quiz generation: {num_questions} questions on {topic}"
         }
-        
+
     except Exception as e:
         return {
             "status": "error",
@@ -971,13 +975,59 @@ async def stream_quiz_questions(
     difficulty: str,
     num_questions: int,
     source: str,
-    session: PersistentSessionContext
+    session: PersistentSessionContext,
+    empathetic_message: str = None
 ):
     """
     Generator that yields complete quiz questions one at a time.
     Called by orchestrator after tool signals streaming intent.
+
+    Args:
+        topic: Subject area for the quiz
+        difficulty: Question difficulty level
+        num_questions: Number of questions to generate
+        source: Source preference ("documents" or "scratch")
+        session: Current session context
+        empathetic_message: Optional empathetic understanding text to stream first
+
+    Yields:
+        Status updates and complete questions
     """
-    
+
+    # 🆕 PHASE 1: Stream empathetic message if provided
+    if empathetic_message:
+        print(f"💬 Starting empathetic message streaming...")
+
+        # Yield start signal
+        yield {
+            "status": "empathetic_message_start",
+            "message": "Understanding your learning needs..."
+        }
+
+        # Stream the empathetic message word by word for a human-like effect
+        words = empathetic_message.split()
+        current_text = ""
+
+        for i, word in enumerate(words):
+            current_text += word + " "
+
+            # Stream in small chunks (every 3-5 words) for better UX
+            if (i + 1) % 4 == 0 or i == len(words) - 1:
+                yield {
+                    "status": "empathetic_message_chunk",
+                    "chunk": current_text.strip(),
+                    "progress": int((i + 1) / len(words) * 100)
+                }
+
+        # Signal empathetic message complete
+        yield {
+            "status": "empathetic_message_complete",
+            "full_message": empathetic_message
+        }
+
+        print(f"✅ Empathetic message streaming complete")
+
+    # 🆕 PHASE 2: Generate quiz questions (existing logic)
     # Get content based on source
     if source == "documents" and session.vectorstore:
         docs = session.vectorstore.similarity_search(query=topic, k=1000)
@@ -985,8 +1035,8 @@ async def stream_quiz_questions(
         content_context = f"Document content:\n{full_text}"
     else:
         content_context = f"""You are generating questions about: {topic}
-      
-            If this is a broad topic (like 'research design', 'pharmacology', 'cardiac care'), 
+
+            If this is a broad topic (like 'research design', 'pharmacology', 'cardiac care'),
             ensure you test diverse subtopics and concepts within that domain."""
     
     # Track previously generated questions (for deduplication only)
@@ -1081,7 +1131,7 @@ async def _generate_single_question(
     print(f"{'='*60}\n")
     
     prompt = PromptTemplate(
-        input_variables=["content", "topic", "difficulty", "question_num", "language", 
+        input_variables=["content", "topic", "difficulty", "question_num", "language",
                     "questions_to_avoid", "answer_instruction"],
     template="""
     You are a {language}-speaking nursing quiz generator creating NCLEX-style questions.
@@ -1106,19 +1156,44 @@ async def _generate_single_question(
     - Create 4 plausible options (A-D) where ALL options could seem reasonable to a novice
     - The correct answer should be the BEST choice based on evidence-based practice
 
+    🎯 TOPIC ASSIGNMENT (NEW REQUIREMENT):
+    - Assign a SPECIFIC topic/subject to this question based on what it tests
+    - The topic should be 2-4 words maximum
+    - Be specific and descriptive (e.g., "Cardiac Medications" not "Medicine")
+    - Use consistent naming across related questions
+    - CRITICAL: Write the topic in {language} (same language as the quiz)
+    - Examples of good topics in English:
+      * "Heart Anatomy"
+      * "Blood Pressure"
+      * "Wound Assessment"
+      * "Pain Management"
+      * "Fluid Balance"
+      * "Infection Control"
+    - Examples of good topics in French:
+      * "Anatomie Cardiaque"
+      * "Pression Artérielle"
+      * "Évaluation des Plaies"
+      * "Gestion de la Douleur"
+      * "Équilibre Hydrique"
+      * "Contrôle des Infections"
+    - Examples of BAD topics:
+      * "General Knowledge" / "Connaissances Générales" (too broad)
+      * "Chapter 5" / "Chapitre 5" (not descriptive)
+      * "Various Topics" / "Sujets Divers" (meaningless)
+
     📤 Return ONLY valid JSON (no markdown wrapper):
     {{
         "question": "Detailed clinical scenario in {language}",
         "options": [
             "A) First option",
-            "B) Second option", 
+            "B) Second option",
             "C) Third option",
             "D) Fourth option"
         ],
         "answer": "X) The correct option",
         "justification": "Use this EXACT format with html:
 
-        <strong> Option X is correct </strong> because [1-2 sentences explaining why this is the BEST evidence-based choice]. 
+        <strong> Option X is correct </strong> because [1-2 sentences explaining why this is the BEST evidence-based choice].
         <br><br>
 
         <strong> Option A is incorrect </strong> [1 sentence explaining the clinical flaw]. <br>
@@ -1126,6 +1201,7 @@ async def _generate_single_question(
         <strong> Option B is incorrect </strong> because [1 sentence explaining the clinical flaw].  <br>
 
         <strong> Option C is incorrect </strong>  because [1 sentence explaining the clinical flaw].  <br> ",
+        "topic": "Specific Topic Name",
         "metadata": {{
             "sourceLanguage": "{language}",
             "topic": "{topic}",
@@ -1142,6 +1218,7 @@ async def _generate_single_question(
     - Maintain parallel structure (all start the same way)
     - Keep each explanation to 1-2 sentences
     - Test application and analysis, not just recall
+    - MUST include the "topic" field at the root level of the JSON
     """
 )
 
@@ -1162,16 +1239,28 @@ async def _generate_single_question(
         # Clean and parse
         cleaned = result.strip().strip("```json").strip("```").strip()
         parsed_question = json.loads(cleaned)
-        
+
         # Extract correct answer index
         answer = parsed_question.get('answer', '')
         if answer:
             answer_letter = answer[0]  # Extract 'A' from "A) ..."
             answer_index = ord(answer_letter) - ord('A')  # A=0, B=1, C=2, D=3
-            
+
             if 'metadata' in parsed_question:
                 parsed_question['metadata']['correctAnswerIndex'] = answer_index
-        
+
+        # ✨ Validate and ensure topic field exists
+        if 'topic' not in parsed_question or not parsed_question['topic']:
+            # Fallback: try to extract from metadata or use a default
+            if 'metadata' in parsed_question and 'topic' in parsed_question['metadata']:
+                parsed_question['topic'] = parsed_question['metadata']['topic']
+            else:
+                # Last resort: use the quiz topic or a generic label
+                parsed_question['topic'] = topic if topic else "General"
+            print(f"⚠️ Topic field missing, assigned: {parsed_question['topic']}")
+        else:
+            print(f"✅ Topic assigned: {parsed_question['topic']}")
+
         return parsed_question
         
     except json.JSONDecodeError as e:
