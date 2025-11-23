@@ -1516,7 +1516,7 @@ async def analyze_last_quiz_and_generate_practice(
                 })
 
         # Generate empathetic message based on performance
-        empathetic_message = _generate_performance_message(
+        empathetic_message = await _generate_performance_message(
             percentage=percentage,
             correct=correct_count,
             total=total_questions,
@@ -1591,7 +1591,7 @@ async def analyze_last_quiz_and_generate_practice(
         }
 
 
-def _generate_performance_message(
+async def _generate_performance_message(
     percentage: int,
     correct: int,
     total: int,
@@ -1599,7 +1599,10 @@ def _generate_performance_message(
     language: str = "en-US"
 ) -> str:
     """
-    Generate performance-appropriate empathetic message.
+    Generate dynamic, empathetic performance message using LLM.
+
+    Each message is uniquely generated to feel authentic and human,
+    avoiding repetitive templates.
 
     Args:
         percentage: Overall score percentage
@@ -1613,77 +1616,107 @@ def _generate_performance_message(
     """
     is_french = language == "fr"
 
-    # Build topic mention
+    # Build topic analysis
     if weak_topics:
-        if is_french:
-            topic_names = ', '.join([t['name'] for t in weak_topics[:2]])
-            topic_mention = f"particulièrement sur {topic_names}"
-        else:
-            topic_names = ', '.join([t['name'] for t in weak_topics[:2]])
-            topic_mention = f"particularly with {topic_names}"
+        topic_details = "\n".join([
+            f"- {t['name']}: {t['correct']}/{t['total']} ({t['percentage']}%)"
+            for t in weak_topics[:3]
+        ])
+        topic_summary = f"Weak areas identified:\n{topic_details}"
     else:
-        topic_mention = ""
+        topic_summary = "No significant weak areas - strong performance across all topics"
 
-    # Performance-based empathetic messages
+    # Determine performance tier and tone
     if percentage < 50:
-        # Struggling - Maximum empathy and encouragement
-        if is_french:
-            return f"""Je comprends que cela peut être difficile d'obtenir {correct} sur {total} ({percentage}%), {topic_mention}. C'est tout à fait normal de rencontrer des défis lors de l'apprentissage de nouveaux concepts médicaux - beaucoup d'étudiants passent par là.
-
-Ce qui est important, c'est que vous prenez l'initiative de pratiquer davantage. Cela montre une vraie détermination. Nous allons travailler ensemble sur ces concepts, étape par étape. Je vais commencer avec des questions plus accessibles pour renforcer votre confiance, puis progressivement augmenter la difficulté.
-
-Vous êtes capable de maîtriser cela. Allons-y ensemble!"""
-        else:
-            return f"""I understand it can be challenging to score {correct} out of {total} ({percentage}%), {topic_mention}. It's completely normal to struggle with new medical concepts - many nursing students experience this.
-
-What matters is that you're taking the initiative to practice more. That shows real dedication to your learning. We'll work through these concepts together, step by step. I'll start with more approachable questions to build your confidence, then gradually increase the difficulty.
-
-You've got this. Let's do it together!"""
-
+        tier = "struggling"
+        tone_guidance = """Warm, understanding, normalize the difficulty.
+        Sound like a supportive friend who gets it. Acknowledge this genuinely sucks but frame practice as the path forward.
+        Keep it conversational - imagine texting a friend who just told you they bombed a test."""
     elif percentage < 70:
-        # Making progress - Encouragement with gentle push
-        if is_french:
-            return f"""Bon travail! Vous avez obtenu {correct} sur {total} ({percentage}%). Vous avez déjà saisi les bases, ce qui est excellent. Maintenant, concentrons-nous sur l'amélioration {topic_mention}.
-
-Avec un peu plus de pratique ciblée, vous allez rapidement progresser. Je vais vous donner des questions qui vous aideront à combler ces lacunes spécifiques.
-
-Vous êtes sur la bonne voie - continuons à construire sur ce que vous savez déjà!"""
-        else:
-            return f"""Good work! You scored {correct} out of {total} ({percentage}%). You've already grasped the fundamentals, which is excellent. Now let's focus on improving {topic_mention}.
-
-With some targeted practice, you'll see rapid progress. I'll give you questions that will help fill in these specific gaps.
-
-You're on the right track - let's build on what you already know!"""
-
+        tier = "developing"
+        tone_guidance = """Encouraging, recognize their progress naturally.
+        Point out what they're getting right before mentioning what needs work.
+        Casual, friendly tone - like celebrating small wins with a study buddy."""
     elif percentage < 85:
-        # Doing well - Positive reinforcement with challenge
-        if is_french:
-            return f"""Excellent progrès! {correct} sur {total} ({percentage}%) montre une solide compréhension. Vous maîtrisez bien la plupart des concepts. Maintenant, perfectionnons ensemble {topic_mention} pour atteindre l'excellence.
-
-Je vais vous proposer des questions un peu plus avancées pour affiner votre compréhension et vous préparer à tout ce que l'NCLEX pourrait vous lancer.
-
-Vous êtes prêt pour le challenge - montrons ce que vous savez faire!"""
-        else:
-            return f"""Excellent progress! {correct} out of {total} ({percentage}%) shows solid understanding. You're mastering most of the concepts. Now let's perfect {topic_mention} together to reach excellence.
-
-I'll give you some more advanced questions to refine your understanding and prepare you for anything the NCLEX might throw at you.
-
-You're ready for the challenge - let's show what you can do!"""
-
+        tier = "proficient"
+        tone_guidance = """Genuine praise, then gentle push toward excellence.
+        Celebrate their solid performance authentically, then frame practice as fine-tuning.
+        Confident, supportive friend who knows they can master this."""
     else:
-        # Exceptional - High praise with expert-level challenge
+        tier = "exceptional"
+        tone_guidance = """Celebrate their mastery genuinely, then challenge them.
+        Show real excitement about their performance, frame next practice as leveling up.
+        Like a coach who's genuinely impressed and wants to push their star player higher."""
+
+    # Build dynamic prompt for LLM
+    language_instruction = "in French (fr)" if is_french else "in English"
+
+    prompt = f"""You're a supportive nursing tutor and friend. Your nursing student friend just finished a quiz and you can see their results.
+
+📊 THEIR PERFORMANCE:
+- Score: {correct} out of {total} ({percentage}%)
+- Performance level: {tier}
+- {topic_summary}
+
+🎯 YOUR MISSION:
+Write a SHORT (2-3 sentences, MAX 60 words), conversational message {language_instruction} that:
+
+1. **Acknowledges their exact score** ({correct}/{total}) - be specific!
+2. **Mentions the topics they struggled with by name** - this shows you're paying attention
+3. **Briefly says what you're doing next** - creating a practice quiz for them
+4. **{tone_guidance}**
+
+🚫 CRITICAL DON'Ts:
+- NO generic phrases ("Let's do this together!", "You've got this!", "I'm here to help")
+- NO templates or corporate speak
+- NO emojis or excessive punctuation
+- NO being overly wordy - keep it tight and real
+- DO NOT sound like a robot or chatbot
+
+✅ CRITICAL DOs:
+- BE SPECIFIC: Use their actual score and actual topic names
+- BE CONVERSATIONAL: Write like you're texting a friend
+- BE AUTHENTIC: Vary your language - no two messages should ever sound the same
+- BE BRIEF: 2-3 sentences max, under 60 words
+- USE NATURAL LANGUAGE: Contractions, casual phrasing, real human speech
+
+💡 TONE GUIDE: {tone_guidance}
+
+Think: "What would I text my nursing student friend right now?"
+NOT: "What's the template for this score range?"
+
+Generate your unique, authentic message {language_instruction}:"""
+
+    try:
+        # Use OpenAI for fast, conversational responses with HIGH temperature for maximum variety
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.95)  # Very high temp for natural variation
+
+        result = await llm.ainvoke(prompt)
+        message = result.content.strip()
+
+        print(f"✅ Generated dynamic empathetic message ({len(message)} chars)")
+        return message
+
+    except Exception as e:
+        print(f"❌ Error generating dynamic message: {e}")
+
+        # Fallback to conversational varied messages
         if is_french:
-            return f"""Impressionnant! {correct} sur {total} ({percentage}%) - vous démontrez une maîtrise exceptionnelle! Mais je sais que vous visez la perfection. Peaufinons encore {topic_mention if topic_mention else 'tous les domaines'} avec des questions de niveau expert.
-
-Ces questions seront vraiment stimulantes - conçues pour tester même les meilleurs étudiants. Êtes-vous prêt à viser les 100%?
-
-Montrez-moi votre excellence!"""
+            fallback_messages = [
+                f"{correct} sur {total} sur {weak_topics[0]['name'] if weak_topics else 'ces sujets'} - c'est vraiment difficile au début. Je prépare des questions plus simples pour t'aider à comprendre.",
+                f"Résultat: {correct}/{total}. {weak_topics[0]['name'] if weak_topics else 'Ces concepts'} sont compliqués, je sais. On va pratiquer avec des questions ciblées.",
+                f"Hey, {percentage}% - {weak_topics[0]['name'] if weak_topics else 'ce sujet'} casse la tête à tout le monde. Je génère un quiz adapté pour toi."
+            ]
         else:
-            return f"""Impressive! {correct} out of {total} ({percentage}%) - you're demonstrating exceptional mastery! But I know you're aiming for perfection. Let's refine {topic_mention if topic_mention else 'all areas'} even further with expert-level questions.
+            fallback_messages = [
+                f"{correct} out of {total} on {weak_topics[0]['name'] if weak_topics else 'these topics'} - that stuff is genuinely hard at first. I'm setting up easier questions to help you get it.",
+                f"Score: {correct}/{total}. {weak_topics[0]['name'] if weak_topics else 'These concepts'} are tricky, I know. We'll practice with targeted questions.",
+                f"Hey, {percentage}% - {weak_topics[0]['name'] if weak_topics else 'this topic'} trips everyone up. I'm generating a quiz tailored for you."
+            ]
 
-These questions will be truly challenging - designed to test even the best students. Ready to aim for 100%?
-
-Let's see your excellence shine!"""
+        # Pick a random fallback to add some variety
+        import random
+        return random.choice(fallback_messages)
 
 
 class NursingTools:

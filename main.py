@@ -219,17 +219,34 @@ ACTIVE_SESSIONS: Dict[str, NursingTutor] = {}
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[str, WebSocket] = {}
-    
+        self.cancellation_flags: Dict[str, bool] = {}  # Track if chat should be cancelled
+
     async def connect(self, websocket: WebSocket, chat_id: str):
         await websocket.accept()
         self.active_connections[chat_id] = websocket
+        self.cancellation_flags[chat_id] = False  # Reset cancellation flag
         print(f"✅ WebSocket connected for chat_id: {chat_id}")
-    
+
     def disconnect(self, chat_id: str):
         if chat_id in self.active_connections:
             del self.active_connections[chat_id]
             print(f"❌ WebSocket disconnected for chat_id: {chat_id}")
-    
+        if chat_id in self.cancellation_flags:
+            del self.cancellation_flags[chat_id]
+
+    def cancel_stream(self, chat_id: str):
+        """Mark a chat's stream for cancellation"""
+        self.cancellation_flags[chat_id] = True
+        print(f"🛑 Stream cancellation requested for chat_id: {chat_id}")
+
+    def is_cancelled(self, chat_id: str) -> bool:
+        """Check if a chat's stream has been cancelled"""
+        return self.cancellation_flags.get(chat_id, False)
+
+    def reset_cancellation(self, chat_id: str):
+        """Reset cancellation flag for a chat"""
+        self.cancellation_flags[chat_id] = False
+
     async def send_message(self, chat_id: str, message: dict):
         if chat_id in self.active_connections:
             try:
@@ -263,19 +280,28 @@ async def websocket_endpoint(websocket: WebSocket, chat_id: str):
         manager.disconnect(chat_id)
         
 async def handle_websocket_message(chat_id: str, message: dict, websocket: WebSocket):
-    """Handle incoming WebSocket messages""" 
+    """Handle incoming WebSocket messages"""
     message_type = message.get("type")
-    
+
     # check if Im getting a message
     if message_type == "chat_message":
         # Handle regular chat messages (proceed to call the AI Tutor)
         await process_chat_message(chat_id, message, websocket)
-      
-    # check if Im getting a ping to get the session alive  
+
+    # check if Im getting a ping to get the session alive
     elif message_type == "ping":
         # Handle ping/pong for connection keepalive
         await websocket.send_text(json.dumps({"type": "pong"}))
-        
+
+    # check if user wants to cancel ongoing streaming
+    elif message_type == "cancel_stream":
+        print(f"🛑 Received cancel request for chat {chat_id}")
+        manager.cancel_stream(chat_id)
+        await websocket.send_text(json.dumps({
+            "type": "stream_cancelled",
+            "message": "Stream cancellation requested"
+        }))
+
     else:
         # Unknown message type
         await websocket.send_text(json.dumps({
@@ -308,16 +334,26 @@ async def process_chat_message(chat_id: str, message: dict, websocket: WebSocket
         
         # Process message and stream responses
         async for chunk in nursing_tutor.process_message(user_input, language):
+            # Check for cancellation before processing each chunk
+            if manager.is_cancelled(chat_id):
+                print(f"🛑 Stream cancelled for chat {chat_id}, stopping...")
+                await websocket.send_text(json.dumps({
+                    "type": "stream_cancelled",
+                    "message": "Streaming stopped by user"
+                }))
+                manager.reset_cancellation(chat_id)  # Reset for next message
+                return  # Stop streaming
+
             # Parse the existing streaming format
             try:
                 chunk_data = json.loads(chunk.strip())
-                
+
                 # Forward to WebSocket with type wrapper
                 await websocket.send_text(json.dumps({
                     "type": "stream_chunk",
                     "data": chunk_data
                 }))
-                
+
             except json.JSONDecodeError:
                 # Handle non-JSON chunks
                 await websocket.send_text(json.dumps({
@@ -326,6 +362,7 @@ async def process_chat_message(chat_id: str, message: dict, websocket: WebSocket
                 }))
         
         # Send completion signal
+        manager.reset_cancellation(chat_id)  # Reset cancellation flag
         await websocket.send_text(json.dumps({
             "type": "stream_complete",
             "message": "Response complete"
