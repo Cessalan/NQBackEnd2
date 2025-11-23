@@ -298,7 +298,8 @@ class NursingTutor:
                                     num_questions=metadata.get("num_questions"),
                                     source=metadata.get("source"),
                                     session=self.session,
-                                    empathetic_message=empathetic_message  # Pass empathetic message
+                                    empathetic_message=empathetic_message,  # Pass empathetic message
+                                    chat_id=self.session.chat_id  # Pass chat_id for cancellation
                                 ):
                                     # Handle empathetic message streaming
                                     if chunk.get("status") == "empathetic_message_start":

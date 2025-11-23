@@ -2,9 +2,9 @@ from typing import Dict, Any, Optional,List
 from datetime import datetime
 from langchain_core.tools import tool
 from models.session import PersistentSessionContext
-from langchain_openai import ChatOpenAI 
+from langchain_openai import ChatOpenAI
 # Manual prompt variable injection, including memory if used (ideal for custom stuff)
-from langchain.chains import LLMChain 
+from langchain.chains import LLMChain
 from langchain.prompts import PromptTemplate
 from langchain_community.vectorstores import FAISS
 from langchain_openai import OpenAIEmbeddings
@@ -15,13 +15,25 @@ import json
 import random
 
 #to format llm response into string
-from langchain_core.output_parsers import StrOutputParser 
+from langchain_core.output_parsers import StrOutputParser
 
 # firebase that stores data needed for context (conversation)
 from firebase_admin import firestore
 
 # firebase that stores the vector store files
 from firebase_admin import storage
+
+# Global reference to connection manager (will be set by main.py)
+_CONNECTION_MANAGER = None
+
+def set_connection_manager(manager):
+    """Set the global connection manager reference"""
+    global _CONNECTION_MANAGER
+    _CONNECTION_MANAGER = manager
+
+def get_connection_manager():
+    """Get the global connection manager"""
+    return _CONNECTION_MANAGER
 
 
 def get_firestore_client():
@@ -972,7 +984,8 @@ async def stream_quiz_questions(
     num_questions: int,
     source: str,
     session: PersistentSessionContext,
-    empathetic_message: str = None
+    empathetic_message: str = None,
+    chat_id: str = None
 ):
     """
     Generator that yields complete quiz questions one at a time.
@@ -985,14 +998,27 @@ async def stream_quiz_questions(
         source: Source preference ("documents" or "scratch")
         session: Current session context
         empathetic_message: Optional empathetic understanding text to stream first
+        chat_id: Chat ID for cancellation checking
 
     Yields:
         Status updates and complete questions
     """
 
+    # Helper to check cancellation
+    def is_cancelled():
+        manager = get_connection_manager()
+        if manager and chat_id:
+            return manager.is_cancelled(chat_id)
+        return False
+
     # 🆕 PHASE 1: Stream empathetic message if provided
     if empathetic_message:
         print(f"💬 Starting empathetic message streaming...")
+
+        # Check cancellation before starting
+        if is_cancelled():
+            print(f"🛑 Quiz generation cancelled before empathetic message")
+            return
 
         # Yield start signal
         yield {
@@ -1005,6 +1031,11 @@ async def stream_quiz_questions(
         current_text = ""
 
         for i, word in enumerate(words):
+            # Check cancellation
+            if is_cancelled():
+                print(f"🛑 Quiz generation cancelled during empathetic message")
+                return
+
             current_text += word + " "
 
             # Stream in small chunks (every 3-5 words) for better UX
@@ -1037,22 +1068,27 @@ async def stream_quiz_questions(
     
     # Track previously generated questions (for deduplication only)
     generated_questions = _extract_previous_questions(session=session, limit=30)
-      
+
     # Generate questions one at a time
     for question_num in range(1, num_questions + 1):
-        
+
+        # 🛑 Check cancellation before generating each question
+        if is_cancelled():
+            print(f"🛑 Quiz generation cancelled at question {question_num}/{num_questions}")
+            return  # Stop generating questions
+
         # Yield progress
         yield {
             "status": "generating",
             "current": question_num,
             "total": num_questions
         }
-        
+
         # 🎲 Simply pick a random letter for each question
         random_target_letter = random.choice(['A', 'B', 'C', 'D'])
-        
+
         print(f"🎲 Q{question_num}: Randomly assigned correct answer position = {random_target_letter}")
-        
+
         # Generate single question
         question_data = await _generate_single_question(
             content=content_context,
@@ -1063,16 +1099,21 @@ async def stream_quiz_questions(
             questions_to_avoid=generated_questions,
             target_letter=random_target_letter  # 🎲 Random assignment
         )
-        
+
         if question_data:
             generated_questions.append(question_data['question'])
-            
+
             # Extract answer for logging
             answer = question_data['answer']
             answer_letter = answer[0] if answer else 'A'
-            
+
             print(f"✅ Q{question_num} generated - Correct answer: {answer_letter}")
-            
+
+            # 🛑 Check cancellation before yielding question
+            if is_cancelled():
+                print(f"🛑 Quiz generation cancelled after question {question_num} generated")
+                return
+
             yield {
                 "status": "question_ready",
                 "question": question_data,

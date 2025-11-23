@@ -258,6 +258,10 @@ class ConnectionManager:
 # Global connection manager
 manager = ConnectionManager()
 
+# Set the manager reference in quiztools for cancellation checks
+from tools.quiztools import set_connection_manager
+set_connection_manager(manager)
+
 # WebSocket endpoint
 @app.websocket("/ws/{chat_id}")
 async def websocket_endpoint(websocket: WebSocket, chat_id: str):
