@@ -1228,16 +1228,7 @@ async def _generate_single_question(
             "D) Fourth option"
         ],
         "answer": "X) The correct option",
-        "justification": "Use this EXACT format with html:
-
-        <strong> Option X is correct </strong> because [1-2 sentences explaining why this is the BEST evidence-based choice].
-        <br><br>
-
-        <strong> Option A is incorrect </strong> [1 sentence explaining the clinical flaw]. <br>
-
-        <strong> Option B is incorrect </strong> because [1 sentence explaining the clinical flaw].  <br>
-
-        <strong> Option C is incorrect </strong>  because [1 sentence explaining the clinical flaw].  <br> ",
+        "justification": "<strong>Option X is correct</strong> because [1-2 sentences explaining why this is the BEST evidence-based choice].<br><br><strong>Option A is incorrect</strong> because [1 sentence explaining the clinical flaw].<br><strong>Option B is incorrect</strong> because [1 sentence explaining the clinical flaw].<br><strong>Option C is incorrect</strong> because [1 sentence explaining the clinical flaw].",
         "topic": "Specific Topic Name",
         "metadata": {{
             "sourceLanguage": "{language}",
