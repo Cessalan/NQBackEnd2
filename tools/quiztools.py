@@ -1762,9 +1762,12 @@ class NursingTools:
     # return list of tools I have
     def get_tools(self):
         """Return list of tools for LangChain binding"""
+        from tools.flashcard_tools import generate_flashcards_stream
+
         return [
             search_documents,
             generate_quiz_stream,
+            generate_flashcards_stream,
             summarize_document,
             generate_study_sheet_stream
         ]

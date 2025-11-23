@@ -269,6 +269,75 @@ class NursingTutor:
                             
                             return
                                                        
+                        elif tool_name == "generate_flashcards_stream":
+                            print("📇 Flashcard tool called - checking for streaming")
+                            print(f"📋 Tool arguments received from LLM: {tool_args}")
+
+                            # Import flashcard streaming tools
+                            from tools.flashcard_tools import generate_flashcards_stream, stream_flashcards
+                            result = await generate_flashcards_stream.ainvoke(tool_args)
+
+                            # Check if tool signaled streaming intent
+                            if result.get("status") == "flashcard_streaming_initiated":
+                                print("🌊 Starting flashcard streaming from orchestrator")
+
+                                metadata = result.get("metadata", {})
+
+                                # Track flashcards for final save
+                                all_flashcards = []
+
+                                # Stream flashcards one by one
+                                async for chunk in stream_flashcards(
+                                    topic=metadata.get("topic"),
+                                    num_cards=metadata.get("num_cards"),
+                                    source=metadata.get("source"),
+                                    session=self.session,
+                                    chat_id=self.session.chat_id
+                                ):
+                                    # Check status type
+                                    status = chunk.get("status")
+
+                                    if status == "flashcard_generating":
+                                        # Initial generation signal
+                                        yield json.dumps({
+                                            "status": "flashcard_generating",
+                                            "message": chunk.get("message"),
+                                            "current": chunk.get("current"),
+                                            "total": chunk.get("total")
+                                        }) + "\n"
+
+                                    elif status == "generating":
+                                        # Progress update (optional, can be skipped)
+                                        pass
+
+                                    elif status == "flashcard_ready":
+                                        # Individual flashcard ready
+                                        flashcard = chunk.get("flashcard")
+                                        all_flashcards.append(flashcard)
+
+                                        yield json.dumps({
+                                            "status": "flashcard_ready",
+                                            "flashcard": flashcard,
+                                            "index": chunk.get("index"),
+                                            "total_so_far": chunk.get("total_so_far")
+                                        }) + "\n"
+
+                                    elif status == "flashcard_complete":
+                                        # All flashcards generated
+                                        yield json.dumps({
+                                            "status": "flashcard_complete",
+                                            "flashcard_data": all_flashcards,
+                                            "total_generated": chunk.get("total_generated")
+                                        }) + "\n"
+                            else:
+                                # Tool error
+                                yield json.dumps({
+                                    "status": "error",
+                                    "message": result.get("message", "Flashcard generation failed")
+                                }) + "\n"
+
+                            return
+
                         if tool_name == "generate_quiz_stream":
                             print("🎯 Quiz tool called - checking for streaming")
                             print(f"📋 Tool arguments received from LLM: {tool_args}")
@@ -511,6 +580,9 @@ class NursingTutor:
         - generate_quiz_stream: Create practice questions on any topic, this has a maximum limit of 15 questions,
                                 if the user asks for more inform him/her of the limit and confirm before proceeding the trigger the tool
                                 **SPECIAL FEATURE**: Supports empathetic quiz generation with the 'empathetic_message' parameter
+        - generate_flashcards_stream: Create flashcards for active recall and memorization, maximum limit of 15 cards
+                                      Use this when students request flashcards or want to memorize/review concepts
+                                      Examples: "Create flashcards about X", "Make flashcards for studying Y", "I need flashcards to memorize Z"
         - generate_study_sheet_stream: When the user explicitly asks for a study sheet or a guide  OR when they ask for previous/old study sheets, basically, if the intent is to create or modify a study sheet
         - summarize_document: When they want document summaries
 
