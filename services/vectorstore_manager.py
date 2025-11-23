@@ -6,6 +6,7 @@ Handles loading, saving, and managing vectorstores in Firebase Storage.
 import os
 import asyncio
 import shutil
+import re
 from typing import Optional, List, Dict, Tuple
 from uuid import uuid4
 
@@ -38,6 +39,21 @@ class VectorStoreManager:
             return "/tmp"
         else:
             return tempfile.gettempdir()
+
+    @staticmethod
+    def sanitize_filename(filename: str) -> str:
+        """
+        Sanitize filename for Windows filesystem compatibility.
+        Removes/replaces special characters that cause issues with temp paths.
+        """
+        # Remove accents and special characters
+        # Keep only alphanumeric, dots, dashes, and underscores
+        sanitized = re.sub(r'[^\w\s.-]', '', filename)
+        # Replace spaces with underscores
+        sanitized = sanitized.replace(' ', '_')
+        # Remove any consecutive dots or dashes
+        sanitized = re.sub(r'[.-]{2,}', '_', sanitized)
+        return sanitized
     
     # ========================================
     # LOAD VECTORSTORES
@@ -347,14 +363,17 @@ class VectorStoreManager:
             print(f"🔤 Creating vectorstore from {len(documents)} documents...")
             file_vectorstore = FAISS.from_documents(documents, self.embeddings)
             print(f"✅ Vectorstore created successfully")
-            
+
             # Save locally first
+            safe_filename = self.sanitize_filename(filename)
             temp_dir = os.path.join(
-                self.get_temp_dir(), 
-                f"file_vs_{chat_id}_{filename}_{uuid4().hex[:8]}"
+                self.get_temp_dir(),
+                f"file_vs_{chat_id}_{safe_filename}_{uuid4().hex[:8]}"
             )
             os.makedirs(temp_dir, exist_ok=True)
             print(f"💾 Saving to temp directory: {temp_dir}")
+            print(f"   Original filename: {filename}")
+            print(f"   Sanitized filename: {safe_filename}")
             
             file_vectorstore.save_local(temp_dir)
             print(f"✅ Saved file vectorstore locally")

@@ -259,7 +259,7 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 # Set the manager reference in quiztools for cancellation checks
-from tools.quiztools import set_connection_manager
+from tools.quiztools import set_connection_manager, get_chat_context_from_db
 set_connection_manager(manager)
 
 # WebSocket endpoint
@@ -314,20 +314,26 @@ async def handle_websocket_message(chat_id: str, message: dict, websocket: WebSo
         }))
                
 async def process_chat_message(chat_id: str, message: dict, websocket: WebSocket):
-    """Process chat messages through the existing NursingTutor"""  
+    """Process chat messages through the existing NursingTutor"""
     try:
         # Extract message data
         user_input = message.get("input", "")
-        language = await LanguageDetector.detect_language(user_input)
-        print(f"Input was entered in language: {language}")
-        
+
         # Get or create session (same as existing logic)
         if chat_id not in ACTIVE_SESSIONS:
             ACTIVE_SESSIONS[chat_id] = NursingTutor(chat_id)
             # Still reload insights in case new files were uploaded
-            await ACTIVE_SESSIONS[chat_id].load_file_insights_from_firebase() 
-    
+            await ACTIVE_SESSIONS[chat_id].load_file_insights_from_firebase()
+
         nursing_tutor = ACTIVE_SESSIONS[chat_id]
+
+        # Get chat history for context-aware language detection
+        full_context_from_db = await get_chat_context_from_db(chat_id)
+        chat_history = full_context_from_db.get("conversation", [])[-10:] if full_context_from_db else []
+
+        # Detect language with chat context
+        language = await LanguageDetector.detect_language(user_input, chat_history)
+        print(f"Input was entered in language: {language}")
         
         # Send status update
         await websocket.send_text(json.dumps({
@@ -400,7 +406,10 @@ async def upload_multiple_files(
     language: str = Form(...),
 ):
     """Upload multiple files and process in parallel."""
-    
+    # Validate and normalize language parameter
+    if not language or language == "undefined" or language == "null":
+        language = "english"  # Default fallback
+    print(F"*Upload received: user{ user_id}, chat:{chat_id}, language:{language}*")
     # Read all files immediately
     file_data_list = []
     for file in files:
@@ -585,10 +594,10 @@ async def upload_multiple_files(
                         Examples:
                         - "I found materials about cardiac pharmacology and arrhythmia management."
                         - "Les documents sur la pharmacologie cardiaque et la gestion des arythmies."
-                        
-                        REQUIREMEMT: The content must be in the language{language}
 
-                        Return ONLY the summary text, nothing else."""
+                        IMPORTANT REQUIREMENT: The entire summary must be written in {language}.
+
+                        Return ONLY the summary text in {language}, nothing else."""
                         
                         summary_response = await llm.ainvoke([
                             {"role": "user", "content": summary_prompt}
@@ -627,16 +636,16 @@ async def upload_multiple_files(
                         ])
                         
                         chat_title = title_response.content.strip().replace('"', '').replace("'", "")
-                        
+
                         # Update Firebase chat document with new title
                         from firebase_admin import firestore
                         db = firestore.client()
-                        
+
                         db.collection('chats').document(chat_id).update({
                             'title': chat_title,
                             'updatedAt': firestore.SERVER_TIMESTAMP
                         })
-                        
+
                         print(f"✅ Auto-generated and saved chat title: '{chat_title}'")
                         
                     except Exception as summary_error:
@@ -892,7 +901,7 @@ async def extract_file_insights_from_text(
         """
         
         response = await llm.ainvoke([
-            {"role": "system", "content": f"You extract key information from medical documents. Return only valid JSON with all content {language}."},
+            {"role": "system", "content": f"You extract key information from medical documents. Return only valid JSON with all content in {language}."},
             {"role": "user", "content": prompt}
         ])
         
@@ -1506,35 +1515,6 @@ async def generate_chat_title(request: GenerateTitleRequest):
         cleaned_title = generated_title.replace('"', '').replace("'", "").strip()
 
         return GenerateTitleResponse(title=cleaned_title)
-
-# ============================================================================
-# ADMIN/DEBUG ENDPOINTS (optional but helpful)
-# ============================================================================
-@app.get("/admin/sessions")
-async def list_sessions():
-    """View all active sessions"""
-    return {
-        "total_sessions": len(ACTIVE_SESSIONS),
-        "sessions": [
-            {
-                "chat_id": chat_id,
-                "language": session.session.user_language,
-                "has_vectorstore": session.session.vectorstore is not None,
-                "message_count": len(session.session.message_history),
-                "quiz_params": session.session.quiz_params
-            }
-            for chat_id, session in ACTIVE_SESSIONS.items()
-        ]
-    }
-
-@app.delete("/admin/sessions/{chat_id}")
-async def clear_session(chat_id: str):
-    """Clear a specific session"""
-    if chat_id in ACTIVE_SESSIONS:
-        del ACTIVE_SESSIONS[chat_id]
-        return {"message": f"Session {chat_id} cleared"}
-    return {"message": "Session not found"}
-
 
 # ============================================================================
 # HEALTH CHECK
