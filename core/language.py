@@ -60,23 +60,25 @@ class LanguageDetector:
 
             # Build prompt with context
             if context_snippet:
-                prompt = f"""Previous conversation context:
+                prompt = f"""Previous conversation context (for reference only):
 {context_snippet}
 
-Current user message:
+Current user message (MOST IMPORTANT):
 {text}
 
-Based on the conversation history and current message, what language is the user communicating in?
+What language is the CURRENT user message written in?
+CRITICAL: Prioritize the current message's language over the conversation history.
+If the current message is in English, respond 'english' even if previous messages were in French.
 Respond with ONLY the language name in lowercase (e.g., 'english', 'french', 'spanish', 'chinese', 'tagalog')."""
             else:
-                prompt = f"Language: {text}"
+                prompt = f"What language is this text in? Text: {text}"
 
             response = await client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
                     {
                         "role": "system",
-                        "content": "You detect the language of text. Consider the conversation history to determine the language. Respond with ONLY the language name in lowercase (e.g., 'english', 'french', 'spanish', 'chinese', 'tagalog'). Nothing else."
+                        "content": "You detect the language of the CURRENT user message. Always prioritize the current message's language over conversation history. If the current message is in English, return 'english' even if previous messages were in French. Respond with ONLY the language name in lowercase (e.g., 'english', 'french', 'spanish', 'chinese', 'tagalog'). Nothing else."
                     },
                     {
                         "role": "user",
