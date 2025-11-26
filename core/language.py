@@ -61,15 +61,15 @@ class LanguageDetector:
             # Build prompt with context
             if context_snippet:
                 prompt = f"""Previous conversation context (for reference only):
-{context_snippet}
+            {context_snippet}
 
-Current user message (MOST IMPORTANT):
-{text}
+            Current user message (MOST IMPORTANT):
+            {text}
 
-What language is the CURRENT user message written in?
-CRITICAL: Prioritize the current message's language over the conversation history.
-If the current message is in English, respond 'english' even if previous messages were in French.
-Respond with ONLY the language name in lowercase (e.g., 'english', 'french', 'spanish', 'chinese', 'tagalog')."""
+            What language is the CURRENT user message written in?
+            CRITICAL: Prioritize the current message's language over the conversation history.
+            If the current message is in English, respond 'english' even if previous messages were in French.
+            Respond with ONLY the language name in lowercase (e.g., 'english', 'french', 'spanish', 'chinese', 'tagalog')."""
             else:
                 prompt = f"What language is this text in? Text: {text}"
 

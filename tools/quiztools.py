@@ -294,23 +294,34 @@ async def get_chat_context_from_db(chat_id: str) -> dict:
         
         for doc in messages:
             message_data = doc.to_dict()
-            
-            # Regular conversation messages
-            if message_data.get('role') and message_data.get('content'):
+
+            # Regular conversation messages (skip quiz, scenario, and other non-text message types)
+            message_type = message_data.get('type', '')
+            skip_types = ['quiz',
+                          'scenario',
+                          'study_sheet',
+                          'flashcards',
+                          'suggested_prompts',
+                          'upload_loading']
+            # to make sure we skip quizzes
+            has_quiz_data = message_data.get('quizData') is not None
+
+            # get role and conent
+            if message_data.get('role') and message_data.get('content') and message_type not in skip_types and not has_quiz_data:
                 if isinstance(message_data.get('content'), str):
                     conversation_history.append({
                         'role': message_data['role'],
                         'content': message_data['content']
                     })
             
-            # Extract quizzes
+            # Extract quizzes separately to build the context
             if message_data.get('quizData'):
                 quizzes_created.append({
                     'timestamp': message_data.get('timestamp'),
                     'quiz_data': message_data['quizData']
                 })
             
-            # Extract study sheets
+            # Extract study sheets separately to build the context
             if message_data.get('html'):
                 study_sheets_created.append({
                     'timestamp': message_data.get('timestamp'),
