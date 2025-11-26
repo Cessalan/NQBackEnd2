@@ -23,3 +23,4 @@ class PersistentSessionContext:
     tool_calls: List[Dict] = field(default_factory=list)
     studysheet_history: str = field(default="")
     previously_generate_questions_in_quiz = []
+    file_insights: Dict[str, Dict] = field(default_factory=dict)  # {filename: {topics, concepts, doc_type}}

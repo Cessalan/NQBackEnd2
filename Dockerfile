@@ -1,26 +1,30 @@
 FROM python:3.11-slim
 
+# Install system dependencies for OCR, image processing, and document handling
+RUN apt-get update && apt-get install -y \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    libtesseract-dev \
+    libleptonica-dev \
+    pkg-config \
+    libpoppler-cpp-dev \
+    libmagic1 \
+    && rm -rf /var/lib/apt/lists/*
+
 # Set working directory
 WORKDIR /app
 
-# System packages needed for faiss
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    libopenblas-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy requirements first and install
+# Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install dependencies
-RUN pip install --upgrade pip
+# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy all app code
+# Copy application code
 COPY . .
 
-# Expose port 8080 (Cloud Run default)
-EXPOSE 8080
+# Expose port
+EXPOSE 8000
 
-# ✅ FIXED: Use shell form to allow environment variable substitution
-CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}
+# Run the application using exec form (JSON array) for proper signal handling
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]

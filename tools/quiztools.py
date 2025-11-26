@@ -2,9 +2,9 @@ from typing import Dict, Any, Optional,List
 from datetime import datetime
 from langchain_core.tools import tool
 from models.session import PersistentSessionContext
-from langchain_openai import ChatOpenAI 
+from langchain_openai import ChatOpenAI
 # Manual prompt variable injection, including memory if used (ideal for custom stuff)
-from langchain.chains import LLMChain 
+from langchain.chains import LLMChain
 from langchain.prompts import PromptTemplate
 from langchain_community.vectorstores import FAISS
 from langchain_openai import OpenAIEmbeddings
@@ -15,13 +15,25 @@ import json
 import random
 
 #to format llm response into string
-from langchain_core.output_parsers import StrOutputParser 
+from langchain_core.output_parsers import StrOutputParser
 
 # firebase that stores data needed for context (conversation)
 from firebase_admin import firestore
 
 # firebase that stores the vector store files
 from firebase_admin import storage
+
+# Global reference to connection manager (will be set by main.py)
+_CONNECTION_MANAGER = None
+
+def set_connection_manager(manager):
+    """Set the global connection manager reference"""
+    global _CONNECTION_MANAGER
+    _CONNECTION_MANAGER = manager
+
+def get_connection_manager():
+    """Get the global connection manager"""
+    return _CONNECTION_MANAGER
 
 
 def get_firestore_client():
@@ -43,7 +55,6 @@ def get_session() -> PersistentSessionContext:
     if _CURRENT_SESSION is None:
         raise RuntimeError("No session context available. This is a system error.")
     return _CURRENT_SESSION
-
 
 
 def load_files_for_chat(chat_id: str) -> List[Dict[str, Any]]:
@@ -170,8 +181,6 @@ async def generate_study_sheet(user_request: str) -> Dict[str, Any]:
             "message": f"Study sheet generation failed: {str(e)}"
         }
 
-
-
 @tool
 async def generate_study_sheet_stream(
     topic: str,
@@ -180,14 +189,12 @@ async def generate_study_sheet_stream(
     """
     Generate a comprehensive, interactive study guide with progressive loading.
     
-    Use this tool when the user wants:
-    - "Explain [topic] to me"
-    - "Teach me about [topic]"  
-    - "Create a study guide for [topic]"
-    - "I want to learn [topic]"
-    - "Break down [topic] for me"
-    - Comprehensive explanations or tutorials
-    
+    Use this tool ONLY when the user explicitly asks for a study sheet on certain subject or for specific goal:
+    - "Make me a study sheet for[topic]"
+    - "Fais moi une fuille d'etude sur[topic]" 
+    - "Based on the last quiz, make me a study sheet based on my results"
+    - "Make me a study sheet based on my files"  
+
     DO NOT use for:
     - Simple questions like "What is X?" (use search_documents instead)
     - Quiz generation (use generate_quiz)
@@ -208,7 +215,6 @@ async def generate_study_sheet_stream(
         "num_sections": num_sections,
         "message": f"I'll create a comprehensive study guide about {topic}."
     }
-
 
 async def _get_study_sheet_content(session: PersistentSessionContext) -> str:
     """Get content from uploaded documents for study sheet generation"""
@@ -288,23 +294,34 @@ async def get_chat_context_from_db(chat_id: str) -> dict:
         
         for doc in messages:
             message_data = doc.to_dict()
-            
-            # Regular conversation messages
-            if message_data.get('role') and message_data.get('content'):
+
+            # Regular conversation messages (skip quiz, scenario, and other non-text message types)
+            message_type = message_data.get('type', '')
+            skip_types = ['quiz',
+                          'scenario',
+                          'study_sheet',
+                          'flashcards',
+                          'suggested_prompts',
+                          'upload_loading']
+            # to make sure we skip quizzes
+            has_quiz_data = message_data.get('quizData') is not None
+
+            # get role and conent
+            if message_data.get('role') and message_data.get('content') and message_type not in skip_types and not has_quiz_data:
                 if isinstance(message_data.get('content'), str):
                     conversation_history.append({
                         'role': message_data['role'],
                         'content': message_data['content']
                     })
             
-            # Extract quizzes
+            # Extract quizzes separately to build the context
             if message_data.get('quizData'):
                 quizzes_created.append({
                     'timestamp': message_data.get('timestamp'),
                     'quiz_data': message_data['quizData']
                 })
             
-            # Extract study sheets
+            # Extract study sheets separately to build the context
             if message_data.get('html'):
                 study_sheets_created.append({
                     'timestamp': message_data.get('timestamp'),
@@ -491,6 +508,7 @@ async def summarize_document(
             "status": "failed"
         }
 
+
 async def _search_vectorstore_for_summary(
     filename: str, 
     chat_id: str, 
@@ -498,60 +516,251 @@ async def _search_vectorstore_for_summary(
     detail_level: str
 ) -> list:
     """
-    Search vector store for relevant chunks to create summary
-    This function has the list of documents uploaded by user, and if the file is not found , it will just summarize the last file
+    Search vector store for relevant chunks to create summary.
+    
+    CACHE-FIRST ARCHITECTURE:
+    1. Check in-memory session.vectorstore (FAST - 0ms)
+    2. Fallback to Firebase download if cache miss (SLOW - 500ms)
+    
+    Args:
+        filename: Requested file to summarize (may be empty)
+        chat_id: Chat session ID
+        query: Search query (usually empty for full doc summary)
+        detail_level: "brief" | "detailed" | "comprehensive"
+    
+    Returns:
+        List of chunk dicts: [{"content": str, "metadata": dict}]
     """
+    print("\n" + "="*80)
+    print("🔍 _search_vectorstore_for_summary CALLED")
+    print(f"   📄 filename: {filename}")
+    print(f"   💬 chat_id: {chat_id}")
+    print(f"   🔎 query: {query}")
+    print(f"   📊 detail_level: {detail_level}")
+    print("="*80)
+    
     try:
+        # ========================================
+        # STEP 1: Get session and determine file to summarize
+        # ========================================
+        print("\n📦 STEP 1: Retrieving session...")
+        session = get_session()
+        print(f"   ✅ Session retrieved: {session}")
+        
+        if not session.documents:
+            print("   ⚠️ WARNING: No documents in session!")
+            return []
+        
+        print(f"   📚 Total documents in session: {len(session.documents)}")
+        print(f"   📋 Document list: {[doc.get('filename') for doc in session.documents]}")
+        
+        # Get last uploaded file as default
+        lastfile = session.documents[-1]
+        print(f"\n   🗂️ Last file uploaded: {lastfile}")
+        
+        # Default to last file
+        fileToSummarize = lastfile['filename']
+        print(f"   📌 Default file to summarize: {fileToSummarize}")
+        
+        # Override if specific file requested and exists
+        is_requested_file_uploaded = any(doc.get('filename') == filename for doc in session.documents)
+        print(f"\n   🔍 Checking if requested file '{filename}' exists in uploads...")
+        print(f"   {'✅' if is_requested_file_uploaded else '❌'} Requested file found: {is_requested_file_uploaded}")
+        
+        if is_requested_file_uploaded:
+            fileToSummarize = filename
+            print(f"   🎯 Using requested file: {fileToSummarize}")
+        else:
+            print(f"   🔄 Falling back to last file: {fileToSummarize}")
+        
+        print(f"\n   ✅ FINAL DECISION: Will summarize '{fileToSummarize}'")
+        
+        # ========================================
+        # STEP 2: CHECK IN-MEMORY CACHE FIRST ⚡
+        # ========================================
+        print("\n" + "="*80)
+        print("⚡ STEP 2: Checking in-memory cache...")
+        print("="*80)
+        
+        if session.vectorstore:
+            print("   ✅ Cache HIT - Vectorstore found in memory!")
+            print(f"   📊 Vectorstore type: {type(session.vectorstore)}")
+            
+            try:
+                # Get document count (if supported)
+                print(f"   🔢 Attempting to count documents in cache...")
+                
+                # Perform similarity search with filter
+                print(f"\n   🔎 Searching cache for chunks from '{fileToSummarize}'...")
+                print(f"   🔍 Search params:")
+                print(f"      - query: '{query}' (empty = get all)")
+                print(f"      - k: 1000 (max chunks)")
+                print(f"      - filter: {{'source': '{fileToSummarize}'}}")
+                
+                docs = session.vectorstore.similarity_search(
+                    query="",  # Empty query = get all chunks
+                    k=1000,    # Get up to 1000 chunks
+                    filter={"source": fileToSummarize}
+                )
+                
+                print(f"   ✅ Search complete!")
+                print(f"   📦 Found {len(docs)} chunks in cache")
+                
+                if docs:
+                    # Log first chunk preview
+                    first_chunk_preview = docs[0].page_content[:100] + "..." if len(docs[0].page_content) > 100 else docs[0].page_content
+                    print(f"\n   📄 First chunk preview:")
+                    print(f"      Length: {len(docs[0].page_content)} chars")
+                    print(f"      Content: {first_chunk_preview}")
+                    print(f"      Metadata: {docs[0].metadata}")
+                    
+                    # Apply detail level limits
+                    print(f"\n   ✂️ Applying detail level limits...")
+                    chunk_limits = {
+                        "brief": 15000,
+                        "detailed": 20000,
+                        "comprehensive": 30000
+                    }
+                    
+                    limit = chunk_limits.get(detail_level, 20000)
+                    print(f"   📏 Detail level '{detail_level}' → limit: {limit} chars")
+                    
+                    # Combine all chunks
+                    print(f"   🔗 Combining {len(docs)} chunks...")
+                    full_text = "\n\n".join([doc.page_content for doc in docs])
+                    total_chars = len(full_text)
+                    print(f"   📊 Total combined text: {total_chars} chars")
+                    
+                    # Truncate if needed
+                    truncated_text = full_text[:limit]
+                    if len(truncated_text) < len(full_text):
+                        print(f"   ✂️ Truncated from {total_chars} to {len(truncated_text)} chars")
+                    else:
+                        print(f"   ✅ No truncation needed ({total_chars} < {limit})")
+                    
+                    result = [{"content": truncated_text, "metadata": {"source": fileToSummarize}}]
+                    
+                    print(f"\n   🎉 SUCCESS - Returning from CACHE")
+                    print(f"   📦 Result: 1 chunk with {len(truncated_text)} chars")
+                    print("="*80)
+                    
+                    return result
+                else:
+                    print(f"   ⚠️ No chunks found in cache for '{fileToSummarize}'")
+                    print(f"   🤔 This might mean:")
+                    print(f"      - File wasn't uploaded yet")
+                    print(f"      - Filename mismatch")
+                    print(f"      - Vectorstore doesn't have this file")
+                    print(f"   📥 Will try downloading from Firebase...")
+                    
+            except Exception as cache_error:
+                print(f"   ❌ Cache search failed: {cache_error}")
+                import traceback
+                traceback.print_exc()
+                print(f"   📥 Will try downloading from Firebase...")
+        else:
+            print("   ❌ Cache MISS - No vectorstore in memory")
+            print("   🤔 Possible reasons:")
+            print("      - First time accessing this session")
+            print("      - Vectorstore not loaded from Firebase yet")
+            print("      - Session was cleared")
+            print("   📥 Will download from Firebase...")
+        
+        # ========================================
+        # STEP 3: FALLBACK - DOWNLOAD FROM FIREBASE 🔥
+        # ========================================
+        print("\n" + "="*80)
+        print("📥 STEP 3: Downloading from Firebase (FALLBACK)")
+        print("="*80)
+        
         with tempfile.TemporaryDirectory() as tempdir:
-            # Use same pattern as your working code
+            print(f"   📁 Created temp directory: {tempdir}")
+            
             bucket = storage.bucket()
+            print(f"   🪣 Firebase bucket: {bucket.name}")
             
-            session = get_session()
+            # Construct Firebase paths
+            firebase_base = f"FileVectorStore/{chat_id}/{fileToSummarize}"
+            faiss_path_firebase = f"{firebase_base}/index.faiss"
+            pkl_path_firebase = f"{firebase_base}/index.pkl"
             
-            #get last filename uploaded by user
-            lastfile = session.documents[-1]
-            print("Last File Uploaded Obj", lastfile)
+            print(f"\n   🗺️ Firebase paths:")
+            print(f"      FAISS: {faiss_path_firebase}")
+            print(f"      PKL:   {pkl_path_firebase}")
             
-            #set it as the file we want to summarize by default
-            fileToSummarize = lastfile['filename']
-            
-            # but if there was a file specified during a request, and it is found in the file list
-            # summarize the file mentionned in the request
-            
-            is_requested_file_uploaded = any(doc.get('filename') == filename for doc in session.documents)
-            if(is_requested_file_uploaded):
-                fileToSummarize= filename
-          
-            print("filename we decided to summarize", fileToSummarize)
-            
-            faiss_blob = bucket.blob(f"FileVectorStore/{chat_id}/{fileToSummarize}/index.faiss")
-            pkl_blob = bucket.blob(f"FileVectorStore/{chat_id}/{fileToSummarize}/index.pkl")
-            
+            # Local paths
             faiss_path = os.path.join(tempdir, "index.faiss")
             pkl_path = os.path.join(tempdir, "index.pkl")
             
-            # Download files (same as your working code)
-            faiss_blob.download_to_filename(faiss_path)
-            pkl_blob.download_to_filename(pkl_path)
+            print(f"\n   💾 Local paths:")
+            print(f"      FAISS: {faiss_path}")
+            print(f"      PKL:   {pkl_path}")
             
-            # Load vector store (same as your working code)
+            # Get blobs
+            print(f"\n   🔍 Checking if files exist in Firebase...")
+            faiss_blob = bucket.blob(faiss_path_firebase)
+            pkl_blob = bucket.blob(pkl_path_firebase)
+            
+            faiss_exists = faiss_blob.exists()
+            pkl_exists = pkl_blob.exists()
+            
+            print(f"      FAISS exists: {faiss_exists}")
+            print(f"      PKL exists:   {pkl_exists}")
+            
+            if not faiss_exists or not pkl_exists:
+                print(f"\n   ❌ ERROR: Vectorstore files not found in Firebase!")
+                print(f"      This means the file was never uploaded or upload failed")
+                return []
+            
+            # Download files
+            print(f"\n   📥 Downloading FAISS file...")
+            faiss_blob.download_to_filename(faiss_path)
+            faiss_size = os.path.getsize(faiss_path)
+            print(f"      ✅ Downloaded: {faiss_size} bytes")
+            
+            print(f"\n   📥 Downloading PKL file...")
+            pkl_blob.download_to_filename(pkl_path)
+            pkl_size = os.path.getsize(pkl_path)
+            print(f"      ✅ Downloaded: {pkl_size} bytes")
+            
+            # Load vector store
+            print(f"\n   🔤 Loading vectorstore from downloaded files...")
             vectorstore = FAISS.load_local(
                 tempdir, 
                 OpenAIEmbeddings(), 
                 allow_dangerous_deserialization=True
             )
+            print(f"      ✅ Vectorstore loaded successfully")
+            print(f"      Type: {type(vectorstore)}")
             
-            # Get ALL chunks like your working code
+            # Search vectorstore
+            print(f"\n   🔎 Searching downloaded vectorstore...")
+            print(f"      - query: '{query}'")
+            print(f"      - k: 1000")
+            print(f"      - filter: {{'source': '{fileToSummarize}'}}")
+            
             docs = vectorstore.similarity_search(
                 query="", 
                 k=1000, 
                 filter={"source": fileToSummarize}
             )
             
+            print(f"      ✅ Found {len(docs)} chunks")
+            
             if not docs:
+                print(f"\n   ❌ No documents found with source '{fileToSummarize}'")
+                print(f"      This might mean a metadata mismatch")
                 return []
             
-            # Convert to your chunk format but limit based on detail level
+            # Log first chunk
+            first_chunk_preview = docs[0].page_content[:100] + "..." if len(docs[0].page_content) > 100 else docs[0].page_content
+            print(f"\n   📄 First chunk preview:")
+            print(f"      Length: {len(docs[0].page_content)} chars")
+            print(f"      Content: {first_chunk_preview}")
+            print(f"      Metadata: {docs[0].metadata}")
+            
+            # Apply limits
+            print(f"\n   ✂️ Applying detail level limits...")
             chunk_limits = {
                 "brief": 15000,
                 "detailed": 20000,
@@ -559,15 +768,41 @@ async def _search_vectorstore_for_summary(
             }
             
             limit = chunk_limits.get(detail_level, 20000)
-            full_text = "\n\n".join([doc.page_content for doc in docs])[:limit]
+            print(f"   📏 Detail level '{detail_level}' → limit: {limit} chars")
             
-            # Return as chunks for your streaming function
-            return [{"content": full_text, "metadata": {"source": filename}}]
+            # Combine chunks
+            print(f"   🔗 Combining {len(docs)} chunks...")
+            full_text = "\n\n".join([doc.page_content for doc in docs])
+            total_chars = len(full_text)
+            print(f"   📊 Total combined text: {total_chars} chars")
+            
+            # Truncate
+            truncated_text = full_text[:limit]
+            if len(truncated_text) < len(full_text):
+                print(f"   ✂️ Truncated from {total_chars} to {len(truncated_text)} chars")
+            else:
+                print(f"   ✅ No truncation needed")
+            
+            result = [{"content": truncated_text, "metadata": {"source": fileToSummarize}}]
+            
+            print(f"\n   🎉 SUCCESS - Returning from FIREBASE")
+            print(f"   📦 Result: 1 chunk with {len(truncated_text)} chars")
+            print("="*80)
+            
+            return result
             
     except Exception as e:
-        print(f"🔥 Vector store search error: {e}")
+        print("\n" + "="*80)
+        print(f"🔥 FATAL ERROR in _search_vectorstore_for_summary")
+        print("="*80)
+        print(f"   Error type: {type(e).__name__}")
+        print(f"   Error message: {e}")
+        print(f"\n   📋 Full traceback:")
+        import traceback
+        traceback.print_exc()
+        print("="*80)
         return []
-
+    
 def get_chat_vectorstore(
     chat_id: str, 
 ) -> FAISS:
@@ -674,50 +909,52 @@ async def search_documents(query: str, max_results: int = 3) -> Dict[str, Any]:
 
 @tool
 async def generate_quiz_stream(
-    topic: str, 
-    difficulty: str = "medium", 
+    topic: str,
+    difficulty: str = "medium",
     num_questions: int = 4,
-    source_preference: str = "auto"
+    source_preference: str = "auto",
+    empathetic_message: str = None
 ) -> Dict[str, Any]:
     """
     Generate a nursing quiz for the student.
-    
+
     Use this when students request practice questions, want to test their knowledge,
     or need NCLEX-style questions on specific topics.
-    
+
     Args:
         topic: Subject area (e.g., "pharmacology", "cardiac care", "NCLEX prep")
         difficulty: Question difficulty ("easy", "medium", "hard")
         num_questions: Number of questions to generate (1-50, default: 4)
         source_preference: "documents" (from uploads), "scratch" (general), or "auto"
-    
+        empathetic_message: Optional empathetic understanding text to show before quiz (for targeted practice)
+
     Returns:
         Dictionary signaling quiz streaming should begin
     """
-    
+
     print("🎯 QUIZ TOOL: Initiating streaming quiz generation")
-    
+
     try:
         session = get_session()
-         
+
         # Normalize difficulty
         difficulty_map = {
             "facile": "easy", "easy": "easy",
             "moyen": "medium", "medium": "medium", "normal": "medium",
             "difficile": "hard", "hard": "hard", "challenging": "hard"
         }
-        
+
         normalized_difficulty = difficulty_map.get(difficulty.lower(), difficulty)
-        
+
         # Determine source
         if source_preference == "auto":
             source = "documents" if session.documents else "scratch"
         else:
             source = source_preference
-        
+
         # Validate num_questions
         num_questions = max(1, min(15, num_questions))
-        
+
         # Record tool call
         session.tool_calls.append({
             "tool": "generate_quiz_stream",
@@ -726,9 +963,10 @@ async def generate_quiz_stream(
             "difficulty": normalized_difficulty,
             "num_questions": num_questions,
             "source": source,
-            "status": "streaming_initiated"
+            "status": "streaming_initiated",
+            "has_empathetic_message": bool(empathetic_message)
         })
-        
+
         # 🔥 KEY CHANGE: Return signal to orchestrator to handle streaming
         return {
             "status": "quiz_streaming_initiated",
@@ -737,11 +975,12 @@ async def generate_quiz_stream(
                 "difficulty": normalized_difficulty,
                 "num_questions": num_questions,
                 "source": source,
-                "language": session.user_language
+                "language": session.user_language,
+                "empathetic_message": empathetic_message  # Pass empathetic message to orchestrator
             },
             "message": f"Starting quiz generation: {num_questions} questions on {topic}"
         }
-        
+
     except Exception as e:
         return {
             "status": "error",
@@ -755,37 +994,112 @@ async def stream_quiz_questions(
     difficulty: str,
     num_questions: int,
     source: str,
-    session: PersistentSessionContext
+    session: PersistentSessionContext,
+    empathetic_message: str = None,
+    chat_id: str = None
 ):
     """
     Generator that yields complete quiz questions one at a time.
     Called by orchestrator after tool signals streaming intent.
+
+    Args:
+        topic: Subject area for the quiz
+        difficulty: Question difficulty level
+        num_questions: Number of questions to generate
+        source: Source preference ("documents" or "scratch")
+        session: Current session context
+        empathetic_message: Optional empathetic understanding text to stream first
+        chat_id: Chat ID for cancellation checking
+
+    Yields:
+        Status updates and complete questions
     """
-    
+
+    # Helper to check cancellation
+    def is_cancelled():
+        manager = get_connection_manager()
+        if manager and chat_id:
+            return manager.is_cancelled(chat_id)
+        return False
+
+    # 🆕 PHASE 1: Stream empathetic message if provided
+    if empathetic_message:
+        print(f"💬 Starting empathetic message streaming...")
+
+        # Check cancellation before starting
+        if is_cancelled():
+            print(f"🛑 Quiz generation cancelled before empathetic message")
+            return
+
+        # Yield start signal
+        yield {
+            "status": "empathetic_message_start",
+            "message": "Understanding your learning needs..."
+        }
+
+        # Stream the empathetic message word by word for a human-like effect
+        words = empathetic_message.split()
+        current_text = ""
+
+        for i, word in enumerate(words):
+            # Check cancellation
+            if is_cancelled():
+                print(f"🛑 Quiz generation cancelled during empathetic message")
+                return
+
+            current_text += word + " "
+
+            # Stream in small chunks (every 3-5 words) for better UX
+            if (i + 1) % 4 == 0 or i == len(words) - 1:
+                yield {
+                    "status": "empathetic_message_chunk",
+                    "chunk": current_text.strip(),
+                    "progress": int((i + 1) / len(words) * 100)
+                }
+
+        # Signal empathetic message complete
+        yield {
+            "status": "empathetic_message_complete",
+            "full_message": empathetic_message
+        }
+
+        print(f"✅ Empathetic message streaming complete")
+
+    # 🆕 PHASE 2: Generate quiz questions (existing logic)
     # Get content based on source
     if source == "documents" and session.vectorstore:
-        # Get document content
         docs = session.vectorstore.similarity_search(query=topic, k=1000)
         full_text = "\n\n".join([doc.page_content for doc in docs])[:12000]
         content_context = f"Document content:\n{full_text}"
     else:
-        # Generate from scratch
-        content_context = f"General nursing knowledge about: {topic}"
+        content_context = f"""You are generating questions about: {topic}
+
+            If this is a broad topic (like 'research design', 'pharmacology', 'cardiac care'),
+            ensure you test diverse subtopics and concepts within that domain."""
     
-    
-    #track generate questions
+    # Track previously generated questions (for deduplication only)
     generated_questions = _extract_previous_questions(session=session, limit=30)
-      
+
     # Generate questions one at a time
     for question_num in range(1, num_questions + 1):
-        
+
+        # 🛑 Check cancellation before generating each question
+        if is_cancelled():
+            print(f"🛑 Quiz generation cancelled at question {question_num}/{num_questions}")
+            return  # Stop generating questions
+
         # Yield progress
         yield {
             "status": "generating",
             "current": question_num,
             "total": num_questions
         }
-        
+
+        # 🎲 Simply pick a random letter for each question
+        random_target_letter = random.choice(['A', 'B', 'C', 'D'])
+
+        print(f"🎲 Q{question_num}: Randomly assigned correct answer position = {random_target_letter}")
+
         # Generate single question
         question_data = await _generate_single_question(
             content=content_context,
@@ -793,102 +1107,163 @@ async def stream_quiz_questions(
             difficulty=difficulty,
             question_num=question_num,
             language=session.user_language,
-            questions_to_avoid=generated_questions
+            questions_to_avoid=generated_questions,
+            target_letter=random_target_letter  # 🎲 Random assignment
         )
-        
+
         if question_data:
-            #Append to list for next iteration
             generated_questions.append(question_data['question'])
-            # Yield complete question
+
+            # Extract answer for logging
+            answer = question_data['answer']
+            answer_letter = answer[0] if answer else 'A'
+
+            print(f"✅ Q{question_num} generated - Correct answer: {answer_letter}")
+
+            # 🛑 Check cancellation before yielding question
+            if is_cancelled():
+                print(f"🛑 Quiz generation cancelled after question {question_num} generated")
+                return
+
             yield {
                 "status": "question_ready",
                 "question": question_data,
                 "index": question_num - 1
             }
     
-    # Final completion
     yield {
         "status": "quiz_complete",
         "total_generated": num_questions
     }
-
-
 async def _generate_single_question(
     content: str,
     topic: str,
     difficulty: str,
     question_num: int,
     language: str,
-    questions_to_avoid:list = None
+    questions_to_avoid: list = None,
+    target_letter: str = None  # 🎲 Randomly assigned letter
 ) -> dict:
     """
     Generate ONE complete quiz question using LLM.
     Returns fully-formed question object.
     """
     
+    # Defensive defaults
+    if questions_to_avoid is None:
+        questions_to_avoid = []
+    
+    # Build question deduplication text
     if questions_to_avoid:
         avoid_text = "\n".join([f"- {q}" for q in questions_to_avoid])
     else:
-        avoid_text = "None - this is the first question in this quiz"
-        
-    prompt = PromptTemplate(
-        input_variables=["content", "topic", "difficulty", "question_num", "language", "questions_to_avoid"],
-        template="""
-        You are a {language}-speaking nursing quiz generator.
+        avoid_text = "None - this is the first question"
+    
+    # Build instruction for answer placement
+    if target_letter:
+        answer_instruction = f"""
+        CRITICAL REQUIREMENT - CORRECT ANSWER POSITION:
+        You MUST make option **{target_letter})** the correct answer for this question.
 
-        Generate **EXACTLY ONE high-quality multiple choice question** about: {topic}
-        
-        Difficulty: {difficulty}
-        Question number: {question_num}
-        
-        CRITICAL - DO NOT repeat or rephrase these questions ALREADY IN THIS QUIZ:
-        {questions_to_avoid}
-        
-        Context:
-        {content}
-
-        Requirements:
-        - Test critical thinking and clinical judgment
-        - Create a COMPLETELY NEW question testing a DIFFERENT concept/scenario than the ones above
-        - Use realistic nursing scenarios
-        - Create 4 plausible options (A-D)
-        - Provide detailed rationale
-        - Use clear {language}
-
-        📤 Return ONLY valid JSON (no markdown):
-        {{
-            "question": "Question text in {language}",
-            "options": [
-                "A) Option 1",
-                "B) Option 2", 
-                "C) Option 3",
-                "D) Option 4"
-            ],
-            "answer": "B) Option 2",
-            "justification": "Detailed explanation in {language}",
-            "metadata": {{
-                "sourceLanguage": "{language}",
-                "topic": "{topic}",
-                "category": "nursing_category",
-                "difficulty": "{difficulty}",
-                "correctAnswerIndex": 1,
-                "sourceDocument": "conversational_generation",
-                "keywords": ["keyword1", "keyword2"]
-            }}
-        }}
-
-        📌 Guidelines:
-        - Evidence-based nursing practice
-        - Realistic patient scenarios
-        - Focus on nursing interventions
-        - Age-appropriate conditions
+        Design your question and options so that {target_letter} is the most appropriate clinical response.
+        - All 4 options should be plausible
+        - But {target_letter} should be the BEST choice based on evidence-based practice
+        - The other options should be reasonable but less optimal or incorrect
         """
-    )
+    else:
+        answer_instruction = "You can choose any option (A, B, C, or D) as the correct answer."
+    
+    print(f"\n{'='*60}")
+    print(f"Generating Question {question_num}")
+    print(f"Target answer position: {target_letter}")
+    print(f"{'='*60}\n")
+    
+    prompt = PromptTemplate(
+        input_variables=["content", "topic", "difficulty", "question_num", "language",
+                    "questions_to_avoid", "answer_instruction"],
+    template="""
+    You are a {language}-speaking nursing quiz generator creating NCLEX-style questions.
 
-    llm = ChatOpenAI(model="gpt-4o", temperature=0.4)
+    Generate **EXACTLY ONE high-quality multiple choice question** about: {topic}
+
+    Difficulty: {difficulty}
+    Question number: {question_num}
+
+    {answer_instruction}
+
+    CRITICAL - DO NOT repeat these questions:
+    {questions_to_avoid}
+
+    Context:
+    {content}
+
+    Requirements:
+    - Test critical thinking and clinical judgment
+    - Create a COMPLETELY NEW question testing a DIFFERENT concept/scenario
+    - Use realistic nursing scenarios with specific patient details (age, condition, symptoms)
+    - Create 4 plausible options (A-D) where ALL options could seem reasonable to a novice
+    - The correct answer should be the BEST choice based on evidence-based practice
+
+    🎯 TOPIC ASSIGNMENT (NEW REQUIREMENT):
+    - Assign a SPECIFIC topic/subject to this question based on what it tests
+    - The topic should be 2-4 words maximum
+    - Be specific and descriptive (e.g., "Cardiac Medications" not "Medicine")
+    - Use consistent naming across related questions
+    - CRITICAL: Write the topic in {language} (same language as the quiz)
+    - Examples of good topics in English:
+      * "Heart Anatomy"
+      * "Blood Pressure"
+      * "Wound Assessment"
+      * "Pain Management"
+      * "Fluid Balance"
+      * "Infection Control"
+    - Examples of good topics in French:
+      * "Anatomie Cardiaque"
+      * "Pression Artérielle"
+      * "Évaluation des Plaies"
+      * "Gestion de la Douleur"
+      * "Équilibre Hydrique"
+      * "Contrôle des Infections"
+    - Examples of BAD topics:
+      * "General Knowledge" / "Connaissances Générales" (too broad)
+      * "Chapter 5" / "Chapitre 5" (not descriptive)
+      * "Various Topics" / "Sujets Divers" (meaningless)
+
+    📤 Return ONLY valid JSON (no markdown wrapper):
+    {{
+        "question": "Detailed clinical scenario in {language}",
+        "options": [
+            "A) First option",
+            "B) Second option",
+            "C) Third option",
+            "D) Fourth option"
+        ],
+        "answer": "X) The correct option",
+        "justification": "<strong>Option X is correct</strong> because [1-2 sentences explaining why this is the BEST evidence-based choice].<br><br><strong>Option A is incorrect</strong> because [1 sentence explaining the clinical flaw].<br><strong>Option B is incorrect</strong> because [1 sentence explaining the clinical flaw].<br><strong>Option C is incorrect</strong> because [1 sentence explaining the clinical flaw].",
+        "topic": "Specific Topic Name",
+        "metadata": {{
+            "sourceLanguage": "{language}",
+            "topic": "{topic}",
+            "category": "nursing",
+            "difficulty": "{difficulty}",
+            "correctAnswerIndex": 0,
+            "sourceDocument": "conversational_generation",
+            "keywords": ["relevant", "keywords"]
+        }}
+    }}
+
+    📌 Formatting Rules (CRITICAL):
+    - Use **bold** for every "Option X is..." statement
+    - Maintain parallel structure (all start the same way)
+    - Keep each explanation to 1-2 sentences
+    - Test application and analysis, not just recall
+    - MUST include the "topic" field at the root level of the JSON
+    """
+)
+
+    llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
     chain = prompt | llm | StrOutputParser()
-
-    print("Questions to avoid:", avoid_text);
+    
     try:
         result = await chain.ainvoke({
             "content": content,
@@ -896,25 +1271,47 @@ async def _generate_single_question(
             "difficulty": difficulty,
             "question_num": question_num,
             "language": language,
-            "questions_to_avoid": avoid_text
+            "questions_to_avoid": avoid_text,
+            "answer_instruction": answer_instruction
         })
         
         # Clean and parse
-        cleaned = result.strip().strip("```json").strip("```")
+        cleaned = result.strip().strip("```json").strip("```").strip()
         parsed_question = json.loads(cleaned)
-        
-        # ✅ NEW: Shuffle options to randomize correct answer position
-        parsed_question = _shuffle_question_options(parsed_question)
-        
+
+        # Extract correct answer index
+        answer = parsed_question.get('answer', '')
+        if answer:
+            answer_letter = answer[0]  # Extract 'A' from "A) ..."
+            answer_index = ord(answer_letter) - ord('A')  # A=0, B=1, C=2, D=3
+
+            if 'metadata' in parsed_question:
+                parsed_question['metadata']['correctAnswerIndex'] = answer_index
+
+        # ✨ Validate and ensure topic field exists
+        if 'topic' not in parsed_question or not parsed_question['topic']:
+            # Fallback: try to extract from metadata or use a default
+            if 'metadata' in parsed_question and 'topic' in parsed_question['metadata']:
+                parsed_question['topic'] = parsed_question['metadata']['topic']
+            else:
+                # Last resort: use the quiz topic or a generic label
+                parsed_question['topic'] = topic if topic else "General"
+            print(f"⚠️ Topic field missing, assigned: {parsed_question['topic']}")
+        else:
+            print(f"✅ Topic assigned: {parsed_question['topic']}")
+
         return parsed_question
         
     except json.JSONDecodeError as e:
         print(f"❌ Failed to parse question {question_num}: {e}")
+        if 'result' in locals():
+            print(f"Raw output: {result[:500]}...")
         return None
     except Exception as e:
         print(f"❌ Error generating question {question_num}: {e}")
+        import traceback
+        traceback.print_exc()
         return None
-
 
 def _extract_previous_questions(session: PersistentSessionContext, limit: int = 15) -> list:
     """
@@ -952,78 +1349,83 @@ def _extract_previous_questions(session: PersistentSessionContext, limit: int = 
     return previous_questions[-limit:]
 
 
-def _shuffle_question_options(question: dict) -> dict:
+
     """
-    Shuffle options to randomize correct answer position.
-    Updates both 'answer' and 'correctAnswerIndex' accordingly.
+    Replace option letter references in justification text.
+    
+    Example:
+        text: "Option A is incorrect because... Option B is correct..."
+        mapping: {'A': 'C', 'B': 'A'}
+        result: "Option C is incorrect because... Option A is correct..."
     
     Args:
-        question: Parsed question dict with options and answer
+        text: The justification text with option references
+        letter_mapping: Dictionary mapping old letters to new letters
         
     Returns:
-        Question dict with shuffled options and updated answer/index
+        Text with updated option letters
     """
     
-    if not question.get('options') or not question.get('answer'):
-        return question
+    # We need to replace in a way that doesn't cause collisions
+    # Strategy: Use temporary placeholders first
     
-    # Extract the letter labels (A, B, C, D)
-    options = question['options']
+    # Step 1: Replace with temporary placeholders
+    temp_mapping = {
+        'A': '__TEMP_A__',
+        'B': '__TEMP_B__',
+        'C': '__TEMP_C__',
+        'D': '__TEMP_D__'
+    }
     
-    # Find current correct answer
-    correct_answer_text = question['answer']
+    result = text
     
-    # Extract the actual answer text (remove the letter prefix like "A) ")
-    correct_text = correct_answer_text.split(') ', 1)[1] if ') ' in correct_answer_text else correct_answer_text
-    
-    # Find which option contains the correct answer
-    old_correct_index = -1
-    option_texts = []
-    
-    for i, opt in enumerate(options):
-        # Extract text without letter prefix
-        text = opt.split(') ', 1)[1] if ') ' in opt else opt
-        option_texts.append(text)
+    # Replace "Option A", "option A", etc. with temporary placeholders
+    for old_letter in ['A', 'B', 'C', 'D']:
+        # Match various formats: "Option A", "option A", "Options A", etc.
+        patterns = [
+            f"Option {old_letter}",
+            f"option {old_letter}",
+            f"Options {old_letter}",
+            f"options {old_letter}",
+        ]
         
-        if text == correct_text or opt == correct_answer_text:
-            old_correct_index = i
+        for pattern in patterns:
+            result = result.replace(pattern, pattern.replace(old_letter, temp_mapping[old_letter]))
     
-    if old_correct_index == -1:
-        print(f"⚠️ Warning: Could not find correct answer in options")
-        return question
+    # Step 2: Replace temporary placeholders with new letters
+    for old_letter, new_letter in letter_mapping.items():
+        temp = temp_mapping[old_letter]
+        result = result.replace(temp, new_letter)
     
-    # Create list of tuples (text, is_correct)
-    options_data = [(text, i == old_correct_index) for i, text in enumerate(option_texts)]
-    
-    # Shuffle the options
-    random.shuffle(options_data)
-    
-    # Rebuild options with new letter labels
-    letters = ['A', 'B', 'C', 'D']
-    new_options = []
-    new_correct_index = -1
-    new_answer = ""
-    
-    for i, (text, is_correct) in enumerate(options_data):
-        new_option = f"{letters[i]}) {text}"
-        new_options.append(new_option)
-        
-        if is_correct:
-            new_correct_index = i
-            new_answer = new_option
-    
-    # Update question with shuffled data
-    question['options'] = new_options
-    question['answer'] = new_answer
-    
-    if 'metadata' in question:
-        question['metadata']['correctAnswerIndex'] = new_correct_index
-    
-    print(f"🔀 Shuffled options: correct answer moved from position {old_correct_index} to {new_correct_index}")
-    
-    return question
+    return result
 
-@tool
+
+def _extract_answer_concept(answer: str, topic: str) -> str:
+    """
+    Extract the key concept from the correct answer.
+    
+    Examples:
+    - "B) Randomized controlled trial" → "Randomized controlled trial"
+    - "A) Descriptive design" → "Descriptive design"
+    
+    Args:
+        answer: The correct answer string (e.g., "B) Randomized controlled trial")
+        topic: The quiz topic for context
+        
+    Returns:
+        The core concept being tested
+    """
+    # Remove the letter prefix (A), B), C), D))
+    if ') ' in answer:
+        concept = answer.split(') ', 1)[1]
+    else:
+        concept = answer
+    
+    # Clean up common patterns
+    concept = concept.strip()
+    
+    return concept
+
 async def load_vectorstore_from_firebase(session: PersistentSessionContext) -> Optional[FAISS]:
     """
     Loads vectorstore based on documents uploaded previously, 
@@ -1038,7 +1440,7 @@ async def load_vectorstore_from_firebase(session: PersistentSessionContext) -> O
         return session.vectorstore
     
     # Create cache key from session's documents
-    current_doc_hash = frozenset([doc.filename for doc in session.documents])
+    current_doc_hash = frozenset([doc.get("filename") for doc in session.documents])
     
     # Check if documents changed since last load
     if hasattr(session, '_last_doc_hash') and session._last_doc_hash == current_doc_hash:
@@ -1082,20 +1484,301 @@ async def load_vectorstore_from_firebase(session: PersistentSessionContext) -> O
 # TOOL COLLECTION CLASS (Updated)
 # ============================================================================
 
+@tool
+async def analyze_last_quiz_and_generate_practice(
+    last_quiz_data: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Analyze the student's last quiz performance and generate a targeted practice quiz.
+
+    This tool should be used when a student expresses intent to practice their weak areas,
+    improve on topics they struggled with, or wants more practice based on previous quiz results.
+
+    The tool will:
+    1. Analyze quiz performance (score, weak topics, patterns)
+    2. Generate an empathetic, performance-appropriate message
+    3. Create a targeted quiz focusing on weak areas
+
+    Args:
+        last_quiz_data: Complete quiz data including questions, answers, topics, and user selections
+
+    Returns:
+        Streaming generator that yields empathetic message chunks and quiz questions
+
+    Example user intents that should trigger this tool:
+    - "I want to practice my weak areas"
+    - "Help me improve on topics I struggled with"
+    - "I need more practice on what I got wrong"
+    - "Practice weak topics"
+    """
+    session = get_session()
+
+    try:
+        # Extract quiz data
+        questions = last_quiz_data.get('questions', [])
+
+        if not questions:
+            yield {
+                "status": "error",
+                "message": "No quiz data available to analyze. Please complete a quiz first."
+            }
+            return
+
+        # Analyze performance
+        total_questions = len(questions)
+        correct_count = sum(1 for q in questions if q.get('userSelection', {}).get('isCorrect', False))
+        percentage = round((correct_count / total_questions) * 100) if total_questions > 0 else 0
+
+        # Analyze topic performance
+        topic_performance = {}
+        for q in questions:
+            topic = q.get('topic', 'General')
+            if topic not in topic_performance:
+                topic_performance[topic] = {'total': 0, 'correct': 0, 'questions': []}
+
+            topic_performance[topic]['total'] += 1
+            topic_performance[topic]['questions'].append(q)
+
+            if q.get('userSelection', {}).get('isCorrect', False):
+                topic_performance[topic]['correct'] += 1
+
+        # Calculate topic percentages and identify weak topics
+        weak_topics = []
+        topic_details = []
+
+        for topic, perf in topic_performance.items():
+            topic_pct = round((perf['correct'] / perf['total']) * 100) if perf['total'] > 0 else 0
+            topic_details.append(f"{topic}: {perf['correct']}/{perf['total']} ({topic_pct}%)")
+
+            if topic_pct < 60:  # Weak topic threshold
+                weak_topics.append({
+                    'name': topic,
+                    'percentage': topic_pct,
+                    'correct': perf['correct'],
+                    'total': perf['total']
+                })
+
+        # Generate empathetic message based on performance
+        empathetic_message = await _generate_performance_message(
+            percentage=percentage,
+            correct=correct_count,
+            total=total_questions,
+            weak_topics=weak_topics,
+            language=session.user_language
+        )
+
+        print(f"📊 Quiz Analysis: {percentage}% ({correct_count}/{total_questions})")
+        print(f"📌 Weak Topics: {', '.join([t['name'] for t in weak_topics]) if weak_topics else 'None'}")
+        print(f"💬 Empathetic Message: {empathetic_message[:100]}...")
+
+        # PHASE 1: Stream empathetic message
+        yield {
+            "status": "empathetic_message_start",
+            "message": "Understanding your learning needs..."
+        }
+
+        words = empathetic_message.split()
+        current_text = ""
+
+        for i, word in enumerate(words):
+            current_text += word + " "
+
+            # Stream in chunks of 4 words for smooth UX
+            if (i + 1) % 4 == 0 or i == len(words) - 1:
+                yield {
+                    "status": "empathetic_message_chunk",
+                    "chunk": current_text.strip(),
+                    "progress": int((i + 1) / len(words) * 100)
+                }
+
+        yield {
+            "status": "empathetic_message_complete",
+            "full_message": empathetic_message
+        }
+
+        # PHASE 2: Determine quiz parameters based on weak topics
+        if weak_topics:
+            # Focus on weakest topics
+            target_topics = ', '.join([t['name'] for t in weak_topics[:3]])  # Max 3 topics
+            difficulty = "easy" if percentage < 50 else "medium"
+            num_questions = 5
+        else:
+            # No weak topics - challenge with harder questions on all topics
+            target_topics = ', '.join(topic_performance.keys())
+            difficulty = "hard"
+            num_questions = 5
+
+        print(f"🎯 Generating practice quiz: {num_questions} {difficulty} questions on {target_topics}")
+
+        # PHASE 3: Call generate_quiz_stream to signal quiz generation with empathetic message
+        # This will be picked up by the orchestrator which will handle streaming via stream_quiz_questions
+        source_preference = "documents" if session.documents else "scratch"
+
+        # Call the generate_quiz_stream tool to get the signal
+        quiz_signal = await generate_quiz_stream(
+            topic=target_topics,
+            difficulty=difficulty,
+            num_questions=num_questions,
+            source_preference=source_preference,
+            empathetic_message=empathetic_message  # Pass the empathetic message we generated
+        )
+
+        # Return the signal for orchestrator to handle
+        yield quiz_signal
+
+    except Exception as e:
+        print(f"❌ Error in analyze_last_quiz_and_generate_practice: {str(e)}")
+        yield {
+            "status": "error",
+            "message": f"Failed to analyze quiz and generate practice: {str(e)}"
+        }
+
+
+async def _generate_performance_message(
+    percentage: int,
+    correct: int,
+    total: int,
+    weak_topics: List[Dict[str, Any]],
+    language: str = "en-US"
+) -> str:
+    """
+    Generate dynamic, empathetic performance message using LLM.
+
+    Each message is uniquely generated to feel authentic and human,
+    avoiding repetitive templates.
+
+    Args:
+        percentage: Overall score percentage
+        correct: Number of correct answers
+        total: Total questions
+        weak_topics: List of weak topic dictionaries
+        language: User's language preference
+
+    Returns:
+        Empathetic message string
+    """
+    is_french = language == "fr"
+
+    # Build topic analysis
+    if weak_topics:
+        topic_details = "\n".join([
+            f"- {t['name']}: {t['correct']}/{t['total']} ({t['percentage']}%)"
+            for t in weak_topics[:3]
+        ])
+        topic_summary = f"Weak areas identified:\n{topic_details}"
+    else:
+        topic_summary = "No significant weak areas - strong performance across all topics"
+
+    # Determine performance tier and tone
+    if percentage < 50:
+        tier = "struggling"
+        tone_guidance = """Warm, understanding, normalize the difficulty.
+        Sound like a supportive friend who gets it. Acknowledge this genuinely sucks but frame practice as the path forward.
+        Keep it conversational - imagine texting a friend who just told you they bombed a test."""
+    elif percentage < 70:
+        tier = "developing"
+        tone_guidance = """Encouraging, recognize their progress naturally.
+        Point out what they're getting right before mentioning what needs work.
+        Casual, friendly tone - like celebrating small wins with a study buddy."""
+    elif percentage < 85:
+        tier = "proficient"
+        tone_guidance = """Genuine praise, then gentle push toward excellence.
+        Celebrate their solid performance authentically, then frame practice as fine-tuning.
+        Confident, supportive friend who knows they can master this."""
+    else:
+        tier = "exceptional"
+        tone_guidance = """Celebrate their mastery genuinely, then challenge them.
+        Show real excitement about their performance, frame next practice as leveling up.
+        Like a coach who's genuinely impressed and wants to push their star player higher."""
+
+    # Build dynamic prompt for LLM
+    language_instruction = "in French (fr)" if is_french else "in English"
+
+    prompt = f"""You're a supportive nursing tutor and friend. Your nursing student friend just finished a quiz and you can see their results.
+
+📊 THEIR PERFORMANCE:
+- Score: {correct} out of {total} ({percentage}%)
+- Performance level: {tier}
+- {topic_summary}
+
+🎯 YOUR MISSION:
+Write a SHORT (2-3 sentences, MAX 60 words), conversational message {language_instruction} that:
+
+1. **Acknowledges their exact score** ({correct}/{total}) - be specific!
+2. **Mentions the topics they struggled with by name** - this shows you're paying attention
+3. **Briefly says what you're doing next** - creating a practice quiz for them
+4. **{tone_guidance}**
+
+🚫 CRITICAL DON'Ts:
+- NO generic phrases ("Let's do this together!", "You've got this!", "I'm here to help")
+- NO templates or corporate speak
+- NO emojis or excessive punctuation
+- NO being overly wordy - keep it tight and real
+- DO NOT sound like a robot or chatbot
+
+✅ CRITICAL DOs:
+- BE SPECIFIC: Use their actual score and actual topic names
+- BE CONVERSATIONAL: Write like you're texting a friend
+- BE AUTHENTIC: Vary your language - no two messages should ever sound the same
+- BE BRIEF: 2-3 sentences max, under 60 words
+- USE NATURAL LANGUAGE: Contractions, casual phrasing, real human speech
+
+💡 TONE GUIDE: {tone_guidance}
+
+Think: "What would I text my nursing student friend right now?"
+NOT: "What's the template for this score range?"
+
+Generate your unique, authentic message {language_instruction}:"""
+
+    try:
+        # Use OpenAI for fast, conversational responses with HIGH temperature for maximum variety
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.95)  # Very high temp for natural variation
+
+        result = await llm.ainvoke(prompt)
+        message = result.content.strip()
+
+        print(f"✅ Generated dynamic empathetic message ({len(message)} chars)")
+        return message
+
+    except Exception as e:
+        print(f"❌ Error generating dynamic message: {e}")
+
+        # Fallback to conversational varied messages
+        if is_french:
+            fallback_messages = [
+                f"{correct} sur {total} sur {weak_topics[0]['name'] if weak_topics else 'ces sujets'} - c'est vraiment difficile au début. Je prépare des questions plus simples pour t'aider à comprendre.",
+                f"Résultat: {correct}/{total}. {weak_topics[0]['name'] if weak_topics else 'Ces concepts'} sont compliqués, je sais. On va pratiquer avec des questions ciblées.",
+                f"Hey, {percentage}% - {weak_topics[0]['name'] if weak_topics else 'ce sujet'} casse la tête à tout le monde. Je génère un quiz adapté pour toi."
+            ]
+        else:
+            fallback_messages = [
+                f"{correct} out of {total} on {weak_topics[0]['name'] if weak_topics else 'these topics'} - that stuff is genuinely hard at first. I'm setting up easier questions to help you get it.",
+                f"Score: {correct}/{total}. {weak_topics[0]['name'] if weak_topics else 'These concepts'} are tricky, I know. We'll practice with targeted questions.",
+                f"Hey, {percentage}% - {weak_topics[0]['name'] if weak_topics else 'this topic'} trips everyone up. I'm generating a quiz tailored for you."
+            ]
+
+        # Pick a random fallback to add some variety
+        import random
+        return random.choice(fallback_messages)
+
+
 class NursingTools:
-    """Collection of tools for the nursing tutor - Updated for LangChain integration""" 
+    """Collection of tools for the nursing tutor - Updated for LangChain integration"""
     # pass context to the constructor
     def __init__(self, session: PersistentSessionContext):
         self.session = session
         # Set global session context for tools to access
         set_session_context(session)
-    
+
     # return list of tools I have
     def get_tools(self):
         """Return list of tools for LangChain binding"""
+        from tools.flashcard_tools import generate_flashcards_stream
+
         return [
             search_documents,
             generate_quiz_stream,
+            generate_flashcards_stream,
             summarize_document,
             generate_study_sheet_stream
         ]
