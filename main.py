@@ -286,6 +286,7 @@ async def websocket_endpoint(websocket: WebSocket, chat_id: str):
 async def handle_websocket_message(chat_id: str, message: dict, websocket: WebSocket):
     """Handle incoming WebSocket messages"""
     message_type = message.get("type")
+    print(f"📨 Received WebSocket message: type={message_type}, chat_id={chat_id}")
 
     # check if Im getting a message
     if message_type == "chat_message":
@@ -462,6 +463,53 @@ async def process_game_quiz(chat_id: str, message: dict, websocket: WebSocket):
         session = nursing_tutor.session  # PersistentSessionContext
 
         # ------------------------------------------
+        # Step 1.5: Ensure vectorstore is loaded from Firebase
+        # The upload saves vectorstore to Firebase, but a new WebSocket
+        # session needs to load it back into memory.
+        #
+        # RACE CONDITION HANDLING: The background upload might still be
+        # in progress when this runs, so we retry a few times with delays.
+        # ------------------------------------------
+        if session.vectorstore is None:
+            print(f"📥 Loading vectorstore from Firebase for game quiz...")
+
+            # Notify frontend we're loading documents
+            await websocket.send_text(json.dumps({
+                "type": "stream_chunk",
+                "data": {
+                    "status": "game_loading_documents",
+                    "message": "Loading your documents..."
+                }
+            }))
+
+            # Retry up to 5 times with increasing delays (total ~10 seconds max)
+            max_retries = 5
+            retry_delays = [1, 2, 2, 3, 3]  # seconds between retries
+            loaded_vectorstore = None
+
+            for attempt in range(max_retries):
+                loaded_vectorstore = await vectorstore_manager.load_combined_vectorstore_from_firebase(chat_id)
+
+                if loaded_vectorstore:
+                    session.vectorstore = loaded_vectorstore
+                    print(f"✅ Vectorstore loaded successfully for {chat_id} (attempt {attempt + 1})")
+                    break
+                else:
+                    if attempt < max_retries - 1:
+                        wait_time = retry_delays[attempt]
+                        print(f"⏳ Vectorstore not ready yet, waiting {wait_time}s... (attempt {attempt + 1}/{max_retries})")
+                        await asyncio.sleep(wait_time)
+                    else:
+                        print(f"⚠️ No vectorstore found in Firebase for {chat_id} after {max_retries} attempts")
+
+            if not loaded_vectorstore:
+                await websocket.send_text(json.dumps({
+                    "type": "error",
+                    "message": "Documents are still processing. Please wait a moment and try again."
+                }))
+                return
+
+        # ------------------------------------------
         # Step 2: Get or initialize game state from Firestore
         # ------------------------------------------
         chat_doc = chat_ref.get()
@@ -510,6 +558,9 @@ async def process_game_quiz(chat_id: str, message: dict, websocket: WebSocket):
         quiz_id = f"quiz_{uuid4().hex[:8]}"
 
         print(f"🎮 Generating {question_count} {difficulty} questions...")
+        print(f"📊 Session vectorstore status: {session.vectorstore is not None}")
+        if session.vectorstore:
+            print(f"📊 Vectorstore type: {type(session.vectorstore)}")
 
         # ------------------------------------------
         # Step 5: Stream questions using existing function
