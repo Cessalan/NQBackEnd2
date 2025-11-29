@@ -354,8 +354,10 @@ class NursingTutor:
                                 metadata = result.get("metadata", {})
                                 empathetic_message = metadata.get("empathetic_message")
 
-                                # Import streaming function
-                                from tools.quiztools import stream_quiz_questions
+                                # Import streaming function WITH Question Bank integration
+                                # This checks the bank for instant delivery, then generates remaining via LLM
+                                # New questions are saved to the bank in the background for future reuse
+                                from services.quiz_with_bank import stream_quiz_with_bank as stream_quiz_questions
 
                                 # Track questions for final save
                                 all_questions = []

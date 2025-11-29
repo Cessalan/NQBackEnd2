@@ -442,7 +442,8 @@ async def process_game_quiz(chat_id: str, message: dict, websocket: WebSocket):
     """
     try:
         # Import what we need
-        from tools.quiztools import stream_quiz_questions
+        # Use the Question Bank-integrated version for instant delivery + bank enrichment
+        from services.quiz_with_bank import stream_quiz_with_bank as stream_quiz_questions
         from firebase_admin import firestore
         from uuid import uuid4
 
@@ -1939,6 +1940,150 @@ async def generate_chat_title(request: GenerateTitleRequest):
         cleaned_title = generated_title.replace('"', '').replace("'", "").strip()
 
         return GenerateTitleResponse(title=cleaned_title)
+
+# ============================================================================
+# QUESTION BANK IMPORT ENDPOINT
+# ============================================================================
+from pydantic import BaseModel
+from typing import List, Optional, Dict, Any
+
+class QuestionMetadata(BaseModel):
+    """Metadata object matching LLM output format."""
+    sourceLanguage: str = "en"
+    topic: str = ""
+    category: str = "nursing"
+    difficulty: str = "medium"
+    correctAnswerIndex: int = 0
+    sourceDocument: str = "admin_import"
+    keywords: List[str] = []
+
+class QuestionImport(BaseModel):
+    """
+    Single question for import.
+    Matches the EXACT format your LLM generates.
+    """
+    question: str
+    options: List[str]  # ["A) ...", "B) ...", "C) ...", "D) ..."]
+    answer: str         # The correct option text (e.g., "B) ...")
+    justification: str  # HTML explanation
+    topic: str          # e.g., "cardiac medications"
+    metadata: Optional[QuestionMetadata] = None  # Optional - matches LLM output
+
+class BulkImportRequest(BaseModel):
+    """Request body for bulk question import."""
+    questions: List[QuestionImport]
+
+@app.post("/admin/import-questions")
+async def import_questions(request: BulkImportRequest):
+    """
+    Import AI-generated questions into the Question Bank.
+
+    Accepts questions in the EXACT format your LLM generates.
+    The metadata object is optional but will be used if provided.
+
+    Example request body (matches LLM output):
+    {
+        "questions": [
+            {
+                "question": "A patient receiving digoxin reports nausea...",
+                "options": [
+                    "A) Continue the medication as prescribed",
+                    "B) Hold the medication and notify the provider",
+                    "C) Administer an antiemetic",
+                    "D) Document the findings and reassess later"
+                ],
+                "answer": "B) Hold the medication and notify the provider",
+                "justification": "<strong>Option B is correct</strong> because...",
+                "topic": "Cardiac Medications",
+                "metadata": {
+                    "sourceLanguage": "en",
+                    "topic": "Cardiac Medications",
+                    "category": "nursing",
+                    "difficulty": "medium",
+                    "correctAnswerIndex": 1,
+                    "sourceDocument": "conversational_generation",
+                    "keywords": ["digoxin", "toxicity", "cardiac"]
+                }
+            }
+        ]
+    }
+    """
+    from services.question_bank import question_bank
+
+    results = {
+        "total": len(request.questions),
+        "imported": 0,
+        "duplicates": 0,
+        "errors": [],
+        "imported_ids": []
+    }
+
+    for i, q in enumerate(request.questions):
+        try:
+            # Extract language and difficulty from metadata if available
+            language = "en"
+            difficulty = "medium"
+
+            if q.metadata:
+                language = q.metadata.sourceLanguage or "en"
+                difficulty = q.metadata.difficulty or "medium"
+
+            # Normalize language code
+            if language.lower().startswith("fr"):
+                language = "fr"
+            elif language.lower().startswith("es"):
+                language = "es"
+            else:
+                language = "en"
+
+            # The question_data format expected by save_question
+            question_data = {
+                "question": q.question,
+                "options": q.options,
+                "answer": q.answer,
+                "justification": q.justification,
+                "topic": q.topic
+            }
+
+            # Save to question bank
+            doc_id = await question_bank.save_question(
+                question_data=question_data,
+                topic=q.topic,
+                language=language,
+                difficulty=difficulty,
+                chat_id="admin_import"  # Mark as admin import
+            )
+
+            if doc_id:
+                results["imported"] += 1
+                results["imported_ids"].append(doc_id)
+                print(f"✅ Imported question {i+1}: {doc_id}")
+            else:
+                results["duplicates"] += 1
+                print(f"⚠️ Question {i+1} skipped (duplicate)")
+
+        except Exception as e:
+            error_msg = f"Question {i+1}: {str(e)}"
+            results["errors"].append(error_msg)
+            print(f"❌ Error importing question {i+1}: {e}")
+
+    print(f"📊 Import complete: {results['imported']} imported, {results['duplicates']} duplicates, {len(results['errors'])} errors")
+
+    return results
+
+
+@app.get("/admin/question-bank-stats")
+async def get_question_bank_stats():
+    """
+    Get statistics about the Question Bank.
+
+    Returns total questions, breakdown by language and category.
+    """
+    from services.question_bank import question_bank
+
+    stats = await question_bank.get_bank_stats()
+    return stats
+
 
 # ============================================================================
 # HEALTH CHECK
