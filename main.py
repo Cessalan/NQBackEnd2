@@ -190,11 +190,29 @@ if api_key:
 else:
     print("❌ OPENAI_API_KEY is NOT SET")
 
+# ============================================================================
+# COST OPTIMIZATION: Lifespan context manager for startup/shutdown
+# ============================================================================
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Lifespan context manager for startup and shutdown events"""
+    # Startup
+    asyncio.create_task(periodic_cleanup())
+    print("🚀 Started periodic cleanup task (30s interval, 60s timeout)")
+    yield
+    # Shutdown - cleanup all sessions
+    print("🛑 Shutting down - cleaning up all sessions...")
+    for chat_id in list(ACTIVE_SESSIONS.keys()):
+        cleanup_session(chat_id)
+
 # Create FastAPI app
 app = FastAPI(
     title="Nursing Tutor AI",
     version="1.0.0",
-    description="AI-powered nursing education assistant with tool calling"
+    description="AI-powered nursing education assistant with tool calling",
+    lifespan=lifespan
 )
 
 # Configure CORS
@@ -214,17 +232,52 @@ app.add_middleware(
 
 # Global session storage
 ACTIVE_SESSIONS: Dict[str, NursingTutor] = {}
+SESSION_LAST_ACTIVITY: Dict[str, float] = {}  # Track last activity time for each session
+
+# ============================================================================
+# COST OPTIMIZATION: Session cleanup configuration
+# ============================================================================
+SESSION_IDLE_TIMEOUT = 60  # 60 seconds - close everything after no interaction
+CONNECTION_IDLE_TIMEOUT = 60  # 60 seconds - WebSocket timeout matches session
+SESSION_MAX_AGE = 1800  # 30 minutes - max session lifetime regardless of activity
+
+import time
+
+def cleanup_session(chat_id: str):
+    """Clean up session and free memory"""
+    if chat_id in ACTIVE_SESSIONS:
+        try:
+            session = ACTIVE_SESSIONS[chat_id]
+            # Clear vectorstore to free memory
+            if hasattr(session, 'session') and hasattr(session.session, 'vectorstore'):
+                session.session.vectorstore = None
+            del ACTIVE_SESSIONS[chat_id]
+            print(f"🧹 Cleaned up session for chat_id: {chat_id}")
+        except Exception as e:
+            print(f"⚠️ Error cleaning up session {chat_id}: {e}")
+
+    if chat_id in SESSION_LAST_ACTIVITY:
+        del SESSION_LAST_ACTIVITY[chat_id]
+
+def update_session_activity(chat_id: str):
+    """Update last activity timestamp for a session"""
+    SESSION_LAST_ACTIVITY[chat_id] = time.time()
 
 # Connection manager for WebSocket connections
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[str, WebSocket] = {}
         self.cancellation_flags: Dict[str, bool] = {}  # Track if chat should be cancelled
+        self.connection_times: Dict[str, float] = {}  # Track when connection was established
+        self.last_activity: Dict[str, float] = {}  # Track last message time
 
     async def connect(self, websocket: WebSocket, chat_id: str):
         await websocket.accept()
         self.active_connections[chat_id] = websocket
         self.cancellation_flags[chat_id] = False  # Reset cancellation flag
+        self.connection_times[chat_id] = time.time()
+        self.last_activity[chat_id] = time.time()
+        update_session_activity(chat_id)
         print(f"✅ WebSocket connected for chat_id: {chat_id}")
 
     def disconnect(self, chat_id: str):
@@ -233,6 +286,19 @@ class ConnectionManager:
             print(f"❌ WebSocket disconnected for chat_id: {chat_id}")
         if chat_id in self.cancellation_flags:
             del self.cancellation_flags[chat_id]
+        if chat_id in self.connection_times:
+            del self.connection_times[chat_id]
+        if chat_id in self.last_activity:
+            del self.last_activity[chat_id]
+
+        # COST OPTIMIZATION: Clean up session when WebSocket disconnects
+        # This frees memory immediately instead of waiting
+        cleanup_session(chat_id)
+
+    def update_activity(self, chat_id: str):
+        """Update last activity time for a connection"""
+        self.last_activity[chat_id] = time.time()
+        update_session_activity(chat_id)
 
     def cancel_stream(self, chat_id: str):
         """Mark a chat's stream for cancellation"""
@@ -255,6 +321,27 @@ class ConnectionManager:
                 print(f"Error sending message to {chat_id}: {e}")
                 self.disconnect(chat_id)
 
+    async def cleanup_idle_connections(self):
+        """Close connections that have been idle too long - called periodically"""
+        current_time = time.time()
+        to_close = []
+
+        for chat_id, last_time in list(self.last_activity.items()):
+            idle_seconds = current_time - last_time
+            if idle_seconds > CONNECTION_IDLE_TIMEOUT:
+                to_close.append(chat_id)
+                print(f"⏰ Connection {chat_id} idle for {idle_seconds:.0f}s, closing...")
+
+        for chat_id in to_close:
+            try:
+                ws = self.active_connections.get(chat_id)
+                if ws:
+                    await ws.close(1000, "Idle timeout - reconnect when needed")
+            except Exception as e:
+                print(f"Error closing idle connection {chat_id}: {e}")
+            finally:
+                self.disconnect(chat_id)
+
 # Global connection manager
 manager = ConnectionManager()
 
@@ -262,20 +349,66 @@ manager = ConnectionManager()
 from tools.quiztools import set_connection_manager, get_chat_context_from_db
 set_connection_manager(manager)
 
+# ============================================================================
+# COST OPTIMIZATION: Background cleanup task
+# ============================================================================
+async def periodic_cleanup():
+    """Background task to clean up idle sessions and connections"""
+    while True:
+        try:
+            await asyncio.sleep(30)  # Check every 30 seconds for 60s timeout
+            current_time = time.time()
+
+            # Clean up idle connections
+            await manager.cleanup_idle_connections()
+
+            # Clean up expired sessions (even without active WebSocket)
+            sessions_to_cleanup = []
+            for chat_id, last_activity in list(SESSION_LAST_ACTIVITY.items()):
+                idle_time = current_time - last_activity
+                if idle_time > SESSION_IDLE_TIMEOUT:
+                    sessions_to_cleanup.append(chat_id)
+                    print(f"🧹 Session {chat_id} expired (idle {idle_time:.0f}s)")
+
+            for chat_id in sessions_to_cleanup:
+                cleanup_session(chat_id)
+
+            # Log stats
+            active_sessions = len(ACTIVE_SESSIONS)
+            active_connections = len(manager.active_connections)
+            if active_sessions > 0 or active_connections > 0:
+                print(f"📊 Active: {active_sessions} sessions, {active_connections} connections")
+
+        except Exception as e:
+            print(f"⚠️ Cleanup task error: {e}")
+
 # WebSocket endpoint
 @app.websocket("/ws/{chat_id}")
 async def websocket_endpoint(websocket: WebSocket, chat_id: str):
     #connect
-    await manager.connect(websocket, chat_id) 
+    await manager.connect(websocket, chat_id)
     try:
         while True:
-            # Wait for incoming message from client
-            data = await websocket.receive_text()
+            # Wait for incoming message from client with timeout
+            # COST OPTIMIZATION: Use asyncio.wait_for to enforce connection timeout
+            try:
+                data = await asyncio.wait_for(
+                    websocket.receive_text(),
+                    timeout=CONNECTION_IDLE_TIMEOUT
+                )
+            except asyncio.TimeoutError:
+                print(f"⏰ WebSocket {chat_id} timed out after {CONNECTION_IDLE_TIMEOUT}s idle")
+                await websocket.close(1000, "Idle timeout")
+                break
+
             message = json.loads(data)
-            
+
+            # Update activity timestamp
+            manager.update_activity(chat_id)
+
             # Handle different message types
             await handle_websocket_message(chat_id, message, websocket)
-            
+
     except WebSocketDisconnect:
         manager.disconnect(chat_id)
         print(f"Client {chat_id} disconnected")

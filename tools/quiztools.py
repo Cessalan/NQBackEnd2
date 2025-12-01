@@ -913,23 +913,51 @@ async def generate_quiz_stream(
     difficulty: str = "medium",
     num_questions: int = 4,
     source_preference: str = "auto",
+    question_types: List[str] = None,
     empathetic_message: str = None
 ) -> Dict[str, Any]:
     """
-    Generate a nursing quiz for the student.
+    Generate a nursing quiz for the student with support for multiple question formats.
 
     Use this when students request practice questions, want to test their knowledge,
     or need NCLEX-style questions on specific topics.
+
+    IMPORTANT - Detecting Question Types from User Messages:
+    - If user EXPLICITLY asks for BOTH types (e.g., "1 mcq and 1 sata", "mix of mcq and sata")
+      → question_types=["mcq", "sata"]
+    - If user ONLY mentions "SATA", "select all that apply" without mentioning MCQ
+      → question_types=["sata"]
+    - If user says "NGN format", "next generation", or "mixed format"
+      → question_types=["mcq", "sata", "casestudy"]
+    - If user just wants regular questions or doesn't specify → use ["mcq"]
+    - If user asks for "case study", "drag and drop", "ordering", "prioritization", "bowtie"
+      → include "casestudy" in question_types
+
+    Examples of user intents and question_types to use:
+    - "Give me a quiz on cardiac care" → question_types=["mcq"]
+    - "SATA questions on diabetes" → question_types=["sata"] (ONLY sata requested)
+    - "1 mcq and 1 sata question" → question_types=["mcq", "sata"] (BOTH requested)
+    - "2 questions, one multiple choice one select all" → question_types=["mcq", "sata"]
+    - "NGN format questions on endocrine" → question_types=["mcq", "sata", "casestudy"]
+    - "Mixed format NCLEX prep" → question_types=["mcq", "sata", "casestudy"]
+    - "Case study question on cardiac" → question_types=["casestudy"]
+    - "Drag and drop prioritization question" → question_types=["casestudy"]
+    - "Give me a bowtie question" → question_types=["casestudy"]
 
     Args:
         topic: Subject area (e.g., "pharmacology", "cardiac care", "NCLEX prep")
         difficulty: Question difficulty ("easy", "medium", "hard")
         num_questions: Number of questions to generate (1-50, default: 4)
         source_preference: "documents" (from uploads), "scratch" (general), or "auto"
-        empathetic_message: Optional empathetic understanding text to show before quiz (for targeted practice)
+        question_types: List of question formats to include. Options:
+            - "mcq" = Multiple choice (single answer) - DEFAULT
+            - "sata" = Select All That Apply (multiple correct answers)
+            - "casestudy" = NGN-style case study with drag-and-drop ordering
+            If None or empty, defaults to ["mcq"]
+        empathetic_message: Optional empathetic understanding text to show before quiz
 
     Returns:
-        Dictionary signaling quiz streaming should begin
+        Dictionary signaling quiz streaming should begin with question type info
     """
 
     print("🎯 QUIZ TOOL: Initiating streaming quiz generation")
@@ -955,6 +983,23 @@ async def generate_quiz_stream(
         # Validate num_questions
         num_questions = max(1, min(15, num_questions))
 
+        # Normalize question_types - default to MCQ if not specified
+        if question_types is None or len(question_types) == 0:
+            question_types = ["mcq"]
+
+        # Validate question types
+        valid_types = ["mcq", "sata", "casestudy", "ordering", "bowtie"]
+        question_types = [qt.lower() for qt in question_types if qt.lower() in valid_types]
+
+        # Normalize aliases: ordering and bowtie both map to casestudy
+        question_types = ["casestudy" if qt in ["ordering", "bowtie"] else qt for qt in question_types]
+
+        # Fallback to MCQ if no valid types
+        if not question_types:
+            question_types = ["mcq"]
+
+        print(f"📋 Question types requested: {question_types}")
+
         # Record tool call
         session.tool_calls.append({
             "tool": "generate_quiz_stream",
@@ -963,11 +1008,12 @@ async def generate_quiz_stream(
             "difficulty": normalized_difficulty,
             "num_questions": num_questions,
             "source": source,
+            "question_types": question_types,
             "status": "streaming_initiated",
             "has_empathetic_message": bool(empathetic_message)
         })
 
-        # 🔥 KEY CHANGE: Return signal to orchestrator to handle streaming
+        # Return signal to orchestrator to handle streaming
         return {
             "status": "quiz_streaming_initiated",
             "metadata": {
@@ -976,9 +1022,10 @@ async def generate_quiz_stream(
                 "num_questions": num_questions,
                 "source": source,
                 "language": session.user_language,
-                "empathetic_message": empathetic_message  # Pass empathetic message to orchestrator
+                "question_types": question_types,  # NEW: Pass question types to orchestrator
+                "empathetic_message": empathetic_message
             },
-            "message": f"Starting quiz generation: {num_questions} questions on {topic}"
+            "message": f"Starting quiz generation: {num_questions} questions on {topic} (formats: {', '.join(question_types)})"
         }
 
     except Exception as e:
@@ -996,11 +1043,15 @@ async def stream_quiz_questions(
     source: str,
     session: PersistentSessionContext,
     empathetic_message: str = None,
-    chat_id: str = None
+    chat_id: str = None,
+    question_types: List[str] = None
 ):
     """
     Generator that yields complete quiz questions one at a time.
     Called by orchestrator after tool signals streaming intent.
+
+    Supports mixed question types - can generate MCQ, SATA, or a mix based on
+    what the user requested via the question_types parameter.
 
     Args:
         topic: Subject area for the quiz
@@ -1010,10 +1061,21 @@ async def stream_quiz_questions(
         session: Current session context
         empathetic_message: Optional empathetic understanding text to stream first
         chat_id: Chat ID for cancellation checking
+        question_types: List of question types to generate ["mcq", "sata", "ordering"]
+                       If None or empty, defaults to ["mcq"]
 
     Yields:
         Status updates and complete questions
     """
+    # Import SATA and Case Study generators
+    from tools.sata_prompts import generate_sata_question, distribute_question_types
+    from tools.casestudy_prompts import generate_casestudy_question
+
+    # Default to MCQ if no types specified
+    if question_types is None or len(question_types) == 0:
+        question_types = ["mcq"]
+
+    print(f"📋 Generating quiz with question types: {question_types}")
 
     # Helper to check cancellation
     def is_cancelled():
@@ -1065,7 +1127,7 @@ async def stream_quiz_questions(
 
         print(f"✅ Empathetic message streaming complete")
 
-    # 🆕 PHASE 2: Generate quiz questions (existing logic)
+    # 🆕 PHASE 2: Generate quiz questions
     # Get content based on source
     if source == "documents" and session.vectorstore:
         docs = session.vectorstore.similarity_search(query=topic, k=1000)
@@ -1076,9 +1138,15 @@ async def stream_quiz_questions(
 
             If this is a broad topic (like 'research design', 'pharmacology', 'cardiac care'),
             ensure you test diverse subtopics and concepts within that domain."""
-    
+
     # Track previously generated questions (for deduplication only)
     generated_questions = _extract_previous_questions(session=session, limit=30)
+
+    # Distribute question types across the quiz
+    # e.g., for 10 questions with ["mcq", "sata"], might get:
+    # ['mcq', 'mcq', 'sata', 'mcq', 'mcq', 'sata', 'mcq', 'mcq', 'sata', 'mcq']
+    question_type_sequence = distribute_question_types(num_questions, question_types)
+    print(f"📝 Question type distribution: {question_type_sequence}")
 
     # Generate questions one at a time
     for question_num in range(1, num_questions + 1):
@@ -1088,37 +1156,79 @@ async def stream_quiz_questions(
             print(f"🛑 Quiz generation cancelled at question {question_num}/{num_questions}")
             return  # Stop generating questions
 
-        # Yield progress
+        # Get the question type for this question
+        current_question_type = question_type_sequence[question_num - 1]
+
+        # Yield progress with question type info
         yield {
             "status": "generating",
             "current": question_num,
-            "total": num_questions
+            "total": num_questions,
+            "question_type": current_question_type
         }
 
-        # 🎲 Simply pick a random letter for each question
-        random_target_letter = random.choice(['A', 'B', 'C', 'D'])
+        question_data = None
 
-        print(f"🎲 Q{question_num}: Randomly assigned correct answer position = {random_target_letter}")
+        # Generate based on question type
+        if current_question_type == "sata":
+            # Generate SATA question
+            print(f"🔷 Q{question_num}: Generating SATA question")
+            question_data = await generate_sata_question(
+                topic=topic,
+                difficulty=difficulty,
+                question_num=question_num,
+                language=session.user_language,
+                content_context=content_context,
+                questions_to_avoid=generated_questions
+            )
+        elif current_question_type == "casestudy":
+            # Generate Case Study / NGN question
+            print(f"🏥 Q{question_num}: Generating Case Study question")
+            question_data = await generate_casestudy_question(
+                topic=topic,
+                difficulty=difficulty,
+                question_num=question_num,
+                language=session.user_language,
+                content_context=content_context,
+                questions_to_avoid=generated_questions
+            )
+        else:
+            # Generate MCQ question (default)
+            print(f"🔶 Q{question_num}: Generating MCQ question")
 
-        # Generate single question
-        question_data = await _generate_single_question(
-            content=content_context,
-            topic=topic,
-            difficulty=difficulty,
-            question_num=question_num,
-            language=session.user_language,
-            questions_to_avoid=generated_questions,
-            target_letter=random_target_letter  # 🎲 Random assignment
-        )
+            # 🎲 Simply pick a random letter for each question
+            random_target_letter = random.choice(['A', 'B', 'C', 'D'])
+            print(f"🎲 Randomly assigned correct answer position = {random_target_letter}")
+
+            question_data = await _generate_single_question(
+                content=content_context,
+                topic=topic,
+                difficulty=difficulty,
+                question_num=question_num,
+                language=session.user_language,
+                questions_to_avoid=generated_questions,
+                target_letter=random_target_letter
+            )
+
+            # Ensure MCQ has questionType field for frontend routing
+            if question_data and 'questionType' not in question_data:
+                question_data['questionType'] = 'mcq'
 
         if question_data:
             generated_questions.append(question_data['question'])
 
-            # Extract answer for logging
-            answer = question_data['answer']
-            answer_letter = answer[0] if answer else 'A'
-
-            print(f"✅ Q{question_num} generated - Correct answer: {answer_letter}")
+            # Log success
+            q_type = question_data.get('questionType', 'mcq')
+            if q_type == 'sata':
+                num_correct = len(question_data.get('answer', []))
+                print(f"✅ Q{question_num} SATA generated - {num_correct} correct answers")
+            elif q_type == 'casestudy':
+                num_items = len(question_data.get('correctOrder', []))
+                print(f"✅ Q{question_num} Case Study generated - {num_items} items to order")
+            else:
+                answer = question_data.get('answer', '')
+                answer_letter = answer[0] if answer else 'A'
+                print(f"✅ Q{question_num} MCQ generated - Correct answer: {answer_letter}")
 
             # 🛑 Check cancellation before yielding question
             if is_cancelled():
@@ -1130,10 +1240,11 @@ async def stream_quiz_questions(
                 "question": question_data,
                 "index": question_num - 1
             }
-    
+
     yield {
         "status": "quiz_complete",
-        "total_generated": num_questions
+        "total_generated": num_questions,
+        "question_types_used": list(set(question_type_sequence))
     }
 async def _generate_single_question(
     content: str,

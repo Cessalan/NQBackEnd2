@@ -128,7 +128,8 @@ class QuestionBankService:
         language: str = "en",
         difficulty: str = "medium",
         count: int = 4,
-        exclude_ids: Optional[List[str]] = None
+        exclude_ids: Optional[List[str]] = None,
+        question_type: Optional[str] = None
     ) -> Tuple[List[Dict], int]:
         """
         Retrieve questions from the bank for a given topic.
@@ -143,6 +144,8 @@ class QuestionBankService:
             difficulty: Difficulty level ("easy", "medium", "hard")
             count: Number of questions to retrieve
             exclude_ids: List of question IDs to exclude (avoid repeats)
+            question_type: Optional question type filter ("mcq", "sata", "casestudy")
+                          If not specified, returns MCQ questions only for backwards compatibility
 
         Returns:
             Tuple of (list of questions, number retrieved from bank)
@@ -152,7 +155,8 @@ class QuestionBankService:
             ...     topic="cardiac medications",
             ...     language="en",
             ...     difficulty="medium",
-            ...     count=4
+            ...     count=4,
+            ...     question_type="mcq"
             ... )
             >>> print(f"Got {from_bank} questions from bank")
         """
@@ -161,11 +165,25 @@ class QuestionBankService:
         difficulty = validate_difficulty(difficulty)
         exclude_set = set(exclude_ids) if exclude_ids else set()
 
+        # Normalize question type (default to mcq for backwards compatibility)
+        if question_type is None:
+            question_type = "mcq"
+        question_type = question_type.lower()
+
+        # For casestudy/ordering/bowtie types, skip the bank entirely for now
+        # since most existing questions are MCQ. Force generation of new questions.
+        if question_type in ["casestudy", "ordering", "bowtie"]:
+            logger.info(
+                f"Question bank: Skipping bank for question_type='{question_type}' - "
+                f"forcing LLM generation for topic='{topic}'"
+            )
+            return [], 0
+
         # Build the composite query key for topic-based lookup
         query_key = build_query_key(language, difficulty, topic)
 
         # Strategy 1: Try exact topic match
-        questions = await self._query_by_key("ldt", query_key, count * 2, exclude_set)
+        questions = await self._query_by_key("ldt", query_key, count * 2, exclude_set, question_type)
 
         # Strategy 2: If not enough, try NCLEX category fallback
         if len(questions) < count:
@@ -178,7 +196,7 @@ class QuestionBankService:
 
             # Get more questions from same NCLEX category
             additional = await self._query_by_key(
-                "ldc", category_key, count * 2, exclude_set
+                "ldc", category_key, count * 2, exclude_set, question_type
             )
             questions.extend(additional)
 
@@ -191,7 +209,7 @@ class QuestionBankService:
 
         logger.info(
             f"Question bank: Retrieved {from_bank_count}/{count} for topic='{topic}', "
-            f"lang='{language}', diff='{difficulty}'"
+            f"lang='{language}', diff='{difficulty}', qtype='{question_type}'"
         )
 
         return final_questions, from_bank_count
@@ -201,7 +219,8 @@ class QuestionBankService:
         field: str,
         value: str,
         limit: int,
-        exclude_ids: Set[str]
+        exclude_ids: Set[str],
+        question_type: str = "mcq"
     ) -> List[Dict]:
         """
         Query questions using a composite key field.
@@ -214,6 +233,7 @@ class QuestionBankService:
             value: The composite key value to match
             limit: Maximum number of documents to fetch
             exclude_ids: Set of question IDs to skip
+            question_type: Question type to filter by ("mcq", "sata", "casestudy")
 
         Returns:
             List of question dictionaries
@@ -233,12 +253,16 @@ class QuestionBankService:
             # Execute query (this is synchronous in firebase-admin)
             docs = query.stream()
 
-            # Convert to question format, skipping excluded IDs
+            # Convert to question format, skipping excluded IDs and filtering by type
             results = []
             for doc in docs:
                 if doc.id not in exclude_ids:
-                    question = self._document_to_question(doc)
-                    results.append(question)
+                    data = doc.to_dict()
+                    # Filter by question type (default to mcq for old questions without qtype)
+                    doc_qtype = data.get("qtype", "mcq")
+                    if doc_qtype == question_type:
+                        question = self._document_to_question(doc)
+                        results.append(question)
 
             return results
 
@@ -251,7 +275,7 @@ class QuestionBankService:
         Convert a Firestore document to the question format expected by frontend.
 
         This ensures the question object matches the structure that
-        the quiz components expect.
+        the quiz components expect, handling different question types.
 
         Args:
             doc: Firestore document snapshot
@@ -261,15 +285,23 @@ class QuestionBankService:
         """
         data = doc.to_dict()
 
-        # Calculate correct answer index for frontend
+        # Get question type (default to mcq for backwards compatibility)
+        question_type = data.get("qtype", "mcq")
+
+        # Calculate correct answer index for frontend (MCQ only)
         options = data.get("opts", [])
         answer = data.get("ans", "")
-        try:
-            correct_index = options.index(answer)
-        except ValueError:
-            correct_index = 0
 
-        return {
+        # For MCQ, calculate correct index
+        correct_index = 0
+        if question_type == "mcq" and isinstance(answer, str):
+            try:
+                correct_index = options.index(answer)
+            except ValueError:
+                correct_index = 0
+
+        # Build base question object
+        question = {
             # Include ID for tracking and exclusion
             "id": doc.id,
 
@@ -278,6 +310,9 @@ class QuestionBankService:
             "options": options,
             "answer": answer,
             "justification": data.get("just", ""),
+
+            # Question type for frontend routing
+            "questionType": question_type,
 
             # Topic for analytics
             "topic": data.get("topic", ""),
@@ -293,11 +328,24 @@ class QuestionBankService:
                 "keywords": [],
                 "nclex_category": get_full_category_name(data.get("cat", "")),
                 "nclex_subcategory": get_full_subcategory_name(data.get("subcat", "")),
+                "questionType": question_type,
             },
 
             # Flag to indicate this came from the bank
             "from_bank": True
         }
+
+        # Add SATA-specific fields
+        if question_type == "sata":
+            question["scoringType"] = data.get("scoringType", "partial")
+
+        # Add case study-specific fields
+        if question_type == "casestudy":
+            question["caseStudy"] = data.get("caseStudy", {})
+            question["correctOrder"] = data.get("correctOrder", [])
+            question["scoringType"] = data.get("scoringType", "partial")
+
+        return question
 
     # ==========================================
     # SAVE QUESTIONS
@@ -381,6 +429,9 @@ class QuestionBankService:
                 logger.info(f"Duplicate question detected, skipping save")
                 return None
 
+            # Determine question type (mcq, sata, casestudy, etc.)
+            question_type = question_data.get("questionType", "mcq")
+
             # Build the document to save
             doc_data = {
                 # Core question content (short keys to save storage)
@@ -388,6 +439,7 @@ class QuestionBankService:
                 "opts": question_data.get("options", []),
                 "ans": question_data.get("answer", ""),
                 "just": question_data.get("justification", ""),
+                "qtype": question_type,  # Question type for filtering
 
                 # Classification (flat fields for efficient queries)
                 "lang": language,
@@ -411,6 +463,17 @@ class QuestionBankService:
                 "served": 0,
                 "correct": 0
             }
+
+            # For SATA questions, store answer as array
+            if question_type == "sata" and isinstance(question_data.get("answer"), list):
+                doc_data["ans"] = question_data.get("answer", [])
+                doc_data["scoringType"] = question_data.get("scoringType", "partial")
+
+            # For case study questions, store additional fields
+            if question_type == "casestudy":
+                doc_data["caseStudy"] = question_data.get("caseStudy", {})
+                doc_data["correctOrder"] = question_data.get("correctOrder", [])
+                doc_data["scoringType"] = question_data.get("scoringType", "partial")
 
             # Add to Firestore
             print(f"📝 [QuestionBank.save_question] Adding to Firestore collection '{self.COLLECTION_NAME}'...")

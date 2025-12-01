@@ -65,10 +65,12 @@ async def stream_quiz_with_bank(
     source: str,
     session: PersistentSessionContext,
     empathetic_message: str = None,
-    chat_id: str = None
+    chat_id: str = None,
+    question_types: List[str] = None
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Generate quiz questions using Question Bank first, then LLM for the rest.
+    Supports multiple question types (MCQ, SATA, etc.)
 
     This is a drop-in replacement for stream_quiz_questions that adds
     Question Bank integration. The yielded chunks have the same format.
@@ -81,6 +83,8 @@ async def stream_quiz_with_bank(
         session: Current session context with user info and vectorstore
         empathetic_message: Optional empathetic message to stream first
         chat_id: Chat ID for cancellation checking
+        question_types: List of question types to generate ["mcq", "sata", "casestudy"]
+                       Defaults to ["mcq"] if not specified
 
     Yields:
         Status updates and complete questions in the same format as
@@ -98,11 +102,22 @@ async def stream_quiz_with_bank(
         ...     difficulty="medium",
         ...     num_questions=4,
         ...     source="scratch",
-        ...     session=session
+        ...     session=session,
+        ...     question_types=["mcq", "sata"]  # Mixed format quiz
         ... ):
         ...     if chunk["status"] == "question_ready":
         ...         print(f"Got question: {chunk['question']['question'][:50]}...")
     """
+    # Import SATA, Case Study, and Unfolding Case Study generators for mixed type quizzes
+    from tools.sata_prompts import generate_sata_question, distribute_question_types
+    from tools.casestudy_prompts import generate_casestudy_question
+    from tools.unfolding_casestudy_prompts import generate_unfolding_casestudy
+
+    # Default to MCQ if no types specified
+    if question_types is None or len(question_types) == 0:
+        question_types = ["mcq"]
+
+    logger.info(f"Question types requested: {question_types}")
 
     # ==========================================
     # HELPER FUNCTIONS
@@ -179,9 +194,13 @@ async def stream_quiz_with_bank(
     exclude_ids = []  # Could be enhanced to track question IDs across sessions
 
     # Try to get questions from the bank
+    # For mixed-type quizzes, we query for each type separately
+    # For single-type quizzes, we query for that specific type
+    primary_question_type = question_types[0] if question_types else "mcq"
+
     logger.info(
         f"Checking Question Bank: topic='{topic}', lang='{language}', "
-        f"diff='{difficulty}', count={num_questions}"
+        f"diff='{difficulty}', count={num_questions}, qtype='{primary_question_type}'"
     )
 
     try:
@@ -190,7 +209,8 @@ async def stream_quiz_with_bank(
             language=language,
             difficulty=difficulty,
             count=num_questions,
-            exclude_ids=exclude_ids
+            exclude_ids=exclude_ids,
+            question_type=primary_question_type  # Pass question type for filtering
         )
     except Exception as e:
         logger.error(f"Error getting questions from bank: {e}")
@@ -267,40 +287,90 @@ async def stream_quiz_with_bank(
         for q in bank_questions:
             generated_questions.append(q.get("question", ""))
 
+        # Distribute question types for remaining questions
+        # This ensures a good mix of MCQ and SATA if both are requested
+        remaining_type_sequence = distribute_question_types(questions_to_generate, question_types)
+        logger.info(f"Question type distribution for remaining: {remaining_type_sequence}")
+
         # Generate remaining questions one at a time
         for i in range(questions_to_generate):
             current_question_num = question_index + 1
+            current_question_type = remaining_type_sequence[i]
 
             # Check cancellation before generating
             if is_cancelled():
                 logger.info(f"Quiz generation cancelled at question {current_question_num}")
                 return
 
-            # Yield progress update
+            # Yield progress update with question type info
             yield {
                 "status": "generating",
                 "current": current_question_num,
                 "total": num_questions,
-                "source": "llm"  # Indicates this is being generated
+                "source": "llm",
+                "question_type": current_question_type
             }
 
-            # Randomly assign correct answer position
-            random_target_letter = random.choice(['A', 'B', 'C', 'D'])
+            question_data = None
 
-            logger.debug(
-                f"Generating Q{current_question_num}: target answer = {random_target_letter}"
-            )
+            # Generate based on question type
+            if current_question_type == "sata":
+                # Generate SATA question
+                logger.info(f"Generating SATA question {current_question_num}")
+                question_data = await generate_sata_question(
+                    topic=topic,
+                    difficulty=difficulty,
+                    question_num=current_question_num,
+                    language=session.user_language,
+                    content_context=content_context,
+                    questions_to_avoid=generated_questions
+                )
+            elif current_question_type == "casestudy":
+                # Generate Case Study / NGN question
+                logger.info(f"Generating Case Study question {current_question_num}")
+                question_data = await generate_casestudy_question(
+                    topic=topic,
+                    difficulty=difficulty,
+                    question_num=current_question_num,
+                    language=session.user_language,
+                    content_context=content_context,
+                    questions_to_avoid=generated_questions
+                )
+            elif current_question_type == "unfoldingcase" or current_question_type == "unfoldingCase":
+                # Generate Unfolding Case Study (NGN 6-item format)
+                # This is an advanced format with multiple items per case
+                logger.info(f"Generating Unfolding Case Study {current_question_num}")
+                question_data = await generate_unfolding_casestudy(
+                    topic=topic,
+                    difficulty=difficulty,
+                    language=session.user_language or "english",
+                    questions_to_avoid=generated_questions
+                )
+            else:
+                # Generate MCQ question (default)
+                logger.info(f"Generating MCQ question {current_question_num}")
 
-            # Generate the question via LLM
-            question_data = await _generate_single_question(
-                content=content_context,
-                topic=topic,
-                difficulty=difficulty,
-                question_num=current_question_num,
-                language=session.user_language,
-                questions_to_avoid=generated_questions,
-                target_letter=random_target_letter
-            )
+                # Randomly assign correct answer position
+                random_target_letter = random.choice(['A', 'B', 'C', 'D'])
+
+                logger.debug(
+                    f"Generating Q{current_question_num}: target answer = {random_target_letter}"
+                )
+
+                # Generate the question via LLM
+                question_data = await _generate_single_question(
+                    content=content_context,
+                    topic=topic,
+                    difficulty=difficulty,
+                    question_num=current_question_num,
+                    language=session.user_language,
+                    questions_to_avoid=generated_questions,
+                    target_letter=random_target_letter
+                )
+
+                # Ensure MCQ has questionType field
+                if question_data and 'questionType' not in question_data:
+                    question_data['questionType'] = 'mcq'
 
             if question_data:
                 # Add to deduplication list
@@ -322,8 +392,9 @@ async def stream_quiz_with_bank(
                 all_questions.append(question_data)
                 question_index += 1
 
+                q_type = question_data.get('questionType', 'mcq')
                 logger.info(
-                    f"Generated Q{current_question_num}: {question_data['question'][:50]}..."
+                    f"Generated Q{current_question_num} ({q_type}): {question_data['question'][:50]}..."
                 )
 
                 # ==========================================
