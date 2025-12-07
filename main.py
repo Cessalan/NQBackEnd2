@@ -291,9 +291,11 @@ class ConnectionManager:
         if chat_id in self.last_activity:
             del self.last_activity[chat_id]
 
-        # COST OPTIMIZATION: Clean up session when WebSocket disconnects
-        # This frees memory immediately instead of waiting
-        cleanup_session(chat_id)
+        # COST OPTIMIZATION: DON'T cleanup session immediately on disconnect
+        # Keep session alive for 60s so user can reconnect without reloading vectorstore
+        # The periodic_cleanup task will clean it up if truly idle
+        # This saves cost by avoiding repeated Firebase/vectorstore loads
+        update_session_activity(chat_id)  # Reset timer on disconnect
 
     def update_activity(self, chat_id: str):
         """Update last activity time for a connection"""
@@ -532,7 +534,12 @@ async def process_chat_message(chat_id: str, message: dict, websocket: WebSocket
             "type": "stream_complete",
             "message": "Response complete"
         }))
-        
+
+        # COST OPTIMIZATION: Server closes connection after stream completes
+        # Don't wait for client - close immediately to free resources
+        print(f"⚡ Stream complete for {chat_id}, closing connection from server")
+        await websocket.close(1000, "Stream complete")
+
     except Exception as e:
         print(f"Error processing chat message: {e}")
         await websocket.send_text(json.dumps({
@@ -760,6 +767,10 @@ async def process_game_quiz(chat_id: str, message: dict, websocket: WebSocket):
                     }
                 }))
                 print(f"🎮 Quiz complete! Sent {question_index} questions")
+
+                # COST OPTIMIZATION: Close connection after quiz completes
+                print(f"⚡ Game quiz complete for {chat_id}, closing connection")
+                await websocket.close(1000, "Quiz complete")
 
     except Exception as e:
         print(f"❌ Game quiz error: {e}")
