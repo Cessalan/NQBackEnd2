@@ -434,6 +434,8 @@ class NursingTutor:
                                             "total_generated": chunk.get("total_generated")
                                         }) + "\n"
 
+                                # Quiz is done - don't generate suggestions after quiz
+                                return
 
                     except Exception as e:
                         print(f"🔥 Tool execution error: {e}")

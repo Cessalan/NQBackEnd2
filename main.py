@@ -967,6 +967,105 @@ def get_temp_dir():
         return tempfile.gettempdir()
 
 
+# ============================================================================
+# POST-UPLOAD MESSAGE HELPERS
+# ============================================================================
+# These functions build the friendly message shown after file upload.
+# They use templates instead of LLM calls for instant response + zero cost.
+# ============================================================================
+
+def build_post_upload_message(topics: list, file_count: int, language: str) -> str:
+    """
+    Build a friendly message after file upload using templates.
+
+    WHY TEMPLATES INSTEAD OF LLM:
+    - Instant response (no API latency)
+    - Zero cost (no tokens used)
+    - Predictable output
+    - Still feels natural with variety built in
+
+    Args:
+        topics: List of topics extracted from uploaded files
+        file_count: Number of files uploaded
+        language: User's language ('english', 'french', 'fr', etc.)
+
+    Returns:
+        A friendly message string
+    """
+    import random
+
+    # Determine if French
+    is_french = language.lower() in ["fr", "french", "français"]
+
+    # Format topics into readable string
+    if topics:
+        if len(topics) == 1:
+            topics_str = topics[0]
+        elif len(topics) == 2:
+            topics_str = f"{topics[0]} and {topics[1]}" if not is_french else f"{topics[0]} et {topics[1]}"
+        else:
+            # "Topic1, Topic2, and Topic3"
+            if is_french:
+                topics_str = ", ".join(topics[:-1]) + f" et {topics[-1]}"
+            else:
+                topics_str = ", ".join(topics[:-1]) + f", and {topics[-1]}"
+    else:
+        topics_str = "your study material" if not is_french else "ton matériel d'étude"
+
+    # File count text
+    if file_count == 1:
+        file_text = "your notes" if not is_french else "tes notes"
+    else:
+        file_text = f"all {file_count} files" if not is_french else f"les {file_count} fichiers"
+
+    # Message templates - variety keeps it feeling natural
+    if is_french:
+        templates = [
+            f"C'est bon! J'ai parcouru {file_text} et trouvé du contenu sur {topics_str}. Par où veux-tu commencer?",
+            f"Parfait! J'ai analysé {file_text} — on a de la matière sur {topics_str}. Qu'est-ce qu'on attaque en premier?",
+            f"J'ai tout reçu! Tes documents couvrent {topics_str}. Comment veux-tu étudier?",
+        ]
+    else:
+        templates = [
+            f"Got it! I've gone through {file_text} and found material on {topics_str}. Where would you like to start?",
+            f"All set! I've looked through {file_text} — there's good content on {topics_str}. How do you want to dive in?",
+            f"Nice! Your documents cover {topics_str}. Pick a way to start studying!",
+        ]
+
+    return random.choice(templates)
+
+
+def get_post_upload_actions(language: str) -> list:
+    """
+    Get the action buttons to show after file upload.
+
+    These are the primary actions a student would want after uploading notes:
+    1. Quiz - Test their knowledge
+    2. Flashcards - Memorize key concepts
+    3. Study sheet - Get a summary breakdown
+
+    Args:
+        language: User's language
+
+    Returns:
+        List of action dictionaries with id, label, and icon
+    """
+    is_french = language.lower() in ["fr", "french", "français"]
+
+    if is_french:
+        return [
+            {"id": "quiz", "label": "Teste-moi sur ces sujets", "icon": "🧪"},
+            {"id": "flashcards", "label": "Créer des flashcards", "icon": "📇"},
+            {"id": "studysheet", "label": "Fais-moi un résumé", "icon": "📝"}
+        ]
+    else:
+        return [
+            {"id": "quiz", "label": "Quiz me on these topics", "icon": "🧪"},
+            {"id": "flashcards", "label": "Create flashcards to study", "icon": "📇"},
+            {"id": "studysheet", "label": "Break it down for me", "icon": "📝"}
+        ]
+
+
 @app.post("/chat/upload-files")
 async def upload_multiple_files(
     files: List[UploadFile] = File(...),
@@ -1221,55 +1320,10 @@ async def upload_multiple_files(
                         print(f"⚠️ Summary generation failed: {summary_error}")
             
             # ========================================
-            # Build Suggestions after user uploads
+            # DISABLED: Suggestions after upload
+            # PostUploadActions now handles guiding the user
             # ========================================
-
-            if chat_id in ACTIVE_SESSIONS:
-                session = ACTIVE_SESSIONS[chat_id]
-                file_insights = getattr(session.session, "file_insights", {})
-                
-                print(f"🔍 DEBUG: file_insights keys = {list(file_insights.keys())}")
-                print(f"🔍 DEBUG: file_insights content = {file_insights}")
-                
-                if file_insights:
-                    print(f"📝 Generating post-upload suggestions for {len(file_insights)} files...")
-                    try:
-                        from services.orchestrator import generate_post_upload_suggestions
-                        suggestions = await generate_post_upload_suggestions(
-                            session=session,
-                            file_insights=file_insights
-                        )
-                        
-                        if suggestions:
-                            # 🆕 SAVE DIRECTLY TO FIREBASE (instead of just yielding)
-                            try:
-                                from firebase_admin import firestore
-                                db = firestore.client()
-                                
-                                suggestion_message = {
-                                    "role": "assistant",
-                                    "type": "suggested_prompts",
-                                    "suggestions": suggestions,
-                                    "timestamp": firestore.SERVER_TIMESTAMP,
-                                    "isStreaming": False
-                                }
-                                
-                                # Save to Firestore
-                                db.collection('chats').document(chat_id).collection('messages').add(suggestion_message)
-                                print(f"✅ Saved {len(suggestions)} suggestions to Firebase")
-                                
-                            except Exception as firebase_error:
-                                print(f"⚠️ Firebase save failed: {firebase_error}")
-                                # Still yield for fallback
-                                yield json.dumps({
-                                    "type": "suggested_prompts",
-                                    "suggestions": suggestions
-                                }) + "\n"
-                            
-                        else:
-                            print(f"chatID :{chat_id} FOUND, insights:{file_insights}, but no suggestions")
-                    except Exception as e:
-                        print(f"⚠️ Suggestion generation failed: {e}")
+            # Suggestions are only generated during normal conversation flow
             # ========================================
             # READY TO CHAT - USER CAN START IMMEDIATELY
             # ========================================
@@ -1307,7 +1361,80 @@ async def upload_multiple_files(
                 "total_words": total_words,
                 "status": "success"
             }) + "\n"
-            
+
+            # ========================================
+            # POST-UPLOAD: FRIENDLY MESSAGE + ACTIONS
+            # ========================================
+            #
+            # WHY: After uploading, users see stats but don't know what to do next.
+            # This sends a friendly AI message with action buttons to guide them.
+            #
+            # COST OPTIMIZATION: We reuse the topics already extracted during upload
+            # (stored in file_insights) instead of making another LLM call to analyze.
+            # The friendly message is built from a template - no extra API call needed.
+            #
+            # FLOW:
+            # 1. Collect topics from all uploaded files (already extracted)
+            # 2. Build a friendly message using templates (instant, no LLM)
+            # 3. Send to frontend + save to Firebase
+            # ========================================
+
+            if chat_id in ACTIVE_SESSIONS:
+                session = ACTIVE_SESSIONS[chat_id]
+                file_insights = getattr(session.session, "file_insights", {})
+
+                if file_insights:
+                    try:
+                        # -----------------------------------------
+                        # STEP 1: Collect all topics from uploaded files
+                        # These were already extracted during file processing
+                        # -----------------------------------------
+                        all_topics = []
+                        for filename, insights in file_insights.items():
+                            if insights and insights.get("topics"):
+                                all_topics.extend(insights.get("topics", []))
+
+                        # Remove duplicates, keep max 5 for readability
+                        unique_topics = list(set(all_topics))[:5]
+                        filenames = [f["filename"] for f in valid_files]
+                        file_count = len(valid_files)
+
+                        # -----------------------------------------
+                        # STEP 2: Build friendly message from template
+                        # No LLM call = instant response, zero cost
+                        # -----------------------------------------
+                        friendly_message = build_post_upload_message(
+                            topics=unique_topics,
+                            file_count=file_count,
+                            language=language
+                        )
+
+                        # -----------------------------------------
+                        # STEP 3: Build action buttons (localized)
+                        # These appear below the message for quick actions
+                        # -----------------------------------------
+                        actions = get_post_upload_actions(language)
+
+                        # -----------------------------------------
+                        # STEP 4: Send to frontend
+                        # Frontend will handle saving to Firebase to control timing
+                        # (ensures LoadingMessageBox is saved first, then PostUploadActions)
+                        # -----------------------------------------
+                        yield json.dumps({
+                            "type": "post_upload_message",
+                            "message": friendly_message,
+                            "topics": unique_topics,
+                            "filenames": filenames,
+                            "file_count": file_count,
+                            "actions": actions
+                        }) + "\n"
+
+                        print(f"✅ Post-upload message sent to frontend (frontend saves to Firebase)")
+
+                    except Exception as post_upload_error:
+                        # Non-critical - user can still chat even if this fails
+                        print(f"⚠️ Post-upload message failed: {post_upload_error}")
+
         except Exception as e:
             print(f"❌ Batch processing error: {e}")
             import traceback
