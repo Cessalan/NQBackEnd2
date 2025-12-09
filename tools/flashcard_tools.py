@@ -249,7 +249,7 @@ async def _generate_single_flashcard(
     prompt = PromptTemplate(
         input_variables=["content", "topic", "card_num", "language", "cards_to_avoid"],
         template="""
-You are a {language}-speaking educational flashcard generator.
+You are a {language}-speaking educational flashcard generator creating SCANNABLE, EASY-TO-READ content.
 
 Generate **EXACTLY ONE high-quality flashcard** about: {topic}
 
@@ -261,42 +261,53 @@ CRITICAL - DO NOT repeat these flashcard fronts:
 Context:
 {content}
 
-Requirements:
-- Front: A clear, focused question or term to test (keep concise, 1-2 sentences max)
-- Back: A comprehensive, accurate answer or definition (2-4 sentences)
-- Topic: A specific 2-4 word category label in {language} (e.g., "Heart Anatomy", "Anatomie Cardiaque")
-- Hint: Optional subtle hint without giving away the answer (1 sentence, optional)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 ANSWER FORMAT RULES (CRITICAL!)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Flashcard Design Principles:
-- Front should test ONE specific concept clearly
-- Back should provide complete, memorable explanation
-- Use active recall - front should prompt retrieval, not recognition
-- Include relevant clinical context or examples in the back
-- Make it practical and applicable to real situations
-- Keep language clear and accessible
+The "back" (answer) MUST be:
+✅ SHORT & SCANNABLE - Max 3-5 bullet points or 2-3 short sentences
+✅ USE BULLET POINTS (•) - Break information into digestible chunks
+✅ BOLD KEY TERMS - Wrap important words in **bold**
+✅ NO WALLS OF TEXT - If longer than 4 lines, use bullets
+
+FORMAT EXAMPLES:
+
+❌ BAD (wall of text):
+"Digoxin toxicity presents with nausea, vomiting, visual disturbances like yellow-green halos, and cardiac arrhythmias including bradycardia. Nurses should check apical pulse for one full minute before administration and hold if HR is below 60 bpm in adults."
+
+✅ GOOD (scannable):
+"**Key Signs:**
+• Nausea & vomiting
+• Yellow-green visual halos
+• Bradycardia / arrhythmias
+
+**Nursing Action:** Check apical pulse × 1 min → Hold if HR < 60"
+
+✅ GOOD (concise sentences):
+"**Digoxin toxicity** causes GI upset + yellow-green halos + arrhythmias.
+
+**Always check:** Apical pulse × 1 full minute before giving. Hold if HR < 60 bpm."
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Requirements:
+- Front: Clear, focused question (1-2 sentences max)
+- Back: SCANNABLE answer using bullets/bold (see format rules above)
+- Topic: 2-4 word category in {language}
+- Hint: Optional 1-sentence hint
 
 🎯 TOPIC ASSIGNMENT:
-- Assign a SPECIFIC topic/subject to this flashcard
-- The topic should be 2-4 words maximum
-- Be specific and descriptive (e.g., "Cardiac Medications" not "Medicine")
-- CRITICAL: Write the topic in {language} (same language as the flashcard)
-- Examples in English:
-  * "Heart Anatomy"
-  * "Blood Pressure"
-  * "Wound Assessment"
-  * "Pain Management"
-- Examples in French:
-  * "Anatomie Cardiaque"
-  * "Pression Artérielle"
-  * "Évaluation des Plaies"
-  * "Gestion de la Douleur"
+- 2-4 words maximum, specific and descriptive
+- Write in {language}
+- Examples: "Heart Anatomy", "Anatomie Cardiaque", "Pain Management"
 
 📤 Return ONLY valid JSON (no markdown wrapper):
 {{
-    "front": "Clear question or term in {language}",
-    "back": "Comprehensive answer or definition in {language}",
-    "topic": "Specific Topic Name",
-    "hint": "Optional subtle hint (can be omitted if not needed)"
+    "front": "Clear question in {language}",
+    "back": "Scannable answer with **bold** and • bullets in {language}",
+    "topic": "Specific Topic",
+    "hint": "Optional hint"
 }}
 
 Generate your flashcard in {language}:"""

@@ -176,97 +176,15 @@ class NursingTutor:
                                 return
                             
                             print(f"📚 Generating study sheet for: {topic}")
-                            
-                            from services.studysheetstreamer import StudySheetStreamer
-                            streamer = StudySheetStreamer(self.session)
-                            
-                            # Get context
-                            context = await streamer.get_document_context(topic)
-                            
-                            # Generate outline
-                            yield json.dumps({
-                                "status": "study_sheet_analyzing",
-                                "message": "Analyzing documents..."
-                            }) + "\n"
-                            
-                            sections = await streamer.generate_dynamic_outline(topic, context, language)
-                            
-                            yield json.dumps({
-                                "status": "study_sheet_plan_ready",
-                                "sections": sections
-                            }) + "\n"
-                            
-                            # Create skeleton
-                            skeleton_html = streamer.create_collapsible_skeleton(topic, sections, language)
-                            
-                            yield json.dumps({
-                                "status": "study_sheet_html_skeleton",
-                                "html_content": skeleton_html
-                            }) + "\n"
-                            
-                            # Generate each section COMPLETELY (no word-by-word)
-                            current_html = skeleton_html
-                            current_progress = 15
-                            section_weight = 70 / len(sections)
-                            
-                            for i, section in enumerate(sections):
-                                # Section start
-                                yield json.dumps({
-                                    "status": "study_sheet_section_start",
-                                    "section_id": section["id"],
-                                    "section_title": section["title"],
-                                    "message": section["message"],
-                                    "progress": current_progress
-                                }) + "\n"
-                                
-                                
-                                # Get section-specific context
-                                section_context = await streamer.get_section_specific_context(
-                                    section_title=section["title"],
-                                    section_scope=section.get("scope", ""),
-                                    topic=topic
-                                )
-                                
-                                # Fallback if needed
-                                if not section_context:
-                                    print(f"⚠️ Using fallback context for: {section['title']}")
-                                    section_context = context[:8000]
-                                    
-                                # Generate COMPLETE section (no streaming)
-                                section_html = await streamer.generate_rich_section_html(section, topic, context, language)
-                                
-                                # Replace placeholder
-                                placeholder = f"{{{{CONTENT_{section['id']}}}}}"
-                                current_html = current_html.replace(placeholder, section_html)
-                                
-                                # Update badge
-                                old_badge = f'<span class="badge badge-loading" id="badge-{section["id"]}">'
-                                new_badge = f'<span class="badge badge-loaded" id="badge-{section["id"]}">✓</span>'
-                                current_html = current_html.replace(old_badge, new_badge)
-                                
-                                current_progress += section_weight
-                                
-                                # Send update with complete section
-                                yield json.dumps({
-                                    "status": "study_sheet_content_update",
-                                    "html_content": current_html,
-                                    "progress": min(current_progress, 99)
-                                }) + "\n"
-                                
-                                # Section complete
-                                yield json.dumps({
-                                    "status": "study_sheet_section_complete",
-                                    "section_id": section["id"],
-                                    "progress": current_progress
-                                }) + "\n"
-                            
-                            # Final completion
-                            yield json.dumps({
-                                "status": "study_sheet_complete",
-                                "html_content": current_html,
-                                "progress": 100
-                            }) + "\n"
-                            
+
+                            # Use new simple study sheet generator (fast, streamed text)
+                            from services.studysheet_simple import SimpleStudySheetGenerator
+                            generator = SimpleStudySheetGenerator(self.session)
+
+                            # Stream the study sheet
+                            async for chunk in generator.generate_study_sheet_stream(topic, language):
+                                yield chunk
+
                             return
                                                        
                         elif tool_name == "generate_flashcards_stream":
