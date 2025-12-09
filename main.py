@@ -176,7 +176,9 @@ firebase_admin.initialize_app(cred, {
 # })
 
 
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.getenv("GOOGLE_API_KEY")
+# Set Google Cloud credentials to the Firebase service account file
+# This enables Google Cloud TTS and other Google Cloud APIs
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "FireBaseAccess.json"
 api_key = os.getenv("OPENAI_API_KEY")
 if api_key:
     print(f"✅ OPENAI_API_KEY found")
@@ -220,6 +222,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
+        "http://localhost:3001",
         "https://docai-efb03.web.app",
         "https://docai-efb03.firebaseapp.com",
         "https://chats.nursequizai.com",
@@ -237,8 +240,8 @@ SESSION_LAST_ACTIVITY: Dict[str, float] = {}  # Track last activity time for eac
 # ============================================================================
 # COST OPTIMIZATION: Session cleanup configuration
 # ============================================================================
-SESSION_IDLE_TIMEOUT = 60  # 60 seconds - close everything after no interaction
-CONNECTION_IDLE_TIMEOUT = 60  # 60 seconds - WebSocket timeout matches session
+SESSION_IDLE_TIMEOUT = 120  # 2 minutes - reasonable for OpenAI TTS
+CONNECTION_IDLE_TIMEOUT = 120  # 2 minutes - WebSocket timeout
 SESSION_MAX_AGE = 1800  # 30 minutes - max session lifetime regardless of activity
 
 import time

@@ -355,6 +355,66 @@ class NursingTutor:
                                 # Quiz is done - don't generate suggestions after quiz
                                 return
 
+                        elif tool_name == "generate_audio_content":
+                            print("🎙️ Audio content tool triggered")
+                            print(f"📋 Tool arguments: {tool_args}")
+
+                            from tools.audio_tools import generate_audio_content
+                            result = await generate_audio_content.ainvoke(tool_args)
+
+                            if result.get("status") == "audio_options":
+                                # User needs to select duration - show options
+                                print("🎙️ Showing audio options to user")
+                                yield json.dumps({
+                                    "status": "audio_options",
+                                    "topic": result.get("topic"),
+                                    "intent": result.get("intent"),
+                                    "style_name": result.get("style_name"),
+                                    "style_description": result.get("style_description"),
+                                    "durations": result.get("durations"),
+                                    "default_duration": result.get("default_duration"),
+                                    "message": result.get("message")
+                                }) + "\n"
+                                return
+
+                            elif result.get("status") == "audio_generation_initiated":
+                                # Duration selected - generate audio
+                                print("🎙️ Starting audio generation")
+                                metadata = result.get("metadata", {})
+
+                                yield json.dumps({
+                                    "status": "audio_generating",
+                                    "message": f"Creating {metadata.get('style_name', 'audio')} about {metadata.get('topic')}...",
+                                    "phase": "starting"
+                                }) + "\n"
+
+                                # Import and use audio generator
+                                from services.audio_generator import AudioGenerator
+                                generator = AudioGenerator(self.session)
+
+                                # Get progress data if this is a progress report
+                                progress_data = metadata.get("progress_data")
+
+                                # Stream audio generation
+                                async for chunk in generator.generate_audio_stream(
+                                    topic=metadata.get("topic"),
+                                    intent=metadata.get("intent"),
+                                    duration=metadata.get("duration"),
+                                    language=metadata.get("language", language),
+                                    progress_data=progress_data
+                                ):
+                                    yield chunk
+
+                                return
+
+                            else:
+                                # Error
+                                yield json.dumps({
+                                    "status": "error",
+                                    "message": result.get("message", "Audio generation failed")
+                                }) + "\n"
+                                return
+
                     except Exception as e:
                         print(f"🔥 Tool execution error: {e}")
                         tool_results.append({"error": str(e)})
@@ -512,6 +572,19 @@ class NursingTutor:
                                       Examples: "Create flashcards about X", "Make flashcards for studying Y", "I need flashcards to memorize Z"
         - generate_study_sheet_stream: When the user explicitly asks for a study sheet or a guide  OR when they ask for previous/old study sheets, basically, if the intent is to create or modify a study sheet
         - summarize_document: When they want document summaries
+        - generate_audio_content: Generate audio lectures, summaries, or explanations
+          **INTENT DETECTION** - Use this when user wants AUDIO content:
+          - "teach me about X", "explain X to me" → intent="teach" (structured lesson)
+          - "summarize X", "quick overview" → intent="summarize" (key points only)
+          - "deep dive into X", "everything about X" → intent="deep_dive" (comprehensive)
+          - "explain X simply", "basics of X" → intent="simplify" (beginner-friendly)
+          - "how am I doing", "my progress" → intent="progress" (stats report)
+
+          Examples of when to use:
+          - "Teach me about cardiac medications" → generate_audio_content(topic="cardiac medications", intent="teach")
+          - "Give me a quick summary of pharmacokinetics" → generate_audio_content(topic="pharmacokinetics", intent="summarize")
+          - "I want a deep dive into the nervous system" → generate_audio_content(topic="nervous system", intent="deep_dive")
+          - "Explain simply how insulin works" → generate_audio_content(topic="how insulin works", intent="simplify")
 
         CRITICAL LANGUAGE RULE:
         - When extracting the 'topic' parameter for any tool, you MUST preserve the topic

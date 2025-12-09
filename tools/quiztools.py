@@ -1885,11 +1885,13 @@ class NursingTools:
     def get_tools(self):
         """Return list of tools for LangChain binding"""
         from tools.flashcard_tools import generate_flashcards_stream
+        from tools.audio_tools import generate_audio_content
 
         return [
             search_documents,
             generate_quiz_stream,
             generate_flashcards_stream,
             summarize_document,
-            generate_study_sheet_stream
+            generate_study_sheet_stream,
+            generate_audio_content
         ]
