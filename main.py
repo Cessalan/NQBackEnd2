@@ -1046,6 +1046,7 @@ def get_post_upload_actions(language: str) -> list:
     1. Quiz - Test their knowledge
     2. Flashcards - Memorize key concepts
     3. Study sheet - Get a summary breakdown
+    4. Audio - Listen to a lecture on the topics
 
     Args:
         language: User's language
@@ -1059,13 +1060,15 @@ def get_post_upload_actions(language: str) -> list:
         return [
             {"id": "quiz", "label": "Teste-moi sur ces sujets", "icon": "🧪"},
             {"id": "flashcards", "label": "Créer des flashcards", "icon": "📇"},
-            {"id": "studysheet", "label": "Fais-moi un résumé", "icon": "📝"}
+            {"id": "studysheet", "label": "Fais-moi un résumé", "icon": "📝"},
+            {"id": "audio", "label": "Écouter une leçon audio", "icon": "🎧"}
         ]
     else:
         return [
             {"id": "quiz", "label": "Quiz me on these topics", "icon": "🧪"},
             {"id": "flashcards", "label": "Create flashcards to study", "icon": "📇"},
-            {"id": "studysheet", "label": "Break it down for me", "icon": "📝"}
+            {"id": "studysheet", "label": "Break it down for me", "icon": "📝"},
+            {"id": "audio", "label": "Listen to an audio lesson", "icon": "🎧"}
         ]
 
 
@@ -1080,7 +1083,10 @@ async def upload_multiple_files(
     # Validate and normalize language parameter
     if not language or language == "undefined" or language == "null":
         language = "english"  # Default fallback
-    print(F"*Upload received: user{ user_id}, chat:{chat_id}, language:{language}*")
+
+    # Normalize language code (handle 'fr-FR', 'fr-CA', etc.)
+    language = language.lower().split('-')[0]  # 'fr-FR' -> 'fr'
+    print(f"*Upload received: user {user_id}, chat:{chat_id}, language:{language}*")
     # Read all files immediately
     file_data_list = []
     for file in files:

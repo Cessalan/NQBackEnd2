@@ -257,14 +257,8 @@ class AudioGenerator:
 
         if language == "french":
             lang_instruction = """Respond entirely in French.
-CRITICAL FOR NATURAL FRENCH SPEECH:
-- Use natural spoken French, not written/formal French
-- Include teaching phrases like "Alors...", "Voyons...", "N'oubliez pas...", "En fait..."
-- Use rhetorical questions to engage: "Pourquoi est-ce important?" "Vous voyez?"
-- Add conversational connectors: "Donc", "Ensuite", "Par exemple", "Autrement dit"
-- Sound like a warm, experienced French nursing professor speaking to students
-- Vary sentence length - mix short punchy sentences with longer explanations
-- Use "vous" (formal) but keep the tone warm and approachable"""
+Write as if you're naturally speaking to nursing students - be yourself, be human.
+Use "vous" but keep the tone warm and conversational, like a professor who genuinely cares."""
         else:
             lang_instruction = "Respond in English."
 
@@ -415,18 +409,12 @@ Write an informative audio script:"""
             return await self._openai_tts(text, language)
 
     async def _elevenlabs_tts(self, text: str, language: str) -> tuple[str, float]:
-        """ElevenLabs TTS - native French teacher voice"""
+        """ElevenLabs TTS - natural French voice"""
 
-        # Best native French voices for teaching:
-        # - Juliette (French native, warm teacher) - voice_id: 5Q0t7uMcjvnagumLfvZi (Community)
-        # - Amelie (French native, clear) - Use voice search for French natives
-        # For now using Charlotte with optimized settings for teaching
-        voice_id = "XB0fDUnXU5powFXDhCwa"  # Charlotte
+        # Charlotte - warm, natural French voice
+        voice_id = "XB0fDUnXU5powFXDhCwa"
 
         print(f"🎙️ Using ElevenLabs TTS for {language}...")
-
-        # Add natural teaching pauses to the text
-        teaching_text = self._add_teaching_pauses(text)
 
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
@@ -436,12 +424,12 @@ Write an informative audio script:"""
                     "Content-Type": "application/json"
                 },
                 json={
-                    "text": teaching_text,
+                    "text": text,
                     "model_id": "eleven_multilingual_v2",
                     "voice_settings": {
-                        "stability": 0.35,  # Lower = more expressive, dynamic (teacher-like)
-                        "similarity_boost": 0.80,  # Keep voice clear
-                        "style": 0.65,  # Higher = more emotional, engaging
+                        "stability": 0.5,  # Balanced - natural variation without being erratic
+                        "similarity_boost": 0.75,
+                        "style": 0.4,  # Moderate style - expressive but not theatrical
                         "use_speaker_boost": True
                     }
                 }
@@ -457,41 +445,6 @@ Write an informative audio script:"""
 
         print(f"✅ ElevenLabs TTS complete: {len(audio_bytes)} bytes")
         return audio_base64, estimated_duration
-
-    def _add_teaching_pauses(self, text: str) -> str:
-        """Add natural pauses for a teacher-like delivery"""
-        import re
-
-        # Add thoughtful pauses after key teaching phrases
-        teaching_phrases = [
-            (r"(Alors,?)", r"\1..."),  # "So..."
-            (r"(Donc,?)", r"\1..."),  # "So/Therefore..."
-            (r"(Voyons,?)", r"\1..."),  # "Let's see..."
-            (r"(Écoutez,?)", r"\1..."),  # "Listen..."
-            (r"(Regardez,?)", r"\1..."),  # "Look..."
-            (r"(En fait,?)", r"\1..."),  # "Actually..."
-            (r"(Autrement dit,?)", r"\1..."),  # "In other words..."
-            (r"(C'est-à-dire,?)", r"\1..."),  # "That is to say..."
-            (r"(Par exemple,?)", r"\1..."),  # "For example..."
-            (r"(N'oubliez pas,?)", r"\1..."),  # "Don't forget..."
-            (r"(Souvenez-vous,?)", r"\1..."),  # "Remember..."
-            (r"(Attention,?)", r"\1..."),  # "Watch out/Note..."
-        ]
-
-        for pattern, replacement in teaching_phrases:
-            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
-
-        # Add slight pauses before important transitions
-        text = re.sub(r"\. (Premièrement|Deuxièmement|Troisièmement|Ensuite|Puis|Enfin|Finalement)",
-                      r"... \1", text, flags=re.IGNORECASE)
-
-        # Add pauses around questions (rhetorical teaching style)
-        text = re.sub(r"\? ", r"?... ", text)
-
-        # Add emphasis pause before "très" (very) and "vraiment" (really)
-        text = re.sub(r" (très|vraiment) ", r"... \1 ", text, flags=re.IGNORECASE)
-
-        return text
 
     async def _google_tts(self, text: str, language: str) -> tuple[str, float]:
         """Google Cloud TTS - high quality neural voices for French"""
