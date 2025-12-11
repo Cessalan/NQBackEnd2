@@ -67,21 +67,50 @@ class NursingTutor:
             #     "content": user_input,
             #     "timestamp": datetime.now().isoformat()
             # })
-              
+
                 # Prepare messages for LLM
             print("About to create messages to feed llm")
-            
-            
+
+
             # Ensure session context is available to tools
             set_session_context(self.session)
-            
+
+            # ═══════════════════════════════════════════════════════════════════
+            # STEP: CHECK FOR CONTINUATION REQUEST
+            # ═══════════════════════════════════════════════════════════════════
+            # This checks if the user's message is a short "continuation" request
+            # like "more", "again", "another" after completing a quiz/flashcard.
+            # If so, we transform the message to make it explicit for the LLM.
+            # ═══════════════════════════════════════════════════════════════════
+
+            # Check if this is a continuation request
+            continuation_info = self._is_continuation_request(user_input)
+
+            # If it's a continuation, transform the message to be explicit
+            if continuation_info['is_continuation']:
+                print(f"🔄 CONTINUATION DETECTED!")
+                print(f"   Original message: '{user_input}'")
+                print(f"   Action type: {continuation_info['action_type']}")
+                print(f"   Topic: {continuation_info['topic']}")
+
+                # Transform the message to make intent explicit
+                user_input = self._transform_continuation_message(user_input, continuation_info)
+
+                print(f"   Transformed to: '{user_input[:100]}...'")
+            else:
+                print(f"📝 Normal message (not a continuation): '{user_input[:50]}...'")
+
+            # ═══════════════════════════════════════════════════════════════════
+            # END CONTINUATION CHECK
+            # ═══════════════════════════════════════════════════════════════════
+
             # Create nursing-specific system prompt
             system_prompt = self._create_system_prompt()
-            
+
             print("SYSTEM PROMPT", system_prompt)
-                   
+
             print("System Prompt created")
-            
+
             messages = []
             try:
                 messages = [
@@ -548,9 +577,9 @@ class NursingTutor:
     def _create_system_prompt(self) -> str:
         """Create nursing-specific system prompt"""
         return f"""You are an AI nursing tutor helping students develop clinical skills.
-    
+
         Carefully analyze the context and determine the user intent before taking action
-        
+
         Your role:
         - Help students learn nursing concepts
         - Generate practice questions and quizzes
@@ -558,9 +587,27 @@ class NursingTutor:
         - Provide clear explanations with rationales
         - Support NCLEX-style critical thinking
 
+        🚨🚨🚨 CRITICAL QUIZ/EXAM RULE - READ THIS FIRST 🚨🚨🚨
+
+        When a user asks for ANY of these, you MUST use the generate_quiz_stream tool:
+        - "quiz", "quiz me", "test me", "exam", "exam question", "practice question"
+        - "make me a question", "give me questions", "create questions"
+        - "NCLEX question", "practice test", "mock exam"
+        - Any variation asking for questions, quizzes, tests, or exams
+
+        ❌ NEVER respond with a text-formatted question like this:
+        "Question: A 16-year-old female presents..."
+        "A) Option A  B) Option B..."
+
+        ✅ ALWAYS use the generate_quiz_stream tool to create interactive quizzes
+
+        The tool creates proper interactive quiz UI - text questions are NOT acceptable.
+        If the user says "make me an exam question" - USE THE TOOL, don't write text.
+
         Available tools:
         - search_documents: Search student's uploaded materials
         - generate_quiz_stream: Create practice questions on any topic (HARD LIMIT: max 15 questions per quiz)
+                                🚨 MANDATORY: Use this tool for ANY quiz/exam/question request
                                 **CRITICAL**: If user asks for >15 questions, you MUST inform them of the limit BEFORE generating
                                 Example: "I can generate a maximum of 15 questions per quiz. Would you like me to create 15 questions on [topic]?"
                                 **If user asks for ≤15 questions OR just says "quiz me"**: Generate IMMEDIATELY without asking
@@ -732,16 +779,24 @@ class NursingTutor:
 
         SIMPLE QUIZ GENERATION RULE:
 
+        🚨 REMINDER: For ANY quiz/exam/question request → USE generate_quiz_stream TOOL
+        Never write questions as text - the tool creates interactive UI!
+
         When user requests a quiz, decide based on context:
 
-        1. **Regular quiz request** (e.g., "quiz me on cardiac drugs"):
+        1. **Regular quiz request** (e.g., "quiz me on cardiac drugs", "make me an exam question", "give me a practice question"):
            → Call generate_quiz_stream WITHOUT empathetic_message (faster)
+           → NEVER write questions as plain text - ALWAYS use the tool!
 
         2. **Post-quiz practice request** (e.g., "I want to practice my weak areas"):
            → Analyze their last quiz, create empathetic message, then call generate_quiz_stream WITH empathetic_message
 
         3. **User already gave consent** (e.g., you asked "Should I create 15 questions?" and they said "yes"):
            → Call generate_quiz_stream IMMEDIATELY without asking again
+
+        4. **Single question request** (e.g., "give me one question", "make me an exam question"):
+           → Call generate_quiz_stream with num_questions=1
+           → Still use the tool - never write questions as text!
 
         EMPATHETIC MESSAGE TONE REQUIREMENTS:
         - The empathetic_message should be warm, conversational, and genuinely understanding
@@ -856,6 +911,14 @@ class NursingTutor:
         - file name of the last file uploaded {self.session.documents[-1]["filename"]if self.session.documents else "no documents uploaded yet"}, if you are unsure about which file the user is talking about always use this one
         - file name of the last file you had an interaction with {self.session.name_last_document_used if self.session.name_last_document_used else " no file yet"}
         - Language preference: {self.session.user_language}
+
+        ═══════════════════════════════════════════════════════════════════════
+        LAST USER ACTIVITY (CRITICAL FOR UNDERSTANDING SHORT MESSAGES!)
+        ═══════════════════════════════════════════════════════════════════════
+
+        {self._get_last_activity_summary()}
+
+        ═══════════════════════════════════════════════════════════════════════
 
         Last quiz data (for intelligent practice mode):
         {self._format_last_quiz_for_extraction()}
@@ -1104,8 +1167,321 @@ class NursingTutor:
         
         if not formatted:
             return "No file insights available yet."
-        
-        return "\n".join(formatted)      
+
+        return "\n".join(formatted)
+
+    # =========================================================================
+    # CONTEXT-AWARE INTENT DETECTION
+    # These methods help the LLM understand what just happened in the conversation
+    # so it can better interpret short messages like "more", "again", etc.
+    # =========================================================================
+
+    def _get_last_activity_summary(self) -> str:
+        """
+        Create a summary of the user's last activity.
+
+        This helps the LLM understand WHAT JUST HAPPENED so it can interpret
+        short messages like "more", "again", "another" correctly.
+
+        Returns:
+            A formatted string describing the last activity, or "No recent activity"
+
+        Example output:
+            "Type: QUIZ_COMPLETED
+             Topic: allergy management
+             Score: 100% (1/1 correct)
+             Status: User just finished this quiz"
+        """
+        try:
+            # ─────────────────────────────────────────────────────────────────
+            # STEP 1: Check if there was a recent quiz
+            # ─────────────────────────────────────────────────────────────────
+            if self.session.quizzes and len(self.session.quizzes) > 0:
+
+                # Get the most recent quiz
+                last_quiz = self.session.quizzes[-1]
+
+                # Extract quiz data (handle different formats)
+                quiz_data = last_quiz.get('quiz_data', {})
+
+                # Get questions list
+                if isinstance(quiz_data, list):
+                    # Format: quizData is the array directly
+                    questions = quiz_data
+                elif isinstance(quiz_data, dict):
+                    # Format: quizData has 'questions' key
+                    questions = quiz_data.get('questions', [])
+                else:
+                    questions = []
+
+                # If we have questions, analyze them
+                if questions and len(questions) > 0:
+
+                    # ─────────────────────────────────────────────────────────
+                    # STEP 2: Calculate score from quiz
+                    # ─────────────────────────────────────────────────────────
+                    total_questions = len(questions)
+                    correct_answers = 0
+                    topics_covered = set()
+
+                    for question in questions:
+                        # Check if user answered correctly
+                        user_selection = question.get('userSelection', {})
+                        if user_selection.get('isCorrect', False):
+                            correct_answers += 1
+
+                        # Collect topics
+                        topic = question.get('topic', '')
+                        if topic:
+                            topics_covered.add(topic)
+
+                    # Calculate percentage
+                    if total_questions > 0:
+                        percentage = round((correct_answers / total_questions) * 100)
+                    else:
+                        percentage = 0
+
+                    # ─────────────────────────────────────────────────────────
+                    # STEP 3: Build the summary string
+                    # ─────────────────────────────────────────────────────────
+                    topics_str = ', '.join(topics_covered) if topics_covered else 'General'
+
+                    summary = f"""
+Type: QUIZ_COMPLETED
+Topic(s): {topics_str}
+Score: {percentage}% ({correct_answers}/{total_questions} correct)
+Status: User just finished this quiz
+
+IMPORTANT: If user now says "more", "again", "another", "continue", "next":
+→ They want ANOTHER QUIZ on the same topic ({topics_str})
+→ Use generate_quiz_stream tool immediately!
+"""
+                    return summary.strip()
+
+            # ─────────────────────────────────────────────────────────────────
+            # STEP 4: Check for other activities (flashcards, study sheets)
+            # ─────────────────────────────────────────────────────────────────
+
+            # Check for flashcards (if you track them in session)
+            if hasattr(self.session, 'last_flashcards') and self.session.last_flashcards:
+                return """
+Type: FLASHCARDS_CREATED
+Status: User just reviewed flashcards
+
+IMPORTANT: If user now says "more", "again", "another":
+→ They want MORE FLASHCARDS on the same topic
+→ Use generate_flashcards_stream tool immediately!
+""".strip()
+
+            # ─────────────────────────────────────────────────────────────────
+            # STEP 5: No recent activity found
+            # ─────────────────────────────────────────────────────────────────
+            return "No recent quiz or flashcard activity"
+
+        except Exception as e:
+            print(f"⚠️ Error getting last activity summary: {e}")
+            return "Unable to determine last activity"
+
+    def _is_continuation_request(self, user_input: str) -> dict:
+        """
+        Check if the user's message is a "continuation" request.
+
+        A continuation request is when the user says something short like
+        "more", "again", "another" - meaning they want more of whatever
+        just happened (quiz, flashcards, etc.)
+
+        Args:
+            user_input: The user's message
+
+        Returns:
+            A dictionary with:
+            - is_continuation: True/False
+            - action_type: 'quiz', 'flashcard', or None
+            - topic: The topic to continue with, or None
+
+        Example:
+            Input: "more"
+            Output: {'is_continuation': True, 'action_type': 'quiz', 'topic': 'allergy management'}
+        """
+        # ─────────────────────────────────────────────────────────────────────
+        # STEP 1: Define continuation words (English and French)
+        # ─────────────────────────────────────────────────────────────────────
+        CONTINUATION_WORDS_EN = [
+            'more',           # "more" - most common
+            'again',          # "again" - repeat
+            'another',        # "another one"
+            'another one',    # explicit
+            'one more',       # "one more"
+            'continue',       # "continue"
+            'keep going',     # "keep going"
+            'next',           # "next"
+            'go on',          # "go on"
+            'yes',            # "yes" (after quiz offer)
+            'sure',           # "sure"
+            'okay',           # "okay"
+            'ok',             # "ok"
+            'yep',            # "yep"
+            'yeah',           # "yeah"
+            'do it',          # "do it"
+            'lets go',        # "let's go"
+            "let's go",       # with apostrophe
+            'challenge me',   # after seeing "Challenge Me More" button
+        ]
+
+        CONTINUATION_WORDS_FR = [
+            'encore',         # "encore" - again/more
+            'plus',           # "plus" - more
+            'un autre',       # "un autre" - another one
+            'une autre',      # "une autre" - another one (feminine)
+            'continuer',      # "continuer" - continue
+            'suite',          # "suite" - next
+            'suivant',        # "suivant" - next
+            'oui',            # "oui" - yes
+            'ouais',          # "ouais" - yeah
+            'd accord',       # "d'accord" - okay
+            "d'accord",       # with apostrophe
+            'ok',             # same in French
+            'vas-y',          # "vas-y" - go ahead
+            'allez',          # "allez" - let's go
+        ]
+
+        # Combine all continuation words
+        ALL_CONTINUATION_WORDS = CONTINUATION_WORDS_EN + CONTINUATION_WORDS_FR
+
+        # ─────────────────────────────────────────────────────────────────────
+        # STEP 2: Normalize the user input
+        # ─────────────────────────────────────────────────────────────────────
+        normalized_input = user_input.lower().strip()
+
+        # Remove punctuation for comparison
+        import re
+        normalized_input_clean = re.sub(r'[^\w\s]', '', normalized_input)
+
+        # ─────────────────────────────────────────────────────────────────────
+        # STEP 3: Check if message is short AND contains continuation word
+        # ─────────────────────────────────────────────────────────────────────
+
+        # Only treat as continuation if message is short (max 5 words)
+        word_count = len(normalized_input_clean.split())
+
+        if word_count > 5:
+            # Message too long - probably not a simple continuation
+            return {'is_continuation': False, 'action_type': None, 'topic': None}
+
+        # Check if any continuation word matches
+        is_continuation = False
+        for word in ALL_CONTINUATION_WORDS:
+            if word in normalized_input_clean or normalized_input_clean == word:
+                is_continuation = True
+                break
+
+        if not is_continuation:
+            return {'is_continuation': False, 'action_type': None, 'topic': None}
+
+        # ─────────────────────────────────────────────────────────────────────
+        # STEP 4: Determine what action to continue (quiz, flashcard, etc.)
+        # ─────────────────────────────────────────────────────────────────────
+        action_type = None
+        topic = None
+
+        # Check if there was a recent quiz
+        if self.session.quizzes and len(self.session.quizzes) > 0:
+            action_type = 'quiz'
+
+            # Get the topic from the last quiz
+            last_quiz = self.session.quizzes[-1]
+            quiz_data = last_quiz.get('quiz_data', {})
+
+            # Extract questions
+            if isinstance(quiz_data, list):
+                questions = quiz_data
+            elif isinstance(quiz_data, dict):
+                questions = quiz_data.get('questions', [])
+            else:
+                questions = []
+
+            # Get topics from questions
+            if questions:
+                topics = set()
+                for q in questions:
+                    t = q.get('topic', '')
+                    if t:
+                        topics.add(t)
+                if topics:
+                    topic = ', '.join(topics)
+
+        # Check for flashcards (if tracked)
+        elif hasattr(self.session, 'last_flashcards') and self.session.last_flashcards:
+            action_type = 'flashcard'
+            topic = getattr(self.session, 'last_flashcard_topic', None)
+
+        # ─────────────────────────────────────────────────────────────────────
+        # STEP 5: Return the result
+        # ─────────────────────────────────────────────────────────────────────
+        return {
+            'is_continuation': True,
+            'action_type': action_type,
+            'topic': topic
+        }
+
+    def _transform_continuation_message(self, user_input: str, continuation_info: dict) -> str:
+        """
+        Transform a short continuation message into an explicit request.
+
+        This helps the LLM understand exactly what the user wants.
+
+        Args:
+            user_input: Original message like "more"
+            continuation_info: Result from _is_continuation_request()
+
+        Returns:
+            Transformed message with explicit intent
+
+        Example:
+            Input: "more", {'action_type': 'quiz', 'topic': 'allergies'}
+            Output: "[CONTINUATION REQUEST: User wants another QUIZ on topic: allergies]
+                     Original message: more"
+        """
+        action_type = continuation_info.get('action_type')
+        topic = continuation_info.get('topic')
+
+        if action_type == 'quiz':
+            if topic:
+                return f"""[CONTINUATION REQUEST: User wants ANOTHER QUIZ on the same topic.
+Topic: {topic}
+Action: Call generate_quiz_stream tool immediately with topic="{topic}"
+Do NOT ask for confirmation - just generate the quiz!]
+
+Original message: {user_input}"""
+            else:
+                return f"""[CONTINUATION REQUEST: User wants ANOTHER QUIZ.
+Action: Call generate_quiz_stream tool immediately
+Do NOT ask for confirmation - just generate the quiz!]
+
+Original message: {user_input}"""
+
+        elif action_type == 'flashcard':
+            if topic:
+                return f"""[CONTINUATION REQUEST: User wants MORE FLASHCARDS on the same topic.
+Topic: {topic}
+Action: Call generate_flashcards_stream tool immediately with topic="{topic}"
+Do NOT ask for confirmation - just generate the flashcards!]
+
+Original message: {user_input}"""
+            else:
+                return f"""[CONTINUATION REQUEST: User wants MORE FLASHCARDS.
+Action: Call generate_flashcards_stream tool immediately
+Do NOT ask for confirmation - just generate the flashcards!]
+
+Original message: {user_input}"""
+
+        # No specific action detected - return original
+        return user_input
+
+    # =========================================================================
+    # END OF CONTEXT-AWARE INTENT DETECTION
+    # =========================================================================
+
     # Streaming function that works with chunks
     @staticmethod
     async def stream_document_summary(

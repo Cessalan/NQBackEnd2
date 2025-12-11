@@ -579,8 +579,9 @@ async def process_game_quiz(chat_id: str, message: dict, websocket: WebSocket):
     Message format from frontend:
     {
         "type": "game_quiz",
-        "questionCount": 5,      # Optional, default 5
-        "difficulty": "medium"   # Optional, default "medium"
+        "questionCount": 5,       # Optional, default 5
+        "difficulty": "medium",   # Optional, default "medium"
+        "existingTopics": []      # Optional, user's existing topics for smart matching
     }
     """
     try:
@@ -699,9 +700,11 @@ async def process_game_quiz(chat_id: str, message: dict, websocket: WebSocket):
         # ------------------------------------------
         question_count = message.get("questionCount", 5)
         difficulty = message.get("difficulty", "medium")
+        existing_topics = message.get("existingTopics", [])  # User's existing topics
         quiz_id = f"quiz_{uuid4().hex[:8]}"
 
         print(f"🎮 Generating {question_count} {difficulty} questions...")
+        print(f"📚 User's existing topics: {existing_topics}")
         print(f"📊 Session vectorstore status: {session.vectorstore is not None}")
         if session.vectorstore:
             print(f"📊 Vectorstore type: {type(session.vectorstore)}")
@@ -719,7 +722,8 @@ async def process_game_quiz(chat_id: str, message: dict, websocket: WebSocket):
             source="documents",          # Generate from user's uploaded docs
             session=session,
             empathetic_message=None,     # No intro message for game mode
-            chat_id=chat_id              # For cancellation checking
+            chat_id=chat_id,             # For cancellation checking
+            existing_topics=existing_topics  # User's existing topics for smart matching
         ):
             # Handle different chunk types from stream_quiz_questions
 

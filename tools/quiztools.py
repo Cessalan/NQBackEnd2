@@ -1253,23 +1253,31 @@ async def _generate_single_question(
     question_num: int,
     language: str,
     questions_to_avoid: list = None,
-    target_letter: str = None  # 🎲 Randomly assigned letter
+    target_letter: str = None,  # 🎲 Randomly assigned letter
+    existing_topics: list = None  # User's existing topics from progress tracking
 ) -> dict:
     """
     Generate ONE complete quiz question using LLM.
     Returns fully-formed question object.
+
+    Args:
+        existing_topics: List of topic names the user already has in their progress.
+                        LLM will try to match to these topics when the question
+                        content fits, reducing topic fragmentation.
     """
-    
+
     # Defensive defaults
     if questions_to_avoid is None:
         questions_to_avoid = []
-    
+    if existing_topics is None:
+        existing_topics = []
+
     # Build question deduplication text
     if questions_to_avoid:
         avoid_text = "\n".join([f"- {q}" for q in questions_to_avoid])
     else:
         avoid_text = "None - this is the first question"
-    
+
     # Build instruction for answer placement
     if target_letter:
         answer_instruction = f"""
@@ -1283,15 +1291,36 @@ async def _generate_single_question(
         """
     else:
         answer_instruction = "You can choose any option (A, B, C, or D) as the correct answer."
-    
+
+    # Build existing topics instruction
+    if existing_topics and len(existing_topics) > 0:
+        topics_list = "\n".join([f"      - {t}" for t in existing_topics[:30]])  # Limit to 30 topics
+        existing_topics_instruction = f"""
+    📚 EXISTING TOPICS (PRIORITY MATCHING):
+    The user already has these topics in their progress tracking. If the question content
+    fits one of these existing topics, USE THAT EXACT TOPIC NAME instead of creating a new one.
+    This prevents topic fragmentation and helps the user track their progress better.
+
+    User's existing topics:
+{topics_list}
+
+    Rules:
+    - If the question fits an existing topic, use that EXACT topic name (case-sensitive)
+    - Only create a NEW topic if the question doesn't fit any existing topic
+    - Don't force a poor match - if nothing fits well, create a new descriptive topic
+    """
+    else:
+        existing_topics_instruction = ""
+
     print(f"\n{'='*60}")
     print(f"Generating Question {question_num}")
     print(f"Target answer position: {target_letter}")
+    print(f"Existing topics available: {len(existing_topics) if existing_topics else 0}")
     print(f"{'='*60}\n")
     
     prompt = PromptTemplate(
         input_variables=["content", "topic", "difficulty", "question_num", "language",
-                    "questions_to_avoid", "answer_instruction"],
+                    "questions_to_avoid", "answer_instruction", "existing_topics_instruction"],
     template="""
     You are a {language}-speaking nursing quiz generator creating NCLEX-style questions.
 
@@ -1314,13 +1343,14 @@ async def _generate_single_question(
     - Use realistic nursing scenarios with specific patient details (age, condition, symptoms)
     - Create 4 plausible options (A-D) where ALL options could seem reasonable to a novice
     - The correct answer should be the BEST choice based on evidence-based practice
-
-    🎯 TOPIC ASSIGNMENT (NEW REQUIREMENT):
+    {existing_topics_instruction}
+    🎯 TOPIC ASSIGNMENT:
     - Assign a SPECIFIC topic/subject to this question based on what it tests
     - The topic should be 2-4 words maximum
     - Be specific and descriptive (e.g., "Cardiac Medications" not "Medicine")
     - Use consistent naming across related questions
     - CRITICAL: Write the topic in {language} (same language as the quiz)
+    - IF EXISTING TOPICS WERE PROVIDED ABOVE, try to match to one of those first!
     - Examples of good topics in English:
       * "Heart Anatomy"
       * "Blood Pressure"
@@ -1383,7 +1413,8 @@ async def _generate_single_question(
             "question_num": question_num,
             "language": language,
             "questions_to_avoid": avoid_text,
-            "answer_instruction": answer_instruction
+            "answer_instruction": answer_instruction,
+            "existing_topics_instruction": existing_topics_instruction
         })
         
         # Clean and parse

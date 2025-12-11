@@ -66,7 +66,8 @@ async def stream_quiz_with_bank(
     session: PersistentSessionContext,
     empathetic_message: str = None,
     chat_id: str = None,
-    question_types: List[str] = None
+    question_types: List[str] = None,
+    existing_topics: List[str] = None
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Generate quiz questions using Question Bank first, then LLM for the rest.
@@ -85,6 +86,8 @@ async def stream_quiz_with_bank(
         chat_id: Chat ID for cancellation checking
         question_types: List of question types to generate ["mcq", "sata", "casestudy"]
                        Defaults to ["mcq"] if not specified
+        existing_topics: User's existing topics from progress tracking. LLM will try
+                        to match questions to these topics when applicable.
 
     Yields:
         Status updates and complete questions in the same format as
@@ -365,7 +368,8 @@ async def stream_quiz_with_bank(
                     question_num=current_question_num,
                     language=session.user_language,
                     questions_to_avoid=generated_questions,
-                    target_letter=random_target_letter
+                    target_letter=random_target_letter,
+                    existing_topics=existing_topics  # Pass user's existing topics
                 )
 
                 # Ensure MCQ has questionType field
