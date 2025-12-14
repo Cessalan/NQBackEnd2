@@ -425,12 +425,10 @@ Write an informative audio script:"""
                 },
                 json={
                     "text": text,
-                    "model_id": "eleven_multilingual_v2",
+                    "model_id": "eleven_turbo_v2_5",  # Turbo model - fast, good French, included in Starter plan
                     "voice_settings": {
-                        "stability": 0.5,  # Balanced - natural variation without being erratic
-                        "similarity_boost": 0.75,
-                        "style": 0.4,  # Moderate style - expressive but not theatrical
-                        "use_speaker_boost": True
+                        "stability": 0.5,
+                        "similarity_boost": 0.75
                     }
                 }
             )

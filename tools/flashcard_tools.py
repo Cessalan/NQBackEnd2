@@ -150,6 +150,8 @@ async def stream_flashcards(
 
     # Track generated flashcards for deduplication
     generated_fronts = []
+    # Track existing topics to avoid duplicates/variations
+    existing_topics = []
 
     # Generate flashcards one at a time
     for card_num in range(1, num_cards + 1):
@@ -172,11 +174,17 @@ async def stream_flashcards(
             topic=topic,
             card_num=card_num,
             language=session.user_language,
-            cards_to_avoid=generated_fronts
+            cards_to_avoid=generated_fronts,
+            existing_topics=existing_topics
         )
 
         if flashcard_data:
             generated_fronts.append(flashcard_data['front'])
+
+            # Track the topic for future flashcards (avoid duplicates)
+            card_topic = flashcard_data.get('topic', '')
+            if card_topic and card_topic not in existing_topics:
+                existing_topics.append(card_topic)
 
             print(f"✅ Flashcard {card_num}/{num_cards} generated - Topic: {flashcard_data.get('topic', 'N/A')}")
 
@@ -206,7 +214,8 @@ async def _generate_single_flashcard(
     topic: str,
     card_num: int,
     language: str,
-    cards_to_avoid: list = None
+    cards_to_avoid: list = None,
+    existing_topics: list = None
 ) -> dict:
     """
     Generate ONE complete flashcard using LLM.
@@ -226,6 +235,7 @@ async def _generate_single_flashcard(
         card_num: Current card number
         language: User's language preference
         cards_to_avoid: List of previous card fronts for deduplication
+        existing_topics: List of topics already used in this flashcard set
 
     Returns:
         Flashcard dictionary matching frontend format
@@ -234,6 +244,8 @@ async def _generate_single_flashcard(
     # Defensive defaults
     if cards_to_avoid is None:
         cards_to_avoid = []
+    if existing_topics is None:
+        existing_topics = []
 
     # Build deduplication text
     if cards_to_avoid:
@@ -241,13 +253,20 @@ async def _generate_single_flashcard(
     else:
         avoid_text = "None - this is the first flashcard"
 
+    # Build existing topics text for smart topic matching
+    if existing_topics:
+        existing_topics_text = ", ".join([f'"{t}"' for t in existing_topics])
+    else:
+        existing_topics_text = "None yet - you are creating the first topic"
+
     print(f"\n{'='*60}")
     print(f"Generating Flashcard {card_num}")
     print(f"Topic: {topic}")
+    print(f"Existing topics: {existing_topics}")
     print(f"{'='*60}\n")
 
     prompt = PromptTemplate(
-        input_variables=["content", "topic", "card_num", "language", "cards_to_avoid"],
+        input_variables=["content", "topic", "card_num", "language", "cards_to_avoid", "existing_topics"],
         template="""
 You are a {language}-speaking educational flashcard generator creating SCANNABLE, EASY-TO-READ content.
 
@@ -297,16 +316,31 @@ Requirements:
 - Topic: 2-4 word category in {language}
 - Hint: Optional 1-sentence hint
 
-🎯 TOPIC ASSIGNMENT:
-- 2-4 words maximum, specific and descriptive
-- Write in {language}
-- Examples: "Heart Anatomy", "Anatomie Cardiaque", "Pain Management"
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 TOPIC ASSIGNMENT (VERY IMPORTANT!)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+EXISTING TOPICS already used in this flashcard set:
+{existing_topics}
+
+RULES FOR TOPIC ASSIGNMENT:
+1. **FIRST: Check if this flashcard fits an EXISTING topic** - If it does, use that EXACT topic name (same spelling, capitalization)
+2. **ONLY create a new topic** if the content is genuinely different from all existing topics
+3. Topic must be 2-4 words, specific and descriptive
+4. Write in {language}
+
+❌ DO NOT create variations like:
+- "Types de Démences" vs "Types de démences" (capitalization)
+- "Critères Diagnostiques" vs "Critères Diagnostics" (spelling)
+- "Risk Factors" vs "Facteurs de Risque" (language mixing)
+
+✅ REUSE existing topics when the content fits!
 
 📤 Return ONLY valid JSON (no markdown wrapper):
 {{
     "front": "Clear question in {language}",
     "back": "Scannable answer with **bold** and • bullets in {language}",
-    "topic": "Specific Topic",
+    "topic": "Use existing topic if applicable OR create new one",
     "hint": "Optional hint"
 }}
 
@@ -322,7 +356,8 @@ Generate your flashcard in {language}:"""
             "topic": topic,
             "card_num": card_num,
             "language": language,
-            "cards_to_avoid": avoid_text
+            "cards_to_avoid": avoid_text,
+            "existing_topics": existing_topics_text
         })
 
         # Clean and parse
