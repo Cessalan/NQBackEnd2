@@ -6,6 +6,7 @@ import os
 import base64
 import asyncio
 import httpx
+import re
 from typing import AsyncGenerator, Optional
 from openai import AsyncOpenAI
 from datetime import datetime
@@ -196,13 +197,16 @@ class AudioGenerator:
 
         # Phase 3: Text-to-Speech
         try:
+            # Prepare script for clearer pacing in TTS
+            script_for_tts = self._prepare_for_tts(script, language)
+
             yield json.dumps({
                 "status": "audio_tts_progress",
                 "message": "Generating audio...",
                 "progress": 50
             }) + "\n"
 
-            audio_base64, audio_duration = await self._text_to_speech(script, language)
+            audio_base64, audio_duration = await self._text_to_speech(script_for_tts, language)
 
             yield json.dumps({
                 "status": "audio_ready",
@@ -258,6 +262,7 @@ class AudioGenerator:
         if language == "french":
             lang_instruction = """Respond entirely in French.
 Write as if you're naturally speaking to nursing students - be yourself, be human.
+Use short sentences, clear pauses between ideas, and a calm teacher pace.
 Use "vous" but keep the tone warm and conversational, like a professor who genuinely cares."""
         else:
             lang_instruction = "Respond in English."
@@ -386,33 +391,33 @@ SOURCE MATERIAL:
 Write an informative audio script:"""
 
     async def _text_to_speech(self, text: str, language: str) -> tuple[str, float]:
-        """Convert text to speech - ElevenLabs for French (primary), Google Cloud fallback, OpenAI for English"""
+        """Convert text to speech - ElevenLabs for French (Élodie), Google/OpenAI fallback, OpenAI for English"""
 
         if language == "french":
-            # Try ElevenLabs first (best quality)
+            # Primary: ElevenLabs (Élodie) for natural teacher-style French
             if ELEVENLABS_AVAILABLE:
                 try:
                     return await self._elevenlabs_tts(text, language)
                 except Exception as e:
                     print(f"⚠️ ElevenLabs TTS failed: {e}")
 
-            # Fallback to Google Cloud TTS
+            # Secondary: Google Cloud TTS if available
             if GOOGLE_TTS_AVAILABLE:
                 try:
                     return await self._google_tts(text, language)
                 except Exception as e:
                     print(f"⚠️ Google TTS failed: {e}")
 
-            # Final fallback to OpenAI
+            # Final fallback: OpenAI TTS
             return await self._openai_tts(text, language)
-        else:
-            return await self._openai_tts(text, language)
+
+        return await self._openai_tts(text, language)
 
     async def _elevenlabs_tts(self, text: str, language: str) -> tuple[str, float]:
-        """ElevenLabs TTS - natural French voice"""
+        """ElevenLabs TTS - Élodie (teacher-style French)"""
 
-        # Charlotte - warm, natural French voice
-        voice_id = "XB0fDUnXU5powFXDhCwa"
+        # Élodie - warm, teacher-style French voice (user-selected)
+        voice_id = "K7gx0ylJdff0yjM2uVQS"
 
         print(f"🎙️ Using ElevenLabs TTS for {language}...")
 
@@ -425,10 +430,12 @@ Write an informative audio script:"""
                 },
                 json={
                     "text": text,
-                    "model_id": "eleven_turbo_v2_5",  # Turbo model - fast, good French, included in Starter plan
+                    "model_id": "eleven_multilingual_v2",  # Most natural French quality
                     "voice_settings": {
-                        "stability": 0.5,
-                        "similarity_boost": 0.75
+                        "stability": 0.35,
+                        "similarity_boost": 0.9,
+                        "style": 0.4,
+                        "use_speaker_boost": True
                     }
                 }
             )
@@ -486,7 +493,7 @@ Write an informative audio script:"""
 
         audio_config = texttospeech.AudioConfig(
             audio_encoding=texttospeech.AudioEncoding.MP3,
-            speaking_rate=0.95,  # Slightly slower for clarity
+            speaking_rate=0.9,  # Slower pace for teacher clarity
             pitch=1.0,  # Slightly higher for warmth
             volume_gain_db=0.0,
             effects_profile_id=["headphone-class-device"]  # Optimized for headphones
@@ -510,25 +517,25 @@ Write an informative audio script:"""
         text = text.replace(">", "&gt;")
 
         # Add medium pauses after periods (natural sentence breaks)
-        text = re.sub(r'\. ', r'.<break time="400ms"/> ', text)
+        text = re.sub(r'\. ', r'.<break time="650ms"/> ', text)
 
         # Add shorter pauses after commas
-        text = re.sub(r', ', r',<break time="200ms"/> ', text)
+        text = re.sub(r', ', r',<break time="350ms"/> ', text)
 
         # Add pauses after colons
-        text = re.sub(r': ', r':<break time="300ms"/> ', text)
+        text = re.sub(r': ', r':<break time="450ms"/> ', text)
 
         # Add pauses after semicolons
-        text = re.sub(r'; ', r';<break time="300ms"/> ', text)
+        text = re.sub(r'; ', r';<break time="450ms"/> ', text)
 
         # Add longer pauses after question marks
-        text = re.sub(r'\? ', r'?<break time="500ms"/> ', text)
+        text = re.sub(r'\? ', r'?<break time="750ms"/> ', text)
 
         # Add longer pauses after exclamation marks
-        text = re.sub(r'! ', r'!<break time="400ms"/> ', text)
+        text = re.sub(r'! ', r'!<break time="600ms"/> ', text)
 
         # Add pauses around ellipsis for dramatic effect
-        text = re.sub(r'\.\.\.', r'<break time="600ms"/>', text)
+        text = re.sub(r'\.\.\.', r'<break time="800ms"/>', text)
 
         # Add emphasis to key nursing/medical terms (common patterns)
         emphasis_words = [
@@ -625,3 +632,23 @@ Recent Quiz Performance:
 Topics Studied:
 {progress_data.get('topics_studied', 'None yet')}
 """
+
+    def _prepare_for_tts(self, text: str, language: str) -> str:
+        """Add gentle pauses and shorter phrasing for clearer TTS delivery."""
+        cleaned = text.strip()
+
+        # Encourage longer pauses after sentences and headings (double breaks)
+        cleaned = re.sub(r'([.!?])\s+', r'\1\n\n', cleaned)
+        cleaned = re.sub(r'(:)\s+', r'\1\n\n', cleaned)
+
+        # Split long lines to keep cadence natural
+        cleaned_lines = []
+        for line in cleaned.splitlines():
+            if len(line) > 160:
+                # Insert a break at the nearest comma/semicolon to slow pacing
+                split_line = re.sub(r',\s+', ',\n\n', line, count=1)
+                cleaned_lines.extend(split_line.splitlines())
+            else:
+                cleaned_lines.append(line)
+
+        return "\n".join(cleaned_lines)

@@ -1090,6 +1090,7 @@ async def upload_multiple_files(
 
     # Normalize language code (handle 'fr-FR', 'fr-CA', etc.)
     language = language.lower().split('-')[0]  # 'fr-FR' -> 'fr'
+    prompt_language = _language_for_prompt(language)
     print(f"*Upload received: user {user_id}, chat:{chat_id}, language:{language}*")
     # Read all files immediately
     file_data_list = []
@@ -1276,9 +1277,9 @@ async def upload_multiple_files(
                         - "I found materials about cardiac pharmacology and arrhythmia management."
                         - "Les documents sur la pharmacologie cardiaque et la gestion des arythmies."
 
-                        IMPORTANT REQUIREMENT: The entire summary must be written in {language}.
+                        IMPORTANT REQUIREMENT: The entire summary must be written in {prompt_language}.
 
-                        Return ONLY the summary text in {language}, nothing else."""
+                        Return ONLY the summary text in {prompt_language}, nothing else."""
                         
                         summary_response = await llm.ainvoke([
                             {"role": "user", "content": summary_prompt}
@@ -1308,7 +1309,7 @@ async def upload_multiple_files(
                         - Focus on the main topic/subject area
                         - Max 6 words
                         - Make it specific to the content (e.g., "Cardiac Pharmacology Notes", "NCLEX Respiratory Review")
-                        - Write in {language}
+                        - Write in {prompt_language}
 
                         Return ONLY the title, no quotes or extra text."""
                         
@@ -1541,6 +1542,25 @@ async def upload_everything_background(
     print(f"❌ Background upload failed for chat {chat_id} after {max_retries} attempts")
     print(f"   User can still chat - vectorstore is in memory")
 
+def _language_for_prompt(lang_code: str) -> str:
+    """
+    Map short language codes to clearer labels for prompt conditioning.
+    Keeps default as-is if unknown.
+    """
+    if not lang_code:
+        return "English"
+    code = lang_code.lower()
+    mapping = {
+        "en": "English",
+        "english": "English",
+        "fr": "French",
+        "french": "French",
+        "es": "Spanish",
+        "spanish": "Spanish"
+    }
+    return mapping.get(code, lang_code)
+
+
 async def extract_file_insights_from_text(
     text: str, 
     filename: str, 
@@ -1586,11 +1606,14 @@ async def extract_file_insights_from_text(
                 samples.append(text[start_pos:start_pos + 1000])
             sample_text = "\n\n---\n\n".join(samples)
         
+        # Convert to a clearer label for the prompt (e.g., "fr" -> "French")
+        prompt_language = _language_for_prompt(language)
+
         # Use GPT-4o-mini for fast, cheap analysis                
         llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
         
         # Determine response language        
-        prompt = f"""Analyze this nursing/medical document excerpt and extract key information in {language}.
+        prompt = f"""Analyze this nursing/medical document excerpt and extract key information in {prompt_language}.
 
         Document: {filename}
         Content sample:
@@ -1601,7 +1624,7 @@ async def extract_file_insights_from_text(
         2. Specific concepts (5-10 specific medical/nursing terms or procedures)
         3. Document type (textbook, lecture notes, clinical guide, reference, etc.)
 
-        Return ONLY valid JSON with content in this language {language}:
+        Return ONLY valid JSON with content in this language {prompt_language}:
         {{
         "topics": ["topic1", "topic2", "topic3"],
         "concepts": ["concept1", "concept2", ...],
@@ -1610,7 +1633,7 @@ async def extract_file_insights_from_text(
         """
         
         response = await llm.ainvoke([
-            {"role": "system", "content": f"You extract key information from medical documents. Return only valid JSON with all content in {language}."},
+            {"role": "system", "content": f"You extract key information from medical documents. Return only valid JSON with all content in {prompt_language}."},
             {"role": "user", "content": prompt}
         ])
         
