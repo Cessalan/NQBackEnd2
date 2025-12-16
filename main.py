@@ -226,6 +226,7 @@ app.add_middleware(
         "https://docai-efb03.web.app",
         "https://docai-efb03.firebaseapp.com",
         "https://chats.nursequizai.com",
+        "https://nursequizai.com",
         "https://ragfastapi-1075876064685.europe-west1.run.app"
     ],
     allow_credentials=True,
