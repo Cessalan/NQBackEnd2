@@ -495,6 +495,7 @@ async def process_chat_message(chat_id: str, message: dict, websocket: WebSocket
         # Debug: Check vectorstore status
         has_vectorstore = nursing_tutor.session.vectorstore is not None
         print(f"📊 Session vectorstore status: {'EXISTS in memory' if has_vectorstore else 'NOT in memory'}")
+        print(f"📊 Session object id: {id(nursing_tutor.session)}")
 
         # Ensure vectorstore is loaded (needed for mindmap, quiz, etc.)
         if nursing_tutor.session.vectorstore is None:
@@ -1888,9 +1889,10 @@ async def embed_document_task(temp_path: str, filename: str, chat_id: str, file_
         if chat_id not in ACTIVE_SESSIONS:
             print(f"⚠️ No session found for {chat_id}, creating...")
             ACTIVE_SESSIONS[chat_id] = NursingTutor(chat_id)
-        
+
         session = ACTIVE_SESSIONS[chat_id]
-        
+        print(f"📤 Upload using session object id: {id(session.session)}")
+
         # Add to combined vectorstore
         if session.session.vectorstore:
             print(f"➕ Adding to existing vectorstore")
@@ -1898,8 +1900,9 @@ async def embed_document_task(temp_path: str, filename: str, chat_id: str, file_
         else:
             print(f"🆕 Creating new vectorstore")
             session.session.vectorstore = FAISS.from_documents(documents, embeddings)
-        
+
         print(f"✅ Embedding complete for {filename}")
+        print(f"📤 Vectorstore now set: {session.session.vectorstore is not None}")
         
         updates.append({
             "type": "embedding_complete",

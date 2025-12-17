@@ -37,7 +37,26 @@ async def stream_mindmap_data(
         "message": "Analyzing document structure..."
     }
 
+    # Debug: Check session state
+    print(f"🧠 Mindmap generator received session for chat_id={chat_id}")
+    print(f"🧠 Session object id: {id(session)}")
+    print(f"🧠 Session.vectorstore: {'EXISTS' if session.vectorstore else 'None'}")
+
     # Step 2: Get document content from vectorstore
+    # If vectorstore not in memory, try loading from Firebase
+    if not session.vectorstore:
+        print(f"📥 Mindmap: Vectorstore not in memory, loading from Firebase for {chat_id}...")
+        try:
+            from services.vectorstore_manager import vectorstore_manager
+            loaded_vectorstore = await vectorstore_manager.load_combined_vectorstore_from_firebase(chat_id)
+            if loaded_vectorstore:
+                session.vectorstore = loaded_vectorstore
+                print(f"✅ Mindmap: Vectorstore loaded successfully for {chat_id}")
+            else:
+                print(f"⚠️ Mindmap: No vectorstore found in Firebase for {chat_id}")
+        except Exception as e:
+            print(f"❌ Mindmap: Failed to load vectorstore from Firebase: {e}")
+
     if not session.vectorstore:
         yield {
             "status": "error",
