@@ -116,6 +116,15 @@ async def stream_mindmap_data(
     # Language handling
     language = session.user_language if hasattr(session, 'user_language') else 'english'
 
+    # Language-specific edge label examples
+    edge_label_examples = {
+        "french": "utilise des verbes de liaison EN FRANÇAIS comme: 'comprend', 'cause', 'mène à', 'se compose de', 'est traité par', 'provoque', 'prévient', 'se caractérise par', 'nécessite', 'permet', 'entraîne', 'implique'",
+        "english": "use linking verbs like: 'includes', 'causes', 'leads to', 'consists of', 'is treated by', 'results in', 'prevents', 'characterized by', 'requires', 'enables', 'triggers', 'involves'",
+        "spanish": "usa verbos de enlace EN ESPAÑOL como: 'incluye', 'causa', 'lleva a', 'consiste en', 'es tratado por', 'resulta en', 'previene', 'se caracteriza por', 'requiere', 'permite'"
+    }
+
+    edge_instruction = edge_label_examples.get(language.lower(), edge_label_examples["english"])
+
     prompt = f"""You are creating a comprehensive study mindmap for students who need to quickly understand ALL important content from this document. This is for last-minute study - DO NOT OMIT ANY IMPORTANT CONCEPT.
 
 Document Content:
@@ -130,7 +139,7 @@ CRITICAL INSTRUCTIONS:
 6. If the document mentions benefits, causes, effects, symptoms, treatments, etc. - LIST THEM ALL in the details array
 7. Think like a student: "What do I need to memorize from this section?"
 
-Language for all content: {language}
+LANGUAGE REQUIREMENT: ALL content (labels, summaries, details, AND edge labels) MUST be in {language}.
 
 Return ONLY valid JSON in this exact format (no markdown, no extra text):
 {{
@@ -165,8 +174,8 @@ Return ONLY valid JSON in this exact format (no markdown, no extra text):
         }}
     ],
     "edges": [
-        {{ "source": "root", "target": "node_1" }},
-        {{ "source": "node_1", "target": "node_1a" }}
+        {{ "source": "root", "target": "node_1", "label": "comprend" }},
+        {{ "source": "node_1", "target": "node_1a", "label": "se compose de" }}
     ]
 }}
 
@@ -175,7 +184,10 @@ REQUIREMENTS:
 - DO NOT leave details empty - if a concept is mentioned, extract what the document says about it
 - Node types: "central" (root only), "main" (first level), "sub" (second level), "detail" (third level)
 - Every node except root must have a parent
-- Every parent-child relationship must have a corresponding edge
+- Every parent-child relationship must have a corresponding edge with a SHORT LINKING PHRASE (1-3 words max)
+- Edge labels MUST be in {language} and describe the relationship accurately
+- {edge_instruction}
+- Use VARIED edge labels - don't repeat the same label for every edge. Choose the most accurate relationship for each connection.
 - IDs must be unique and referenced correctly
 - Return ONLY the JSON, no other text
 - PRIORITIZE COMPLETENESS: It's better to have more nodes than to miss important content

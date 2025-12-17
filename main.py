@@ -482,6 +482,10 @@ async def process_chat_message(chat_id: str, message: dict, websocket: WebSocket
 
         # Get or create session (same as existing logic)
         session_existed = chat_id in ACTIVE_SESSIONS
+        print(f"🔍 ACTIVE_SESSIONS keys: {list(ACTIVE_SESSIONS.keys())}")
+        print(f"🔍 Looking for chat_id: {chat_id}")
+        print(f"🔍 Session exists: {session_existed}")
+
         if not session_existed:
             ACTIVE_SESSIONS[chat_id] = NursingTutor(chat_id)
             # Still reload insights in case new files were uploaded
@@ -1089,14 +1093,16 @@ def get_post_upload_actions(language: str) -> list:
             {"id": "quiz", "label": "Teste-moi sur ces sujets", "icon": "🧪"},
             {"id": "flashcards", "label": "Créer des flashcards", "icon": "📇"},
             {"id": "studysheet", "label": "Fais-moi un résumé", "icon": "📝"},
-            {"id": "audio", "label": "Écouter une leçon audio", "icon": "🎧"}
+            {"id": "audio", "label": "Écouter une leçon audio", "icon": "🎧"},
+            {"id": "mindmap", "label": "Créer une carte mentale", "icon": "🧠"}
         ]
     else:
         return [
             {"id": "quiz", "label": "Quiz me on these topics", "icon": "🧪"},
             {"id": "flashcards", "label": "Create flashcards to study", "icon": "📇"},
             {"id": "studysheet", "label": "Break it down for me", "icon": "📝"},
-            {"id": "audio", "label": "Listen to an audio lesson", "icon": "🎧"}
+            {"id": "audio", "label": "Listen to an audio lesson", "icon": "🎧"},
+            {"id": "mindmap", "label": "Create a mind map", "icon": "🧠"}
         ]
 
 

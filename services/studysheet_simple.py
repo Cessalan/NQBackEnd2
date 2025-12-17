@@ -7,7 +7,7 @@ from openai import OpenAI
 
 
 class SimpleStudySheetGenerator:
-    """Generates study sheets using GPT-5-mini streaming with Anthropic fallback."""
+    """Generates study sheets using OpenAI streaming with Anthropic fallback."""
 
     def __init__(self, session):
         self.session = session
@@ -47,7 +47,7 @@ class SimpleStudySheetGenerator:
             print(f"OpenAI study sheet stream failed, falling back to Anthropic: {e}")
             yield json.dumps({
                 "status": "study_sheet_provider",
-                "provider": "openai-gpt-5-mini",
+                "provider": "openai",
                 "message": "OpenAI unavailable, switching to Anthropic fallback"
             }) + "\n"
 
@@ -166,20 +166,22 @@ Key concepts:
 
     def _generate_with_openai(self, prompt: str) -> str:
         """Fallback generator using OpenAI ChatGPT."""
+        model = os.getenv("OPENAI_STUDY_SHEET_MODEL", "gpt-4o-mini")
         response = self.openai_client.chat.completions.create(
-            model=os.getenv("OPENAI_STUDY_SHEET_MODEL", "gpt-5-mini"),
-            max_tokens=8000,
+            model=model,
+            max_completion_tokens=8000,
             temperature=0.3,
             messages=[{"role": "user", "content": prompt}]
         )
         return response.choices[0].message.content if response.choices else ""
 
     async def _stream_with_openai(self, prompt: str):
-        """Stream study sheet content from OpenAI (GPT-5-mini by default)."""
+        """Stream study sheet content from OpenAI."""
+        model = os.getenv("OPENAI_STUDY_SHEET_MODEL", "gpt-4o-mini")
         response = self.openai_client.chat.completions.create(
-            model=os.getenv("OPENAI_STUDY_SHEET_MODEL", "gpt-5-mini"),
+            model=model,
             temperature=0.3,
-            max_tokens=8000,
+            max_completion_tokens=8000,
             stream=True,
             messages=[{"role": "user", "content": prompt}]
         )
