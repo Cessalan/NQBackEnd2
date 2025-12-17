@@ -241,8 +241,8 @@ SESSION_LAST_ACTIVITY: Dict[str, float] = {}  # Track last activity time for eac
 # ============================================================================
 # COST OPTIMIZATION: Session cleanup configuration
 # ============================================================================
-SESSION_IDLE_TIMEOUT = 120  # 2 minutes - reasonable for OpenAI TTS
-CONNECTION_IDLE_TIMEOUT = 120  # 2 minutes - WebSocket timeout
+SESSION_IDLE_TIMEOUT = 300  # 5 minutes - keep session alive for rapid interactions
+CONNECTION_IDLE_TIMEOUT = 300  # 5 minutes - WebSocket idle timeout (not per-message)
 SESSION_MAX_AGE = 1800  # 30 minutes - max session lifetime regardless of activity
 
 import time
@@ -481,12 +481,30 @@ async def process_chat_message(chat_id: str, message: dict, websocket: WebSocket
         user_input = message.get("input", "")
 
         # Get or create session (same as existing logic)
-        if chat_id not in ACTIVE_SESSIONS:
+        session_existed = chat_id in ACTIVE_SESSIONS
+        if not session_existed:
             ACTIVE_SESSIONS[chat_id] = NursingTutor(chat_id)
             # Still reload insights in case new files were uploaded
             await ACTIVE_SESSIONS[chat_id].load_file_insights_from_firebase()
+            print(f"🆕 Created new session for chat {chat_id}")
+        else:
+            print(f"♻️ Reusing existing session for chat {chat_id}")
 
         nursing_tutor = ACTIVE_SESSIONS[chat_id]
+
+        # Debug: Check vectorstore status
+        has_vectorstore = nursing_tutor.session.vectorstore is not None
+        print(f"📊 Session vectorstore status: {'EXISTS in memory' if has_vectorstore else 'NOT in memory'}")
+
+        # Ensure vectorstore is loaded (needed for mindmap, quiz, etc.)
+        if nursing_tutor.session.vectorstore is None:
+            print(f"📥 Loading vectorstore from Firebase for chat {chat_id}...")
+            loaded_vectorstore = await vectorstore_manager.load_combined_vectorstore_from_firebase(chat_id)
+            if loaded_vectorstore:
+                nursing_tutor.session.vectorstore = loaded_vectorstore
+                print(f"✅ Vectorstore loaded successfully for {chat_id}")
+            else:
+                print(f"⚠️ No vectorstore found in Firebase for {chat_id} - background upload may still be in progress")
 
         # Get chat history for context-aware language detection
         full_context_from_db = await get_chat_context_from_db(chat_id)
@@ -519,6 +537,10 @@ async def process_chat_message(chat_id: str, message: dict, websocket: WebSocket
             try:
                 chunk_data = json.loads(chunk.strip())
 
+                # Debug: Log mindmap-related chunks
+                if chunk_data.get("status") in ["mindmap_generating", "mindmap_complete"]:
+                    print(f"🧠 Sending mindmap chunk: status={chunk_data.get('status')}, has_data={bool(chunk_data.get('mindmap_data'))}")
+
                 # Forward to WebSocket with type wrapper
                 await websocket.send_text(json.dumps({
                     "type": "stream_chunk",
@@ -539,10 +561,10 @@ async def process_chat_message(chat_id: str, message: dict, websocket: WebSocket
             "message": "Response complete"
         }))
 
-        # COST OPTIMIZATION: Server closes connection after stream completes
-        # Don't wait for client - close immediately to free resources
-        print(f"⚡ Stream complete for {chat_id}, closing connection from server")
-        await websocket.close(1000, "Stream complete")
+        # Update activity timestamp - connection stays open for more messages
+        # Will be closed by idle timeout (5 min) or client disconnect
+        manager.update_activity(chat_id)
+        print(f"✅ Stream complete for {chat_id}, connection stays open for follow-up messages")
 
     except Exception as e:
         print(f"Error processing chat message: {e}")
@@ -776,9 +798,9 @@ async def process_game_quiz(chat_id: str, message: dict, websocket: WebSocket):
                 }))
                 print(f"🎮 Quiz complete! Sent {question_index} questions")
 
-                # COST OPTIMIZATION: Close connection after quiz completes
-                print(f"⚡ Game quiz complete for {chat_id}, closing connection")
-                await websocket.close(1000, "Quiz complete")
+                # Update activity - connection stays open for delivery/retry
+                manager.update_activity(chat_id)
+                print(f"✅ Game quiz complete for {chat_id}, connection stays open")
 
     except Exception as e:
         print(f"❌ Game quiz error: {e}")
@@ -1355,6 +1377,8 @@ async def upload_multiple_files(
             # ========================================
             if chat_id in ACTIVE_SESSIONS:
                 session = ACTIVE_SESSIONS[chat_id]
+                has_vs = session.session.vectorstore is not None
+                print(f"📤 Upload complete for {chat_id}: session in ACTIVE_SESSIONS=True, vectorstore={'EXISTS' if has_vs else 'None'}")
                 if session.session.vectorstore:
                     # Start background task (fire-and-forget with retry)
                     asyncio.create_task(
@@ -1365,6 +1389,8 @@ async def upload_multiple_files(
                             file_bytes_map=file_bytes_map
                         )
                     )
+            else:
+                print(f"⚠️ Upload complete but chat_id {chat_id} NOT in ACTIVE_SESSIONS!")
             
             # ========================================
             # FINAL SUMMARY (IMMEDIATE)
