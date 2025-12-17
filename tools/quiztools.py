@@ -1058,6 +1058,72 @@ async def generate_quiz_stream(
         }
 
 
+@tool
+async def generate_mindmap_stream(
+    topic: str = "",
+    depth: str = "medium"
+) -> Dict[str, Any]:
+    """
+    Generate a visual mindmap from the student's uploaded documents.
+
+    Use this when students ask to:
+    - Create a mindmap
+    - Visualize concepts
+    - Show a concept map
+    - Map out the material
+    - Create a visual summary
+    - "carte mentale" (French)
+    - "schéma conceptuel" (French)
+
+    Args:
+        topic: Optional focus topic (empty = entire document)
+        depth: How deep to go ("shallow" = main topics only, "medium" = 2 levels, "deep" = 3+ levels)
+
+    Returns:
+        Signal to orchestrator to begin mindmap generation
+    """
+    print("🧠 MINDMAP TOOL: Initiating mindmap generation")
+
+    try:
+        session = get_session()
+
+        # Determine source - must have documents
+        if not session.documents:
+            return {
+                "status": "error",
+                "message": "No documents uploaded. Please upload study materials first to create a mindmap."
+            }
+
+        # Normalize depth
+        depth_map = {
+            "shallow": "shallow", "simple": "shallow", "basic": "shallow",
+            "medium": "medium", "normal": "medium", "standard": "medium",
+            "deep": "deep", "detailed": "deep", "comprehensive": "deep"
+        }
+        normalized_depth = depth_map.get(depth.lower(), "medium")
+
+        print(f"📊 Mindmap parameters: topic='{topic}', depth='{normalized_depth}'")
+        print(f"📄 Documents available: {len(session.documents)}")
+
+        return {
+            "status": "mindmap_streaming_initiated",
+            "metadata": {
+                "topic": topic,
+                "depth": normalized_depth,
+                "language": session.user_language,
+                "document_count": len(session.documents)
+            },
+            "message": f"Creating mindmap{'for ' + topic if topic else ''} from your documents..."
+        }
+
+    except Exception as e:
+        print(f"❌ Mindmap tool error: {e}")
+        return {
+            "status": "error",
+            "message": f"Mindmap generation failed: {str(e)}"
+        }
+
+
 # Helper function for streaming quiz generation
 async def stream_quiz_questions(
     topic: str,
@@ -1968,5 +2034,6 @@ class NursingTools:
             generate_flashcards_stream,
             summarize_document,
             generate_study_sheet_stream,
-            generate_audio_content
+            generate_audio_content,
+            generate_mindmap_stream
         ]

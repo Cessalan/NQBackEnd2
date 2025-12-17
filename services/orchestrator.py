@@ -285,6 +285,53 @@ class NursingTutor:
 
                             return
 
+                        if tool_name == "generate_mindmap_stream":
+                            print("🧠 Mindmap tool called")
+
+                            from tools.quiztools import generate_mindmap_stream
+                            result = await generate_mindmap_stream.ainvoke(tool_args)
+
+                            if result.get("status") == "mindmap_streaming_initiated":
+                                print("🌊 Starting mindmap streaming from orchestrator")
+
+                                metadata = result.get("metadata", {})
+
+                                from services.mindmap_generator import stream_mindmap_data
+
+                                async for chunk in stream_mindmap_data(
+                                    topic=metadata.get("topic", ""),
+                                    depth=metadata.get("depth", "medium"),
+                                    session=self.session,
+                                    chat_id=self.session.chat_id
+                                ):
+                                    status = chunk.get("status")
+
+                                    if status == "mindmap_generating":
+                                        yield json.dumps({
+                                            "status": "mindmap_generating",
+                                            "message": chunk.get("message")
+                                        }) + "\n"
+
+                                    elif status == "mindmap_complete":
+                                        yield json.dumps({
+                                            "status": "mindmap_complete",
+                                            "mindmap_data": chunk.get("mindmap_data")
+                                        }) + "\n"
+
+                                    elif status == "error":
+                                        yield json.dumps({
+                                            "status": "error",
+                                            "message": chunk.get("message")
+                                        }) + "\n"
+                            else:
+                                # Tool error (e.g., no documents)
+                                yield json.dumps({
+                                    "status": "error",
+                                    "message": result.get("message", "Mindmap generation failed")
+                                }) + "\n"
+
+                            return
+
                         if tool_name == "generate_quiz_stream":
                             print("🎯 Quiz tool called - checking for streaming")
                             print(f"📋 Tool arguments received from LLM: {tool_args}")
