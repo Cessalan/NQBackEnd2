@@ -2083,8 +2083,8 @@ async def create_plan(request: PlanRequest):
         """
         # This creates an LLM instance
         llm = ChatOpenAI(
-            model="gpt-4o-mini",           # Which AI model to use
-            temperature=0.3          # How creative (0=focused, 1=creative)
+            model="gpt-4o",           # Larger context for richer plans
+            temperature=0.3
         )
         
         # STEP 2: Send prompt to LLM (this generates the actual plan)
@@ -2148,7 +2148,7 @@ async def generate_section(request: SectionRequest):
     print("GENERATING SECTION BASED ON",request)
     
     try:
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)    
+        llm = ChatOpenAI(model="gpt-4o", temperature=0.3)    
         prompt = f"""
         You are creating educational content for a study guide.
 

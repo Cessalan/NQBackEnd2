@@ -1,6 +1,5 @@
-# Simple Study Sheet Generator - Using Claude with OpenAI fallback
-
 import json
+import os
 from typing import AsyncGenerator
 
 import anthropic
@@ -8,7 +7,7 @@ from openai import OpenAI
 
 
 class SimpleStudySheetGenerator:
-    """Generates study sheets using Claude with a ChatGPT fallback."""
+    """Generates study sheets using GPT-5-mini streaming with Anthropic fallback."""
 
     def __init__(self, session):
         self.session = session
@@ -39,14 +38,27 @@ class SimpleStudySheetGenerator:
         prompt = self._get_prompt(topic, context, language)
         anthropic_error = None
 
-        # Primary path: Anthropic streaming (preferred for formatting fidelity)
+        # Primary path: OpenAI GPT-5-mini streaming
+        try:
+            async for chunk in self._stream_with_openai(prompt):
+                yield chunk
+            return
+        except Exception as e:
+            print(f"OpenAI study sheet stream failed, falling back to Anthropic: {e}")
+            yield json.dumps({
+                "status": "study_sheet_provider",
+                "provider": "openai-gpt-5-mini",
+                "message": "OpenAI unavailable, switching to Anthropic fallback"
+            }) + "\n"
+
+        # Secondary path: Anthropic streaming (preferred for formatting fidelity)
         try:
             for chunk in self._stream_with_anthropic(prompt):
                 yield chunk
             return
         except Exception as e:
             anthropic_error = e
-            print(f"Anthropic study sheet failed, falling back to OpenAI: {e}")
+            print(f"Anthropic study sheet failed, falling back to OpenAI single shot: {e}")
             yield json.dumps({
                 "status": "study_sheet_provider",
                 "provider": "anthropic",
@@ -70,7 +82,7 @@ class SimpleStudySheetGenerator:
             }) + "\n"
         except Exception as openai_error:
             print(f"OpenAI fallback failed: {openai_error}")
-            detail = f"Anthropic error: {anthropic_error}" if anthropic_error else "Anthropic unavailable"
+            detail = f"Anthropic error: {anthropic_error}" if anthropic_error else "Upstream providers unavailable"
             yield json.dumps({
                 "status": "study_sheet_error",
                 "message": f"{detail}; OpenAI error: {openai_error}"
@@ -128,11 +140,11 @@ Key concepts:
 1. First concept with detailed explanation
 2. Second concept with detailed explanation
 
-NEXT SECTION
+        NEXT SECTION
 
-Section content here...
+        Section content here...
 
-Write the complete guide now:"""
+        Write the complete guide now:"""
 
     def _stream_with_anthropic(self, prompt: str):
         """Stream study sheet content from Anthropic."""
@@ -155,12 +167,33 @@ Write the complete guide now:"""
     def _generate_with_openai(self, prompt: str) -> str:
         """Fallback generator using OpenAI ChatGPT."""
         response = self.openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            max_tokens=4000,
+            model=os.getenv("OPENAI_STUDY_SHEET_MODEL", "gpt-5-mini"),
+            max_tokens=8000,
             temperature=0.3,
             messages=[{"role": "user", "content": prompt}]
         )
         return response.choices[0].message.content if response.choices else ""
+
+    async def _stream_with_openai(self, prompt: str):
+        """Stream study sheet content from OpenAI (GPT-5-mini by default)."""
+        response = self.openai_client.chat.completions.create(
+            model=os.getenv("OPENAI_STUDY_SHEET_MODEL", "gpt-5-mini"),
+            temperature=0.3,
+            max_tokens=8000,
+            stream=True,
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        for chunk in response:
+            if chunk.choices and chunk.choices[0].delta and chunk.choices[0].delta.content:
+                yield json.dumps({
+                    "status": "study_sheet_chunk",
+                    "content": chunk.choices[0].delta.content
+                }) + "\n"
+
+        yield json.dumps({
+            "status": "study_sheet_complete"
+        }) + "\n"
 
     @staticmethod
     def _strip_code_fences(text: str) -> str:
@@ -191,7 +224,7 @@ Write the complete guide now:"""
                 session.vectorstore_loaded = True
 
             if session.vectorstore:
-                docs = session.vectorstore.similarity_search(query=topic, k=25)
+                docs = session.vectorstore.similarity_search(query=topic, k=50)
 
                 # Filter quality chunks
                 good_chunks = []
@@ -200,10 +233,11 @@ Write the complete guide now:"""
                     if len(content) > 80:
                         good_chunks.append(content)
 
-                context = "\n\n".join(good_chunks[:15])
+                context = "\n\n".join(good_chunks[:40])
 
-                if len(context) > 8000:
-                    context = context[:8000]
+                max_chars = 120000  # protect downstream model while allowing rich context
+                if len(context) > max_chars:
+                    context = context[:max_chars]
 
                 print(f"\\U0001f4da Study sheet: {len(good_chunks)} chunks, {len(context)} chars")
                 return context

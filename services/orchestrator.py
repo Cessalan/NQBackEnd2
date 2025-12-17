@@ -1497,14 +1497,20 @@ Original message: {user_input}"""
             # Combine relevant chunks into context
             context = "\n\n".join([chunk["content"] for chunk in relevant_chunks])
             
-            # Limit context size for LLM
-            if len(context) > 15000:
-                context = context[:15000] + "..."
+            # Limit context size for LLM - allow more for comprehensive requests
+            limits = {
+                "brief": 20000,
+                "detailed": 40000,
+                "comprehensive": 80000
+            }
+            max_chars = limits.get(detail_level, 40000)
+            if len(context) > max_chars:
+                context = context[:max_chars] + "..."
             
             detail_instructions = {
                 "brief": "Create a concise 3-4 paragraph summary focusing on main concepts only",
-                "detailed": "Create a comprehensive summary with 6-8 paragraphs covering key concepts, clinical applications, and nursing considerations", 
-                "comprehensive": "Create an in-depth analysis with detailed explanations, examples, and extensive nursing applications"
+                "detailed": "Create a comprehensive summary with 6-10 paragraphs covering key concepts, clinical applications, and nursing considerations", 
+                "comprehensive": "Create an in-depth analysis with detailed explanations, examples, and extensive nursing applications; include pharmacology, pathophysiology, and nursing implications when relevant"
             }
             
             summary_prompt = f"""

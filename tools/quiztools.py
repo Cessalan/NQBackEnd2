@@ -1,4 +1,4 @@
-from typing import Dict, Any, Optional,List
+﻿from typing import Dict, Any, Optional,List
 from datetime import datetime
 from langchain_core.tools import tool
 from models.session import PersistentSessionContext
@@ -57,6 +57,29 @@ def get_session() -> PersistentSessionContext:
     return _CURRENT_SESSION
 
 
+def _get_gemini_model(model_env_var: str = "GEMINI_MODEL", default_model: str = "gemini-2.5-flash"):
+    """Configure and return a Gemini model if GOOGLE_API_KEY is set."""
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        return None
+
+    try:
+        import google.generativeai as genai
+
+        genai.configure(api_key=api_key)
+        model_name = os.getenv(model_env_var, default_model)
+        safety_settings = [
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "block_none"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "block_none"},
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "block_none"},
+            {"category": "HARM_CATEGORY_SEXUAL", "threshold": "block_none"},
+        ]
+        return genai.GenerativeModel(model_name=model_name, safety_settings=safety_settings)
+    except Exception as e:
+        print(f"Failed to initialize Gemini: {e}")
+        return None
+
+
 def load_files_for_chat(chat_id: str) -> List[Dict[str, Any]]:
     """
     Retrieves a list of all files uploaded for a specific chat from Firebase Storage,
@@ -103,7 +126,7 @@ def load_files_for_chat(chat_id: str) -> List[Dict[str, Any]]:
 
     except Exception as error:
         # Log the error and return an empty list upon failure, matching the JavaScript
-        print(f"🔥 Failed to list files for chat {chat_id}: {error}")
+        print(f"≡ƒöÑ Failed to list files for chat {chat_id}: {error}")
         return []
 # ============================================================================
 # FIXED TOOLS WITH PROPER DECORATORS
@@ -385,7 +408,7 @@ async def _create_study_sheet_with_anthropic(
         7. "Investigations / Examen para-clinique / Laboratoire" - diagnostic tests, lab values, imaging
         8. "Traitement pharmacologique" - medications, dosages, mechanisms, side effects
         9. "Traitement non-pharmacologique" - non-drug interventions, lifestyle modifications
-        10. "Interventions infirmières" - nursing assessments, interventions, monitoring, patient education
+        10. "Interventions infirmi├¿res" - nursing assessments, interventions, monitoring, patient education
         
         TECHNICAL REQUIREMENTS:
         - Self-contained HTML with embedded CSS and JavaScript
@@ -417,7 +440,7 @@ async def _create_study_sheet_with_anthropic(
         )
         
         html_content = response.content[0].text
-        print("✅ Study sheet generated successfully with Anthropic")
+        print("Γ£à Study sheet generated successfully with Anthropic")
         
     except Exception as e:
         print(f"Anthropic API error: {e}")
@@ -435,7 +458,7 @@ async def _create_study_sheet_with_anthropic(
             )
             
             html_content = response.choices[0].message.content
-            print("✅ Study sheet generated successfully with OpenAI (fallback)")
+            print("Γ£à Study sheet generated successfully with OpenAI (fallback)")
             
         except Exception as openai_error:
             print(f"OpenAI API error: {openai_error}")
@@ -532,67 +555,67 @@ async def _search_vectorstore_for_summary(
         List of chunk dicts: [{"content": str, "metadata": dict}]
     """
     print("\n" + "="*80)
-    print("🔍 _search_vectorstore_for_summary CALLED")
-    print(f"   📄 filename: {filename}")
-    print(f"   💬 chat_id: {chat_id}")
-    print(f"   🔎 query: {query}")
-    print(f"   📊 detail_level: {detail_level}")
+    print("≡ƒöì _search_vectorstore_for_summary CALLED")
+    print(f"   ≡ƒôä filename: {filename}")
+    print(f"   ≡ƒÆ¼ chat_id: {chat_id}")
+    print(f"   ≡ƒöÄ query: {query}")
+    print(f"   ≡ƒôè detail_level: {detail_level}")
     print("="*80)
     
     try:
         # ========================================
         # STEP 1: Get session and determine file to summarize
         # ========================================
-        print("\n📦 STEP 1: Retrieving session...")
+        print("\n≡ƒôª STEP 1: Retrieving session...")
         session = get_session()
-        print(f"   ✅ Session retrieved: {session}")
+        print(f"   Γ£à Session retrieved: {session}")
         
         if not session.documents:
-            print("   ⚠️ WARNING: No documents in session!")
+            print("   ΓÜá∩╕Å WARNING: No documents in session!")
             return []
         
-        print(f"   📚 Total documents in session: {len(session.documents)}")
-        print(f"   📋 Document list: {[doc.get('filename') for doc in session.documents]}")
+        print(f"   ≡ƒôÜ Total documents in session: {len(session.documents)}")
+        print(f"   ≡ƒôï Document list: {[doc.get('filename') for doc in session.documents]}")
         
         # Get last uploaded file as default
         lastfile = session.documents[-1]
-        print(f"\n   🗂️ Last file uploaded: {lastfile}")
+        print(f"\n   ≡ƒùé∩╕Å Last file uploaded: {lastfile}")
         
         # Default to last file
         fileToSummarize = lastfile['filename']
-        print(f"   📌 Default file to summarize: {fileToSummarize}")
+        print(f"   ≡ƒôî Default file to summarize: {fileToSummarize}")
         
         # Override if specific file requested and exists
         is_requested_file_uploaded = any(doc.get('filename') == filename for doc in session.documents)
-        print(f"\n   🔍 Checking if requested file '{filename}' exists in uploads...")
-        print(f"   {'✅' if is_requested_file_uploaded else '❌'} Requested file found: {is_requested_file_uploaded}")
+        print(f"\n   ≡ƒöì Checking if requested file '{filename}' exists in uploads...")
+        print(f"   {'Γ£à' if is_requested_file_uploaded else 'Γ¥î'} Requested file found: {is_requested_file_uploaded}")
         
         if is_requested_file_uploaded:
             fileToSummarize = filename
-            print(f"   🎯 Using requested file: {fileToSummarize}")
+            print(f"   ≡ƒÄ» Using requested file: {fileToSummarize}")
         else:
-            print(f"   🔄 Falling back to last file: {fileToSummarize}")
+            print(f"   ≡ƒöä Falling back to last file: {fileToSummarize}")
         
-        print(f"\n   ✅ FINAL DECISION: Will summarize '{fileToSummarize}'")
+        print(f"\n   Γ£à FINAL DECISION: Will summarize '{fileToSummarize}'")
         
         # ========================================
-        # STEP 2: CHECK IN-MEMORY CACHE FIRST ⚡
+        # STEP 2: CHECK IN-MEMORY CACHE FIRST ΓÜí
         # ========================================
         print("\n" + "="*80)
-        print("⚡ STEP 2: Checking in-memory cache...")
+        print("ΓÜí STEP 2: Checking in-memory cache...")
         print("="*80)
         
         if session.vectorstore:
-            print("   ✅ Cache HIT - Vectorstore found in memory!")
-            print(f"   📊 Vectorstore type: {type(session.vectorstore)}")
+            print("   Γ£à Cache HIT - Vectorstore found in memory!")
+            print(f"   ≡ƒôè Vectorstore type: {type(session.vectorstore)}")
             
             try:
                 # Get document count (if supported)
-                print(f"   🔢 Attempting to count documents in cache...")
+                print(f"   ≡ƒöó Attempting to count documents in cache...")
                 
                 # Perform similarity search with filter
-                print(f"\n   🔎 Searching cache for chunks from '{fileToSummarize}'...")
-                print(f"   🔍 Search params:")
+                print(f"\n   ≡ƒöÄ Searching cache for chunks from '{fileToSummarize}'...")
+                print(f"   ≡ƒöì Search params:")
                 print(f"      - query: '{query}' (empty = get all)")
                 print(f"      - k: 1000 (max chunks)")
                 print(f"      - filter: {{'source': '{fileToSummarize}'}}")
@@ -603,88 +626,88 @@ async def _search_vectorstore_for_summary(
                     filter={"source": fileToSummarize}
                 )
                 
-                print(f"   ✅ Search complete!")
-                print(f"   📦 Found {len(docs)} chunks in cache")
+                print(f"   Γ£à Search complete!")
+                print(f"   ≡ƒôª Found {len(docs)} chunks in cache")
                 
                 if docs:
                     # Log first chunk preview
                     first_chunk_preview = docs[0].page_content[:100] + "..." if len(docs[0].page_content) > 100 else docs[0].page_content
-                    print(f"\n   📄 First chunk preview:")
+                    print(f"\n   ≡ƒôä First chunk preview:")
                     print(f"      Length: {len(docs[0].page_content)} chars")
                     print(f"      Content: {first_chunk_preview}")
                     print(f"      Metadata: {docs[0].metadata}")
                     
                     # Apply detail level limits
-                    print(f"\n   ✂️ Applying detail level limits...")
+                    print(f"\n   Γ£é∩╕Å Applying detail level limits...")
                     chunk_limits = {
-                        "brief": 15000,
-                        "detailed": 20000,
-                        "comprehensive": 30000
+                        "brief": 20000,
+                        "detailed": 60000,
+                        "comprehensive": 120000
                     }
                     
                     limit = chunk_limits.get(detail_level, 20000)
-                    print(f"   📏 Detail level '{detail_level}' → limit: {limit} chars")
+                    print(f"   ≡ƒôÅ Detail level '{detail_level}' ΓåÆ limit: {limit} chars")
                     
                     # Combine all chunks
-                    print(f"   🔗 Combining {len(docs)} chunks...")
+                    print(f"   ≡ƒöù Combining {len(docs)} chunks...")
                     full_text = "\n\n".join([doc.page_content for doc in docs])
                     total_chars = len(full_text)
-                    print(f"   📊 Total combined text: {total_chars} chars")
+                    print(f"   ≡ƒôè Total combined text: {total_chars} chars")
                     
                     # Truncate if needed
                     truncated_text = full_text[:limit]
                     if len(truncated_text) < len(full_text):
-                        print(f"   ✂️ Truncated from {total_chars} to {len(truncated_text)} chars")
+                        print(f"   Γ£é∩╕Å Truncated from {total_chars} to {len(truncated_text)} chars")
                     else:
-                        print(f"   ✅ No truncation needed ({total_chars} < {limit})")
+                        print(f"   Γ£à No truncation needed ({total_chars} < {limit})")
                     
                     result = [{"content": truncated_text, "metadata": {"source": fileToSummarize}}]
                     
-                    print(f"\n   🎉 SUCCESS - Returning from CACHE")
-                    print(f"   📦 Result: 1 chunk with {len(truncated_text)} chars")
+                    print(f"\n   ≡ƒÄë SUCCESS - Returning from CACHE")
+                    print(f"   ≡ƒôª Result: 1 chunk with {len(truncated_text)} chars")
                     print("="*80)
                     
                     return result
                 else:
-                    print(f"   ⚠️ No chunks found in cache for '{fileToSummarize}'")
-                    print(f"   🤔 This might mean:")
+                    print(f"   ΓÜá∩╕Å No chunks found in cache for '{fileToSummarize}'")
+                    print(f"   ≡ƒñö This might mean:")
                     print(f"      - File wasn't uploaded yet")
                     print(f"      - Filename mismatch")
                     print(f"      - Vectorstore doesn't have this file")
-                    print(f"   📥 Will try downloading from Firebase...")
+                    print(f"   ≡ƒôÑ Will try downloading from Firebase...")
                     
             except Exception as cache_error:
-                print(f"   ❌ Cache search failed: {cache_error}")
+                print(f"   Γ¥î Cache search failed: {cache_error}")
                 import traceback
                 traceback.print_exc()
-                print(f"   📥 Will try downloading from Firebase...")
+                print(f"   ≡ƒôÑ Will try downloading from Firebase...")
         else:
-            print("   ❌ Cache MISS - No vectorstore in memory")
-            print("   🤔 Possible reasons:")
+            print("   Γ¥î Cache MISS - No vectorstore in memory")
+            print("   ≡ƒñö Possible reasons:")
             print("      - First time accessing this session")
             print("      - Vectorstore not loaded from Firebase yet")
             print("      - Session was cleared")
-            print("   📥 Will download from Firebase...")
+            print("   ≡ƒôÑ Will download from Firebase...")
         
         # ========================================
-        # STEP 3: FALLBACK - DOWNLOAD FROM FIREBASE 🔥
+        # STEP 3: FALLBACK - DOWNLOAD FROM FIREBASE ≡ƒöÑ
         # ========================================
         print("\n" + "="*80)
-        print("📥 STEP 3: Downloading from Firebase (FALLBACK)")
+        print("≡ƒôÑ STEP 3: Downloading from Firebase (FALLBACK)")
         print("="*80)
         
         with tempfile.TemporaryDirectory() as tempdir:
-            print(f"   📁 Created temp directory: {tempdir}")
+            print(f"   ≡ƒôü Created temp directory: {tempdir}")
             
             bucket = storage.bucket()
-            print(f"   🪣 Firebase bucket: {bucket.name}")
+            print(f"   ≡ƒ¬ú Firebase bucket: {bucket.name}")
             
             # Construct Firebase paths
             firebase_base = f"FileVectorStore/{chat_id}/{fileToSummarize}"
             faiss_path_firebase = f"{firebase_base}/index.faiss"
             pkl_path_firebase = f"{firebase_base}/index.pkl"
             
-            print(f"\n   🗺️ Firebase paths:")
+            print(f"\n   ≡ƒù║∩╕Å Firebase paths:")
             print(f"      FAISS: {faiss_path_firebase}")
             print(f"      PKL:   {pkl_path_firebase}")
             
@@ -692,12 +715,12 @@ async def _search_vectorstore_for_summary(
             faiss_path = os.path.join(tempdir, "index.faiss")
             pkl_path = os.path.join(tempdir, "index.pkl")
             
-            print(f"\n   💾 Local paths:")
+            print(f"\n   ≡ƒÆ╛ Local paths:")
             print(f"      FAISS: {faiss_path}")
             print(f"      PKL:   {pkl_path}")
             
             # Get blobs
-            print(f"\n   🔍 Checking if files exist in Firebase...")
+            print(f"\n   ≡ƒöì Checking if files exist in Firebase...")
             faiss_blob = bucket.blob(faiss_path_firebase)
             pkl_blob = bucket.blob(pkl_path_firebase)
             
@@ -708,33 +731,33 @@ async def _search_vectorstore_for_summary(
             print(f"      PKL exists:   {pkl_exists}")
             
             if not faiss_exists or not pkl_exists:
-                print(f"\n   ❌ ERROR: Vectorstore files not found in Firebase!")
+                print(f"\n   Γ¥î ERROR: Vectorstore files not found in Firebase!")
                 print(f"      This means the file was never uploaded or upload failed")
                 return []
             
             # Download files
-            print(f"\n   📥 Downloading FAISS file...")
+            print(f"\n   ≡ƒôÑ Downloading FAISS file...")
             faiss_blob.download_to_filename(faiss_path)
             faiss_size = os.path.getsize(faiss_path)
-            print(f"      ✅ Downloaded: {faiss_size} bytes")
+            print(f"      Γ£à Downloaded: {faiss_size} bytes")
             
-            print(f"\n   📥 Downloading PKL file...")
+            print(f"\n   ≡ƒôÑ Downloading PKL file...")
             pkl_blob.download_to_filename(pkl_path)
             pkl_size = os.path.getsize(pkl_path)
-            print(f"      ✅ Downloaded: {pkl_size} bytes")
+            print(f"      Γ£à Downloaded: {pkl_size} bytes")
             
             # Load vector store
-            print(f"\n   🔤 Loading vectorstore from downloaded files...")
+            print(f"\n   ≡ƒöñ Loading vectorstore from downloaded files...")
             vectorstore = FAISS.load_local(
                 tempdir, 
                 OpenAIEmbeddings(), 
                 allow_dangerous_deserialization=True
             )
-            print(f"      ✅ Vectorstore loaded successfully")
+            print(f"      Γ£à Vectorstore loaded successfully")
             print(f"      Type: {type(vectorstore)}")
             
             # Search vectorstore
-            print(f"\n   🔎 Searching downloaded vectorstore...")
+            print(f"\n   ≡ƒöÄ Searching downloaded vectorstore...")
             print(f"      - query: '{query}'")
             print(f"      - k: 1000")
             print(f"      - filter: {{'source': '{fileToSummarize}'}}")
@@ -745,59 +768,59 @@ async def _search_vectorstore_for_summary(
                 filter={"source": fileToSummarize}
             )
             
-            print(f"      ✅ Found {len(docs)} chunks")
+            print(f"      Γ£à Found {len(docs)} chunks")
             
             if not docs:
-                print(f"\n   ❌ No documents found with source '{fileToSummarize}'")
+                print(f"\n   Γ¥î No documents found with source '{fileToSummarize}'")
                 print(f"      This might mean a metadata mismatch")
                 return []
             
             # Log first chunk
             first_chunk_preview = docs[0].page_content[:100] + "..." if len(docs[0].page_content) > 100 else docs[0].page_content
-            print(f"\n   📄 First chunk preview:")
+            print(f"\n   ≡ƒôä First chunk preview:")
             print(f"      Length: {len(docs[0].page_content)} chars")
             print(f"      Content: {first_chunk_preview}")
             print(f"      Metadata: {docs[0].metadata}")
             
             # Apply limits
-            print(f"\n   ✂️ Applying detail level limits...")
+            print(f"\n   Γ£é∩╕Å Applying detail level limits...")
             chunk_limits = {
-                "brief": 15000,
-                "detailed": 20000,
-                "comprehensive": 30000
+                "brief": 20000,
+                "detailed": 60000,
+                "comprehensive": 120000
             }
             
             limit = chunk_limits.get(detail_level, 20000)
-            print(f"   📏 Detail level '{detail_level}' → limit: {limit} chars")
+            print(f"   ≡ƒôÅ Detail level '{detail_level}' ΓåÆ limit: {limit} chars")
             
             # Combine chunks
-            print(f"   🔗 Combining {len(docs)} chunks...")
+            print(f"   ≡ƒöù Combining {len(docs)} chunks...")
             full_text = "\n\n".join([doc.page_content for doc in docs])
             total_chars = len(full_text)
-            print(f"   📊 Total combined text: {total_chars} chars")
+            print(f"   ≡ƒôè Total combined text: {total_chars} chars")
             
             # Truncate
             truncated_text = full_text[:limit]
             if len(truncated_text) < len(full_text):
-                print(f"   ✂️ Truncated from {total_chars} to {len(truncated_text)} chars")
+                print(f"   Γ£é∩╕Å Truncated from {total_chars} to {len(truncated_text)} chars")
             else:
-                print(f"   ✅ No truncation needed")
+                print(f"   Γ£à No truncation needed")
             
             result = [{"content": truncated_text, "metadata": {"source": fileToSummarize}}]
             
-            print(f"\n   🎉 SUCCESS - Returning from FIREBASE")
-            print(f"   📦 Result: 1 chunk with {len(truncated_text)} chars")
+            print(f"\n   ≡ƒÄë SUCCESS - Returning from FIREBASE")
+            print(f"   ≡ƒôª Result: 1 chunk with {len(truncated_text)} chars")
             print("="*80)
             
             return result
             
     except Exception as e:
         print("\n" + "="*80)
-        print(f"🔥 FATAL ERROR in _search_vectorstore_for_summary")
+        print(f"≡ƒöÑ FATAL ERROR in _search_vectorstore_for_summary")
         print("="*80)
         print(f"   Error type: {type(e).__name__}")
         print(f"   Error message: {e}")
-        print(f"\n   📋 Full traceback:")
+        print(f"\n   ≡ƒôï Full traceback:")
         import traceback
         traceback.print_exc()
         print("="*80)
@@ -842,7 +865,7 @@ def get_chat_vectorstore(
         return None
 
 @tool
-async def search_documents(query: str, max_results: int = 3) -> Dict[str, Any]:
+async def search_documents(query: str, max_results: int = 8) -> Dict[str, Any]:
     """
     Search uploaded nursing documents for relevant information.
     
@@ -851,7 +874,7 @@ async def search_documents(query: str, max_results: int = 3) -> Dict[str, Any]:
     
     Args:
         query: What to search for (e.g., "cardiac medications", "NCLEX tips")
-        max_results: Maximum number of document chunks to return (default: 3)
+        max_results: Maximum number of document chunks to return (default: 8)
     
     Returns:
         Dictionary with search results and context
@@ -924,25 +947,25 @@ async def generate_quiz_stream(
 
     IMPORTANT - Detecting Question Types from User Messages:
     - If user EXPLICITLY asks for BOTH types (e.g., "1 mcq and 1 sata", "mix of mcq and sata")
-      → question_types=["mcq", "sata"]
+      ΓåÆ question_types=["mcq", "sata"]
     - If user ONLY mentions "SATA", "select all that apply" without mentioning MCQ
-      → question_types=["sata"]
+      ΓåÆ question_types=["sata"]
     - If user says "NGN format", "next generation", or "mixed format"
-      → question_types=["mcq", "sata", "casestudy"]
-    - If user just wants regular questions or doesn't specify → use ["mcq"]
+      ΓåÆ question_types=["mcq", "sata", "casestudy"]
+    - If user just wants regular questions or doesn't specify ΓåÆ use ["mcq"]
     - If user asks for "case study", "drag and drop", "ordering", "prioritization", "bowtie"
-      → include "casestudy" in question_types
+      ΓåÆ include "casestudy" in question_types
 
     Examples of user intents and question_types to use:
-    - "Give me a quiz on cardiac care" → question_types=["mcq"]
-    - "SATA questions on diabetes" → question_types=["sata"] (ONLY sata requested)
-    - "1 mcq and 1 sata question" → question_types=["mcq", "sata"] (BOTH requested)
-    - "2 questions, one multiple choice one select all" → question_types=["mcq", "sata"]
-    - "NGN format questions on endocrine" → question_types=["mcq", "sata", "casestudy"]
-    - "Mixed format NCLEX prep" → question_types=["mcq", "sata", "casestudy"]
-    - "Case study question on cardiac" → question_types=["casestudy"]
-    - "Drag and drop prioritization question" → question_types=["casestudy"]
-    - "Give me a bowtie question" → question_types=["casestudy"]
+    - "Give me a quiz on cardiac care" ΓåÆ question_types=["mcq"]
+    - "SATA questions on diabetes" ΓåÆ question_types=["sata"] (ONLY sata requested)
+    - "1 mcq and 1 sata question" ΓåÆ question_types=["mcq", "sata"] (BOTH requested)
+    - "2 questions, one multiple choice one select all" ΓåÆ question_types=["mcq", "sata"]
+    - "NGN format questions on endocrine" ΓåÆ question_types=["mcq", "sata", "casestudy"]
+    - "Mixed format NCLEX prep" ΓåÆ question_types=["mcq", "sata", "casestudy"]
+    - "Case study question on cardiac" ΓåÆ question_types=["casestudy"]
+    - "Drag and drop prioritization question" ΓåÆ question_types=["casestudy"]
+    - "Give me a bowtie question" ΓåÆ question_types=["casestudy"]
 
     Args:
         topic: Subject area (e.g., "pharmacology", "cardiac care", "NCLEX prep")
@@ -960,7 +983,7 @@ async def generate_quiz_stream(
         Dictionary signaling quiz streaming should begin with question type info
     """
 
-    print("🎯 QUIZ TOOL: Initiating streaming quiz generation")
+    print("≡ƒÄ» QUIZ TOOL: Initiating streaming quiz generation")
 
     try:
         session = get_session()
@@ -998,7 +1021,7 @@ async def generate_quiz_stream(
         if not question_types:
             question_types = ["mcq"]
 
-        print(f"📋 Question types requested: {question_types}")
+        print(f"≡ƒôï Question types requested: {question_types}")
 
         # Record tool call
         session.tool_calls.append({
@@ -1075,7 +1098,7 @@ async def stream_quiz_questions(
     if question_types is None or len(question_types) == 0:
         question_types = ["mcq"]
 
-    print(f"📋 Generating quiz with question types: {question_types}")
+    print(f"≡ƒôï Generating quiz with question types: {question_types}")
 
     # Helper to check cancellation
     def is_cancelled():
@@ -1084,13 +1107,13 @@ async def stream_quiz_questions(
             return manager.is_cancelled(chat_id)
         return False
 
-    # 🆕 PHASE 1: Stream empathetic message if provided
+    # ≡ƒåò PHASE 1: Stream empathetic message if provided
     if empathetic_message:
-        print(f"💬 Starting empathetic message streaming...")
+        print(f"≡ƒÆ¼ Starting empathetic message streaming...")
 
         # Check cancellation before starting
         if is_cancelled():
-            print(f"🛑 Quiz generation cancelled before empathetic message")
+            print(f"≡ƒ¢æ Quiz generation cancelled before empathetic message")
             return
 
         # Yield start signal
@@ -1106,7 +1129,7 @@ async def stream_quiz_questions(
         for i, word in enumerate(words):
             # Check cancellation
             if is_cancelled():
-                print(f"🛑 Quiz generation cancelled during empathetic message")
+                print(f"≡ƒ¢æ Quiz generation cancelled during empathetic message")
                 return
 
             current_text += word + " "
@@ -1125,9 +1148,9 @@ async def stream_quiz_questions(
             "full_message": empathetic_message
         }
 
-        print(f"✅ Empathetic message streaming complete")
+        print(f"Γ£à Empathetic message streaming complete")
 
-    # 🆕 PHASE 2: Generate quiz questions
+    # ≡ƒåò PHASE 2: Generate quiz questions
     # Get content based on source
     if source == "documents" and session.vectorstore:
         docs = session.vectorstore.similarity_search(query=topic, k=1000)
@@ -1146,14 +1169,14 @@ async def stream_quiz_questions(
     # e.g., for 10 questions with ["mcq", "sata"], might get:
     # ['mcq', 'mcq', 'sata', 'mcq', 'mcq', 'sata', 'mcq', 'mcq', 'sata', 'mcq']
     question_type_sequence = distribute_question_types(num_questions, question_types)
-    print(f"📝 Question type distribution: {question_type_sequence}")
+    print(f"≡ƒô¥ Question type distribution: {question_type_sequence}")
 
     # Generate questions one at a time
     for question_num in range(1, num_questions + 1):
 
-        # 🛑 Check cancellation before generating each question
+        # ≡ƒ¢æ Check cancellation before generating each question
         if is_cancelled():
-            print(f"🛑 Quiz generation cancelled at question {question_num}/{num_questions}")
+            print(f"≡ƒ¢æ Quiz generation cancelled at question {question_num}/{num_questions}")
             return  # Stop generating questions
 
         # Get the question type for this question
@@ -1172,7 +1195,7 @@ async def stream_quiz_questions(
         # Generate based on question type
         if current_question_type == "sata":
             # Generate SATA question
-            print(f"🔷 Q{question_num}: Generating SATA question")
+            print(f"≡ƒö╖ Q{question_num}: Generating SATA question")
             question_data = await generate_sata_question(
                 topic=topic,
                 difficulty=difficulty,
@@ -1183,7 +1206,7 @@ async def stream_quiz_questions(
             )
         elif current_question_type == "casestudy":
             # Generate Case Study / NGN question
-            print(f"🏥 Q{question_num}: Generating Case Study question")
+            print(f"≡ƒÅÑ Q{question_num}: Generating Case Study question")
             question_data = await generate_casestudy_question(
                 topic=topic,
                 difficulty=difficulty,
@@ -1194,11 +1217,11 @@ async def stream_quiz_questions(
             )
         else:
             # Generate MCQ question (default)
-            print(f"🔶 Q{question_num}: Generating MCQ question")
+            print(f"≡ƒö╢ Q{question_num}: Generating MCQ question")
 
-            # 🎲 Simply pick a random letter for each question
+            # ≡ƒÄ▓ Simply pick a random letter for each question
             random_target_letter = random.choice(['A', 'B', 'C', 'D'])
-            print(f"🎲 Randomly assigned correct answer position = {random_target_letter}")
+            print(f"≡ƒÄ▓ Randomly assigned correct answer position = {random_target_letter}")
 
             question_data = await _generate_single_question(
                 content=content_context,
@@ -1221,18 +1244,18 @@ async def stream_quiz_questions(
             q_type = question_data.get('questionType', 'mcq')
             if q_type == 'sata':
                 num_correct = len(question_data.get('answer', []))
-                print(f"✅ Q{question_num} SATA generated - {num_correct} correct answers")
+                print(f"Γ£à Q{question_num} SATA generated - {num_correct} correct answers")
             elif q_type == 'casestudy':
                 num_items = len(question_data.get('correctOrder', []))
-                print(f"✅ Q{question_num} Case Study generated - {num_items} items to order")
+                print(f"Γ£à Q{question_num} Case Study generated - {num_items} items to order")
             else:
                 answer = question_data.get('answer', '')
                 answer_letter = answer[0] if answer else 'A'
-                print(f"✅ Q{question_num} MCQ generated - Correct answer: {answer_letter}")
+                print(f"Γ£à Q{question_num} MCQ generated - Correct answer: {answer_letter}")
 
-            # 🛑 Check cancellation before yielding question
+            # ≡ƒ¢æ Check cancellation before yielding question
             if is_cancelled():
-                print(f"🛑 Quiz generation cancelled after question {question_num} generated")
+                print(f"≡ƒ¢æ Quiz generation cancelled after question {question_num} generated")
                 return
 
             yield {
@@ -1253,8 +1276,8 @@ async def _generate_single_question(
     question_num: int,
     language: str,
     questions_to_avoid: list = None,
-    target_letter: str = None,  # 🎲 Randomly assigned letter
-    existing_topics: list = None  # User's existing topics from progress tracking
+    target_letter: str = None,
+    existing_topics: list = None
 ) -> dict:
     """
     Generate ONE complete quiz question using LLM.
@@ -1266,19 +1289,13 @@ async def _generate_single_question(
                         content fits, reducing topic fragmentation.
     """
 
-    # Defensive defaults
     if questions_to_avoid is None:
         questions_to_avoid = []
     if existing_topics is None:
         existing_topics = []
 
-    # Build question deduplication text
-    if questions_to_avoid:
-        avoid_text = "\n".join([f"- {q}" for q in questions_to_avoid])
-    else:
-        avoid_text = "None - this is the first question"
+    avoid_text = "\n".join([f"- {q}" for q in questions_to_avoid]) if questions_to_avoid else "None - this is the first question"
 
-    # Build instruction for answer placement
     if target_letter:
         answer_instruction = f"""
         CRITICAL REQUIREMENT - CORRECT ANSWER POSITION:
@@ -1292,11 +1309,10 @@ async def _generate_single_question(
     else:
         answer_instruction = "You can choose any option (A, B, C, or D) as the correct answer."
 
-    # Build existing topics instruction
-    if existing_topics and len(existing_topics) > 0:
-        topics_list = "\n".join([f"      - {t}" for t in existing_topics[:30]])  # Limit to 30 topics
+    if existing_topics:
+        topics_list = "\n".join([f"      - {t}" for t in existing_topics[:30]])
         existing_topics_instruction = f"""
-    📚 EXISTING TOPICS (PRIORITY MATCHING):
+    ?? EXISTING TOPICS (PRIORITY MATCHING):
     The user already has these topics in their progress tracking. If the question content
     fits one of these existing topics, USE THAT EXACT TOPIC NAME instead of creating a new one.
     This prevents topic fragmentation and helps the user track their progress better.
@@ -1344,7 +1360,7 @@ async def _generate_single_question(
     - Create 4 plausible options (A-D) where ALL options could seem reasonable to a novice
     - The correct answer should be the BEST choice based on evidence-based practice
     {existing_topics_instruction}
-    🎯 TOPIC ASSIGNMENT:
+    ?? TOPIC ASSIGNMENT:
     - Assign a SPECIFIC topic/subject to this question based on what it tests
     - The topic should be 2-4 words maximum
     - Be specific and descriptive (e.g., "Cardiac Medications" not "Medicine")
@@ -1360,18 +1376,18 @@ async def _generate_single_question(
       * "Infection Control"
     - Examples of good topics in French:
       * "Anatomie Cardiaque"
-      * "Pression Artérielle"
-      * "Évaluation des Plaies"
+      * "Pression Art?rielle"
+      * "?valuation des Plaies"
       * "Gestion de la Douleur"
-      * "Équilibre Hydrique"
-      * "Contrôle des Infections"
+      * "?quilibre Hydrique"
+      * "Contr?le des Infections"
     - Examples of BAD topics:
-      * "General Knowledge" / "Connaissances Générales" (too broad)
+      * "General Knowledge" / "Connaissances G?n?rales" (too broad)
       * "Chapter 5" / "Chapitre 5" (not descriptive)
       * "Various Topics" / "Sujets Divers" (meaningless)
 
-    📤 Return ONLY valid JSON (no markdown wrapper):
-    {{
+    ?? Return ONLY valid JSON (no markdown wrapper):
+    {
         "question": "Detailed clinical scenario in {language}",
         "options": [
             "A) First option",
@@ -1382,7 +1398,7 @@ async def _generate_single_question(
         "answer": "X) The correct option",
         "justification": "<strong>Option X is correct</strong> because [1-2 sentences explaining why this is the BEST evidence-based choice].<br><br><strong>Option A is incorrect</strong> because [1 sentence explaining the clinical flaw].<br><strong>Option B is incorrect</strong> because [1 sentence explaining the clinical flaw].<br><strong>Option C is incorrect</strong> because [1 sentence explaining the clinical flaw].",
         "topic": "Specific Topic Name",
-        "metadata": {{
+        "metadata": {
             "sourceLanguage": "{language}",
             "topic": "{topic}",
             "category": "nursing",
@@ -1390,10 +1406,10 @@ async def _generate_single_question(
             "correctAnswerIndex": 0,
             "sourceDocument": "conversational_generation",
             "keywords": ["relevant", "keywords"]
-        }}
-    }}
+        }
+    }
 
-    📌 Formatting Rules (CRITICAL):
+    ?? Formatting Rules (CRITICAL):
     - Use **bold** for every "Option X is..." statement
     - Maintain parallel structure (all start the same way)
     - Keep each explanation to 1-2 sentences
@@ -1401,6 +1417,40 @@ async def _generate_single_question(
     - MUST include the "topic" field at the root level of the JSON
     """
 )
+
+    rendered_prompt = prompt.format(
+        content=content,
+        topic=topic,
+        difficulty=difficulty,
+        question_num=question_num,
+        language=language,
+        questions_to_avoid=avoid_text,
+        answer_instruction=answer_instruction,
+        existing_topics_instruction=existing_topics_instruction
+    )
+
+    gemini_model = _get_gemini_model(model_env_var="GEMINI_QUIZ_MODEL", default_model="gemini-2.5-flash")
+    if gemini_model:
+        try:
+            response = gemini_model.generate_content(
+                rendered_prompt,
+                generation_config={
+                    "temperature": 0.7,
+                    "max_output_tokens": 2000,
+                },
+            )
+            result_text = getattr(response, "text", "") or ""
+            cleaned = result_text.strip().strip("```json").strip("```").strip()
+            parsed_question = json.loads(cleaned)
+
+            answer = parsed_question.get('answer', '')
+            if answer:
+                answer_letter = answer[0]
+                parsed_question.setdefault('metadata', {})
+                parsed_question['metadata']['correctAnswerIndex'] = max(0, min(3, ord(answer_letter.upper()) - ord('A')))
+            return parsed_question
+        except Exception as e:
+            print(f"? Gemini generation failed, falling back to OpenAI: {e}")
 
     llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
     chain = prompt | llm | StrOutputParser()
@@ -1417,40 +1467,34 @@ async def _generate_single_question(
             "existing_topics_instruction": existing_topics_instruction
         })
         
-        # Clean and parse
         cleaned = result.strip().strip("```json").strip("```").strip()
         parsed_question = json.loads(cleaned)
 
-        # Extract correct answer index
         answer = parsed_question.get('answer', '')
         if answer:
-            answer_letter = answer[0]  # Extract 'A' from "A) ..."
-            answer_index = ord(answer_letter) - ord('A')  # A=0, B=1, C=2, D=3
-
+            answer_letter = answer[0]
+            answer_index = ord(answer_letter) - ord('A')
             if 'metadata' in parsed_question:
                 parsed_question['metadata']['correctAnswerIndex'] = answer_index
 
-        # ✨ Validate and ensure topic field exists
         if 'topic' not in parsed_question or not parsed_question['topic']:
-            # Fallback: try to extract from metadata or use a default
             if 'metadata' in parsed_question and 'topic' in parsed_question['metadata']:
                 parsed_question['topic'] = parsed_question['metadata']['topic']
             else:
-                # Last resort: use the quiz topic or a generic label
                 parsed_question['topic'] = topic if topic else "General"
-            print(f"⚠️ Topic field missing, assigned: {parsed_question['topic']}")
+            print(f"?? Topic field missing, assigned: {parsed_question['topic']}")
         else:
-            print(f"✅ Topic assigned: {parsed_question['topic']}")
+            print(f"? Topic assigned: {parsed_question['topic']}")
 
         return parsed_question
         
     except json.JSONDecodeError as e:
-        print(f"❌ Failed to parse question {question_num}: {e}")
+        print(f"? Failed to parse question {question_num}: {e}")
         if 'result' in locals():
             print(f"Raw output: {result[:500]}...")
         return None
     except Exception as e:
-        print(f"❌ Error generating question {question_num}: {e}")
+        print(f"? Error generating question {question_num}: {e}")
         import traceback
         traceback.print_exc()
         return None
@@ -1547,8 +1591,8 @@ def _extract_answer_concept(answer: str, topic: str) -> str:
     Extract the key concept from the correct answer.
     
     Examples:
-    - "B) Randomized controlled trial" → "Randomized controlled trial"
-    - "A) Descriptive design" → "Descriptive design"
+    - "B) Randomized controlled trial" ΓåÆ "Randomized controlled trial"
+    - "A) Descriptive design" ΓåÆ "Descriptive design"
     
     Args:
         answer: The correct answer string (e.g., "B) Randomized controlled trial")
@@ -1709,9 +1753,9 @@ async def analyze_last_quiz_and_generate_practice(
             language=session.user_language
         )
 
-        print(f"📊 Quiz Analysis: {percentage}% ({correct_count}/{total_questions})")
-        print(f"📌 Weak Topics: {', '.join([t['name'] for t in weak_topics]) if weak_topics else 'None'}")
-        print(f"💬 Empathetic Message: {empathetic_message[:100]}...")
+        print(f"≡ƒôè Quiz Analysis: {percentage}% ({correct_count}/{total_questions})")
+        print(f"≡ƒôî Weak Topics: {', '.join([t['name'] for t in weak_topics]) if weak_topics else 'None'}")
+        print(f"≡ƒÆ¼ Empathetic Message: {empathetic_message[:100]}...")
 
         # PHASE 1: Stream empathetic message
         yield {
@@ -1750,7 +1794,7 @@ async def analyze_last_quiz_and_generate_practice(
             difficulty = "hard"
             num_questions = 5
 
-        print(f"🎯 Generating practice quiz: {num_questions} {difficulty} questions on {target_topics}")
+        print(f"≡ƒÄ» Generating practice quiz: {num_questions} {difficulty} questions on {target_topics}")
 
         # PHASE 3: Call generate_quiz_stream to signal quiz generation with empathetic message
         # This will be picked up by the orchestrator which will handle streaming via stream_quiz_questions
@@ -1769,7 +1813,7 @@ async def analyze_last_quiz_and_generate_practice(
         yield quiz_signal
 
     except Exception as e:
-        print(f"❌ Error in analyze_last_quiz_and_generate_practice: {str(e)}")
+        print(f"Γ¥î Error in analyze_last_quiz_and_generate_practice: {str(e)}")
         yield {
             "status": "error",
             "message": f"Failed to analyze quiz and generate practice: {str(e)}"
@@ -1838,12 +1882,12 @@ async def _generate_performance_message(
 
     prompt = f"""You're a supportive nursing tutor and friend. Your nursing student friend just finished a quiz and you can see their results.
 
-📊 THEIR PERFORMANCE:
+≡ƒôè THEIR PERFORMANCE:
 - Score: {correct} out of {total} ({percentage}%)
 - Performance level: {tier}
 - {topic_summary}
 
-🎯 YOUR MISSION:
+≡ƒÄ» YOUR MISSION:
 Write a SHORT (2-3 sentences, MAX 60 words), conversational message {language_instruction} that:
 
 1. **Acknowledges their exact score** ({correct}/{total}) - be specific!
@@ -1851,21 +1895,21 @@ Write a SHORT (2-3 sentences, MAX 60 words), conversational message {language_in
 3. **Briefly says what you're doing next** - creating a practice quiz for them
 4. **{tone_guidance}**
 
-🚫 CRITICAL DON'Ts:
+≡ƒÜ½ CRITICAL DON'Ts:
 - NO generic phrases ("Let's do this together!", "You've got this!", "I'm here to help")
 - NO templates or corporate speak
 - NO emojis or excessive punctuation
 - NO being overly wordy - keep it tight and real
 - DO NOT sound like a robot or chatbot
 
-✅ CRITICAL DOs:
+Γ£à CRITICAL DOs:
 - BE SPECIFIC: Use their actual score and actual topic names
 - BE CONVERSATIONAL: Write like you're texting a friend
 - BE AUTHENTIC: Vary your language - no two messages should ever sound the same
 - BE BRIEF: 2-3 sentences max, under 60 words
 - USE NATURAL LANGUAGE: Contractions, casual phrasing, real human speech
 
-💡 TONE GUIDE: {tone_guidance}
+≡ƒÆí TONE GUIDE: {tone_guidance}
 
 Think: "What would I text my nursing student friend right now?"
 NOT: "What's the template for this score range?"
@@ -1879,18 +1923,18 @@ Generate your unique, authentic message {language_instruction}:"""
         result = await llm.ainvoke(prompt)
         message = result.content.strip()
 
-        print(f"✅ Generated dynamic empathetic message ({len(message)} chars)")
+        print(f"Γ£à Generated dynamic empathetic message ({len(message)} chars)")
         return message
 
     except Exception as e:
-        print(f"❌ Error generating dynamic message: {e}")
+        print(f"Γ¥î Error generating dynamic message: {e}")
 
         # Fallback to conversational varied messages
         if is_french:
             fallback_messages = [
-                f"{correct} sur {total} sur {weak_topics[0]['name'] if weak_topics else 'ces sujets'} - c'est vraiment difficile au début. Je prépare des questions plus simples pour t'aider à comprendre.",
-                f"Résultat: {correct}/{total}. {weak_topics[0]['name'] if weak_topics else 'Ces concepts'} sont compliqués, je sais. On va pratiquer avec des questions ciblées.",
-                f"Hey, {percentage}% - {weak_topics[0]['name'] if weak_topics else 'ce sujet'} casse la tête à tout le monde. Je génère un quiz adapté pour toi."
+                f"{correct} sur {total} sur {weak_topics[0]['name'] if weak_topics else 'ces sujets'} - c'est vraiment difficile au d├⌐but. Je pr├⌐pare des questions plus simples pour t'aider ├á comprendre.",
+                f"R├⌐sultat: {correct}/{total}. {weak_topics[0]['name'] if weak_topics else 'Ces concepts'} sont compliqu├⌐s, je sais. On va pratiquer avec des questions cibl├⌐es.",
+                f"Hey, {percentage}% - {weak_topics[0]['name'] if weak_topics else 'ce sujet'} casse la t├¬te ├á tout le monde. Je g├⌐n├¿re un quiz adapt├⌐ pour toi."
             ]
         else:
             fallback_messages = [
