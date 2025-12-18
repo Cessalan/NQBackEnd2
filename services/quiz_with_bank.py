@@ -67,7 +67,8 @@ async def stream_quiz_with_bank(
     empathetic_message: str = None,
     chat_id: str = None,
     question_types: List[str] = None,
-    existing_topics: List[str] = None
+    existing_topics: List[str] = None,
+    quiz_mode: str = "knowledge"
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Generate quiz questions using Question Bank first, then LLM for the rest.
@@ -88,6 +89,8 @@ async def stream_quiz_with_bank(
                        Defaults to ["mcq"] if not specified
         existing_topics: User's existing topics from progress tracking. LLM will try
                         to match questions to these topics when applicable.
+        quiz_mode: "knowledge" for factual recall questions (default),
+                   "nclex" for clinical judgment questions
 
     Yields:
         Status updates and complete questions in the same format as
@@ -106,7 +109,8 @@ async def stream_quiz_with_bank(
         ...     num_questions=4,
         ...     source="scratch",
         ...     session=session,
-        ...     question_types=["mcq", "sata"]  # Mixed format quiz
+        ...     question_types=["mcq", "sata"],  # Mixed format quiz
+        ...     quiz_mode="knowledge"  # Factual recall questions
         ... ):
         ...     if chunk["status"] == "question_ready":
         ...         print(f"Got question: {chunk['question']['question'][:50]}...")
@@ -121,6 +125,8 @@ async def stream_quiz_with_bank(
         question_types = ["mcq"]
 
     logger.info(f"Question types requested: {question_types}")
+    logger.info(f"Quiz mode: {quiz_mode}")
+    print(f"🎮 [QUIZ_WITH_BANK] Quiz mode received: {quiz_mode}")
 
     # ==========================================
     # HELPER FUNCTIONS
@@ -201,24 +207,35 @@ async def stream_quiz_with_bank(
     # For single-type quizzes, we query for that specific type
     primary_question_type = question_types[0] if question_types else "mcq"
 
-    logger.info(
-        f"Checking Question Bank: topic='{topic}', lang='{language}', "
-        f"diff='{difficulty}', count={num_questions}, qtype='{primary_question_type}'"
-    )
-
-    try:
-        bank_questions, from_bank_count = await question_bank.get_questions(
-            topic=topic,
-            language=language,
-            difficulty=difficulty,
-            count=num_questions,
-            exclude_ids=exclude_ids,
-            question_type=primary_question_type  # Pass question type for filtering
+    # IMPORTANT: Skip question bank for "knowledge" mode
+    # The bank contains mostly NCLEX-style questions (clinical scenarios),
+    # so we need to generate fresh questions for knowledge mode (factual questions)
+    if quiz_mode == "knowledge":
+        logger.info(
+            f"Skipping Question Bank for quiz_mode='knowledge' - generating fresh factual questions"
         )
-    except Exception as e:
-        logger.error(f"Error getting questions from bank: {e}")
+        print(f"🎯 [QUIZ_WITH_BANK] Skipping bank for knowledge mode - will generate all {num_questions} questions")
         bank_questions = []
         from_bank_count = 0
+    else:
+        logger.info(
+            f"Checking Question Bank: topic='{topic}', lang='{language}', "
+            f"diff='{difficulty}', count={num_questions}, qtype='{primary_question_type}'"
+        )
+
+        try:
+            bank_questions, from_bank_count = await question_bank.get_questions(
+                topic=topic,
+                language=language,
+                difficulty=difficulty,
+                count=num_questions,
+                exclude_ids=exclude_ids,
+                question_type=primary_question_type  # Pass question type for filtering
+            )
+        except Exception as e:
+            logger.error(f"Error getting questions from bank: {e}")
+            bank_questions = []
+            from_bank_count = 0
 
     # Calculate how many we still need to generate
     questions_to_generate = num_questions - from_bank_count
@@ -319,14 +336,15 @@ async def stream_quiz_with_bank(
             # Generate based on question type
             if current_question_type == "sata":
                 # Generate SATA question
-                logger.info(f"Generating SATA question {current_question_num}")
+                logger.info(f"Generating SATA question {current_question_num} (mode: {quiz_mode})")
                 question_data = await generate_sata_question(
                     topic=topic,
                     difficulty=difficulty,
                     question_num=current_question_num,
                     language=session.user_language,
                     content_context=content_context,
-                    questions_to_avoid=generated_questions
+                    questions_to_avoid=generated_questions,
+                    quiz_mode=quiz_mode
                 )
             elif current_question_type == "casestudy":
                 # Generate Case Study / NGN question
@@ -351,7 +369,7 @@ async def stream_quiz_with_bank(
                 )
             else:
                 # Generate MCQ question (default)
-                logger.info(f"Generating MCQ question {current_question_num}")
+                logger.info(f"Generating MCQ question {current_question_num} (mode: {quiz_mode})")
 
                 # Randomly assign correct answer position
                 random_target_letter = random.choice(['A', 'B', 'C', 'D'])
@@ -369,7 +387,8 @@ async def stream_quiz_with_bank(
                     language=session.user_language,
                     questions_to_avoid=generated_questions,
                     target_letter=random_target_letter,
-                    existing_topics=existing_topics  # Pass user's existing topics
+                    existing_topics=existing_topics,  # Pass user's existing topics
+                    quiz_mode=quiz_mode  # Pass quiz mode for NCLEX vs Knowledge
                 )
 
                 # Ensure MCQ has questionType field

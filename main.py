@@ -2270,9 +2270,10 @@ async def generate_chat_title(request: GenerateTitleRequest):
         )
         
        
+        # Use gpt-4.1-nano for title generation (simple classification task)
         llm = ChatOpenAI(
             temperature=0.8,
-            model="gpt-4o-mini",
+            model="gpt-4.1-nano",
             streaming=False
         )
 
@@ -2426,6 +2427,83 @@ async def get_question_bank_stats():
 
     stats = await question_bank.get_bank_stats()
     return stats
+
+
+# ============================================================================
+# SPEECH-TO-TEXT (Voice Input)
+# ============================================================================
+from openai import OpenAI
+
+@app.post("/speech-to-text")
+async def speech_to_text(audio: UploadFile = File(...)):
+    """
+    Transcribe audio to text using OpenAI Whisper API.
+
+    Accepts audio files (webm, mp3, wav, m4a, etc.)
+    Returns the transcribed text that can be used as a chat prompt.
+
+    Cost: ~$0.006 per minute of audio
+    """
+    try:
+        # Validate file type
+        content_type = audio.content_type or ""
+        if not any(t in content_type for t in ["audio", "video/webm"]):
+            # Also check file extension as fallback
+            ext = audio.filename.split(".")[-1].lower() if audio.filename else ""
+            if ext not in ["webm", "mp3", "wav", "m4a", "ogg", "mp4"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unsupported audio format: {content_type}. Use webm, mp3, wav, m4a, or ogg."
+                )
+
+        # Read the audio file
+        audio_bytes = await audio.read()
+
+        if len(audio_bytes) == 0:
+            raise HTTPException(status_code=400, detail="Empty audio file")
+
+        # Max 25MB (Whisper API limit)
+        if len(audio_bytes) > 25 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="Audio file too large (max 25MB)")
+
+        # Create a temp file for the audio
+        ext = audio.filename.split(".")[-1] if audio.filename else "webm"
+        with tempfile.NamedTemporaryFile(suffix=f".{ext}", delete=False) as tmp:
+            tmp.write(audio_bytes)
+            tmp_path = tmp.name
+
+        try:
+            # Call OpenAI Whisper API
+            client = OpenAI()
+
+            with open(tmp_path, "rb") as audio_file:
+                transcript = client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio_file,
+                    response_format="text"
+                )
+
+            # Clean up the transcription
+            transcribed_text = transcript.strip() if isinstance(transcript, str) else transcript
+
+            print(f"🎤 [STT] Transcribed {len(audio_bytes)} bytes -> '{transcribed_text[:100]}...'")
+
+            return {
+                "success": True,
+                "text": transcribed_text,
+                "audio_size_bytes": len(audio_bytes)
+            }
+
+        finally:
+            # Clean up temp file
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ [STT] Error: {e}")
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
 
 
 # ============================================================================

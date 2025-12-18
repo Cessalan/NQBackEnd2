@@ -365,7 +365,8 @@ class NursingTutor:
                                     session=self.session,
                                     empathetic_message=empathetic_message,  # Pass empathetic message
                                     chat_id=self.session.chat_id,  # Pass chat_id for cancellation
-                                    question_types=metadata.get("question_types", ["mcq"])  # Pass question types (MCQ, SATA, etc.)
+                                    question_types=metadata.get("question_types", ["mcq"]),  # Pass question types (MCQ, SATA, etc.)
+                                    quiz_mode=metadata.get("quiz_mode", "knowledge")  # Pass quiz mode (knowledge vs nclex)
                                 ):
                                     # Handle empathetic message streaming
                                     if chunk.get("status") == "empathetic_message_start":
@@ -659,6 +660,23 @@ class NursingTutor:
                                 Example: "I can generate a maximum of 15 questions per quiz. Would you like me to create 15 questions on [topic]?"
                                 **If user asks for ≤15 questions OR just says "quiz me"**: Generate IMMEDIATELY without asking
                                 **SPECIAL FEATURE**: Supports empathetic quiz generation with the 'empathetic_message' parameter
+
+                                🎯 QUIZ MODE PARAMETER (quiz_mode) - CRITICAL DEFAULT BEHAVIOR:
+                                **DEFAULT**: quiz_mode="knowledge" - Use this for ALL quiz requests unless user explicitly asks for NCLEX
+
+                                ✅ Use quiz_mode="knowledge" (DEFAULT) when user says:
+                                   - "quiz me", "test me", "give me questions", "practice questions"
+                                   - "quiz me on [topic]", "test my knowledge"
+                                   - Any quiz request that does NOT mention NCLEX or clinical scenarios
+
+                                ✅ Use quiz_mode="nclex" ONLY when user EXPLICITLY says:
+                                   - "NCLEX questions", "NCLEX practice", "NCLEX-style"
+                                   - "clinical scenarios", "situational questions", "judgment questions"
+                                   - "patient scenarios", "case-based questions"
+
+                                ⚠️ IMPORTANT: If unsure, ALWAYS default to quiz_mode="knowledge"
+                                Knowledge mode = direct factual questions (e.g., "What is the normal potassium range?")
+                                NCLEX mode = clinical scenarios (e.g., "A 65-year-old patient presents with...")
         - generate_flashcards_stream: Create flashcards for active recall and memorization (HARD LIMIT: max 15 cards per set)
                                       **CRITICAL**: If user asks for >15 cards, inform them: "I can create up to 15 flashcards per set. Would you like me to make 15 flashcards on [topic]?"
                                       **If user asks for ≤15 cards OR just says "make flashcards"**: Generate IMMEDIATELY without asking

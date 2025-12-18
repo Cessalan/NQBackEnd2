@@ -347,7 +347,8 @@ RULES FOR TOPIC ASSIGNMENT:
 Generate your flashcard in {language}:"""
     )
 
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
+    # Use gpt-4.1-nano for flashcard generation (cost-effective for structured JSON output)
+    llm = ChatOpenAI(model="gpt-4.1-nano", temperature=0.7)
     chain = prompt | llm | StrOutputParser()
 
     try:

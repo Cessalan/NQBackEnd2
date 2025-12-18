@@ -937,7 +937,8 @@ async def generate_quiz_stream(
     num_questions: int = 4,
     source_preference: str = "auto",
     question_types: List[str] = None,
-    empathetic_message: str = None
+    empathetic_message: str = None,
+    quiz_mode: str = "knowledge"
 ) -> Dict[str, Any]:
     """
     Generate a nursing quiz for the student with support for multiple question formats.
@@ -945,27 +946,31 @@ async def generate_quiz_stream(
     Use this when students request practice questions, want to test their knowledge,
     or need NCLEX-style questions on specific topics.
 
+    IMPORTANT - Detecting Quiz Mode from User Messages:
+    - If user asks for "NCLEX", "clinical scenarios", "judgment questions", "situational"
+      → quiz_mode="nclex"
+    - If user asks for "knowledge test", "factual questions", "direct questions", "test my knowledge"
+      → quiz_mode="knowledge"
+    - If user just says "quiz" without specifying → use "knowledge" (default)
+
     IMPORTANT - Detecting Question Types from User Messages:
     - If user EXPLICITLY asks for BOTH types (e.g., "1 mcq and 1 sata", "mix of mcq and sata")
-      ΓåÆ question_types=["mcq", "sata"]
+      → question_types=["mcq", "sata"]
     - If user ONLY mentions "SATA", "select all that apply" without mentioning MCQ
-      ΓåÆ question_types=["sata"]
+      → question_types=["sata"]
     - If user says "NGN format", "next generation", or "mixed format"
-      ΓåÆ question_types=["mcq", "sata", "casestudy"]
-    - If user just wants regular questions or doesn't specify ΓåÆ use ["mcq"]
+      → question_types=["mcq", "sata", "casestudy"]
+    - If user just wants regular questions or doesn't specify → use ["mcq"]
     - If user asks for "case study", "drag and drop", "ordering", "prioritization", "bowtie"
-      ΓåÆ include "casestudy" in question_types
+      → include "casestudy" in question_types
 
-    Examples of user intents and question_types to use:
-    - "Give me a quiz on cardiac care" ΓåÆ question_types=["mcq"]
-    - "SATA questions on diabetes" ΓåÆ question_types=["sata"] (ONLY sata requested)
-    - "1 mcq and 1 sata question" ΓåÆ question_types=["mcq", "sata"] (BOTH requested)
-    - "2 questions, one multiple choice one select all" ΓåÆ question_types=["mcq", "sata"]
-    - "NGN format questions on endocrine" ΓåÆ question_types=["mcq", "sata", "casestudy"]
-    - "Mixed format NCLEX prep" ΓåÆ question_types=["mcq", "sata", "casestudy"]
-    - "Case study question on cardiac" ΓåÆ question_types=["casestudy"]
-    - "Drag and drop prioritization question" ΓåÆ question_types=["casestudy"]
-    - "Give me a bowtie question" ΓåÆ question_types=["casestudy"]
+    Examples of user intents and quiz_mode to use:
+    - "NCLEX practice on diabetes" → quiz_mode="nclex"
+    - "Clinical scenario questions" → quiz_mode="nclex"
+    - "Situational questions" → quiz_mode="nclex"
+    - "Knowledge test on cardiac care" → quiz_mode="knowledge"
+    - "Test my factual recall on medications" → quiz_mode="knowledge"
+    - "Give me a quiz" (no mode specified) → quiz_mode="knowledge" (default)
 
     Args:
         topic: Subject area (e.g., "pharmacology", "cardiac care", "NCLEX prep")
@@ -978,6 +983,8 @@ async def generate_quiz_stream(
             - "casestudy" = NGN-style case study with drag-and-drop ordering
             If None or empty, defaults to ["mcq"]
         empathetic_message: Optional empathetic understanding text to show before quiz
+        quiz_mode: "knowledge" for factual recall questions (default),
+                   "nclex" for clinical judgment questions
 
     Returns:
         Dictionary signaling quiz streaming should begin with question type info
@@ -1021,7 +1028,36 @@ async def generate_quiz_stream(
         if not question_types:
             question_types = ["mcq"]
 
-        print(f"≡ƒôï Question types requested: {question_types}")
+        print(f"📋 Question types requested: {question_types}")
+
+        # Normalize quiz_mode
+        normalized_quiz_mode = quiz_mode.lower() if quiz_mode else "knowledge"
+        if normalized_quiz_mode not in ["nclex", "knowledge"]:
+            normalized_quiz_mode = "knowledge"
+
+        # IMPORTANT: Check the topic string for explicit knowledge/nclex keywords
+        # This overrides the LLM's choice if the user's original prompt was explicit
+        topic_lower = topic.lower() if topic else ""
+
+        # If topic contains "knowledge test" or similar, force knowledge mode
+        knowledge_keywords = ["knowledge test", "factual question", "direct question", "test my knowledge", "not clinical scenarios"]
+        nclex_keywords = ["nclex", "clinical scenario", "patient scenario", "judgment question", "situational"]
+
+        # Check for explicit knowledge request in topic
+        if any(kw in topic_lower for kw in knowledge_keywords):
+            normalized_quiz_mode = "knowledge"
+            print(f"🎯 Detected knowledge keywords in topic - forcing quiz_mode='knowledge'")
+        # Only use nclex if explicitly requested
+        elif any(kw in topic_lower for kw in nclex_keywords):
+            normalized_quiz_mode = "nclex"
+            print(f"🎯 Detected NCLEX keywords in topic - using quiz_mode='nclex'")
+        # Default to knowledge if nothing explicit
+        elif normalized_quiz_mode == "nclex":
+            # LLM chose nclex but user didn't explicitly ask for it - default to knowledge
+            print(f"⚠️ LLM passed quiz_mode='nclex' but no explicit NCLEX request detected - defaulting to 'knowledge'")
+            normalized_quiz_mode = "knowledge"
+
+        print(f"🎮 Final quiz mode: {normalized_quiz_mode}")
 
         # Record tool call
         session.tool_calls.append({
@@ -1032,6 +1068,7 @@ async def generate_quiz_stream(
             "num_questions": num_questions,
             "source": source,
             "question_types": question_types,
+            "quiz_mode": normalized_quiz_mode,
             "status": "streaming_initiated",
             "has_empathetic_message": bool(empathetic_message)
         })
@@ -1045,10 +1082,11 @@ async def generate_quiz_stream(
                 "num_questions": num_questions,
                 "source": source,
                 "language": session.user_language,
-                "question_types": question_types,  # NEW: Pass question types to orchestrator
+                "question_types": question_types,  # Pass question types to orchestrator
+                "quiz_mode": normalized_quiz_mode,  # Pass quiz mode (nclex vs knowledge)
                 "empathetic_message": empathetic_message
             },
-            "message": f"Starting quiz generation: {num_questions} questions on {topic} (formats: {', '.join(question_types)})"
+            "message": f"Starting quiz generation: {num_questions} questions on {topic} (mode: {normalized_quiz_mode}, formats: {', '.join(question_types)})"
         }
 
     except Exception as e:
@@ -1343,7 +1381,8 @@ async def _generate_single_question(
     language: str,
     questions_to_avoid: list = None,
     target_letter: str = None,
-    existing_topics: list = None
+    existing_topics: list = None,
+    quiz_mode: str = "knowledge"
 ) -> dict:
     """
     Generate ONE complete quiz question using LLM.
@@ -1353,6 +1392,8 @@ async def _generate_single_question(
         existing_topics: List of topic names the user already has in their progress.
                         LLM will try to match to these topics when the question
                         content fits, reducing topic fragmentation.
+        quiz_mode: "knowledge" for factual recall questions (default),
+                   "nclex" for clinical judgment questions
     """
 
     if questions_to_avoid is None:
@@ -1363,15 +1404,26 @@ async def _generate_single_question(
     avoid_text = "\n".join([f"- {q}" for q in questions_to_avoid]) if questions_to_avoid else "None - this is the first question"
 
     if target_letter:
-        answer_instruction = f"""
-        CRITICAL REQUIREMENT - CORRECT ANSWER POSITION:
-        You MUST make option **{target_letter})** the correct answer for this question.
+        if quiz_mode == "knowledge":
+            answer_instruction = f"""
+            CRITICAL REQUIREMENT - CORRECT ANSWER POSITION:
+            You MUST make option **{target_letter})** the correct answer for this question.
 
-        Design your question and options so that {target_letter} is the most appropriate clinical response.
-        - All 4 options should be plausible
-        - But {target_letter} should be the BEST choice based on evidence-based practice
-        - The other options should be reasonable but less optimal or incorrect
-        """
+            Design your question so that {target_letter} is the ONLY correct answer.
+            - All 4 options should be plausible to someone unfamiliar with the topic
+            - But {target_letter} should be the ONLY factually correct answer
+            - The other options should be common misconceptions or incorrect facts
+            """
+        else:
+            answer_instruction = f"""
+            CRITICAL REQUIREMENT - CORRECT ANSWER POSITION:
+            You MUST make option **{target_letter})** the correct answer for this question.
+
+            Design your question and options so that {target_letter} is the most appropriate clinical response.
+            - All 4 options should be plausible
+            - But {target_letter} should be the BEST choice based on evidence-based practice
+            - The other options should be reasonable but less optimal or incorrect
+            """
     else:
         answer_instruction = "You can choose any option (A, B, C, or D) as the correct answer."
 
@@ -1397,13 +1449,123 @@ async def _generate_single_question(
     print(f"\n{'='*60}")
     print(f"Generating Question {question_num}")
     print(f"Target answer position: {target_letter}")
+    print(f"Quiz mode: {quiz_mode}")
     print(f"Existing topics available: {len(existing_topics) if existing_topics else 0}")
     print(f"{'='*60}\n")
-    
-    prompt = PromptTemplate(
-        input_variables=["content", "topic", "difficulty", "question_num", "language",
-                    "questions_to_avoid", "answer_instruction", "existing_topics_instruction"],
-    template="""
+
+    # Select template based on quiz mode
+    if quiz_mode == "knowledge":
+        # KNOWLEDGE MODE: Direct factual questions testing recall
+        template_str = """
+    You are a {language}-speaking nursing quiz generator creating KNOWLEDGE TEST questions.
+
+    Generate **EXACTLY ONE factual multiple choice question** about: {topic}
+
+    Difficulty: {difficulty}
+    Question number: {question_num}
+
+    {answer_instruction}
+
+    CRITICAL - DO NOT repeat these questions:
+    {questions_to_avoid}
+
+    Context (from student's uploaded document):
+    {content}
+
+    🎯 QUESTION PRIORITY - FOCUS ON CORE CONCEPTS FIRST:
+
+    You MUST prioritize questions in this order:
+
+    1. **CORE CONCEPTS (Priority 1)** - Test these FIRST:
+       - Main topics and themes of the document
+       - Key definitions and terminology
+       - Fundamental principles and mechanisms
+       - Important classifications and categories
+       - Critical values and normal ranges
+       - Primary functions and purposes
+
+    2. **ESSENTIAL RELATIONSHIPS (Priority 2)**:
+       - Cause and effect relationships
+       - How concepts connect to each other
+       - Important comparisons and contrasts
+       - Key processes and their steps
+
+    3. **SUPPORTING DETAILS (Priority 3)** - Only after core concepts are covered:
+       - Specific examples and applications
+       - Secondary information
+       - Minor details and exceptions
+
+    ⚠️ DO NOT ask about:
+    - Random minor details that aren't central to understanding
+    - Obscure facts mentioned only once
+    - Page numbers, figure references, or document structure
+    - Trivial information that doesn't test real understanding
+
+    IMPORTANT - This is a KNOWLEDGE TEST, NOT an NCLEX exam:
+    - Ask DIRECT questions testing factual recall and understanding
+    - DO NOT use patient scenarios or clinical situations
+    - DO NOT start questions with "A nurse is caring for..." or "A patient presents with..."
+    - Test definitions, normal values, mechanisms, classifications, anatomy, procedures
+    - One answer should be CLEARLY CORRECT (not "best choice" - there is ONE right answer)
+    - Incorrect options should be common misconceptions or factually wrong
+
+    GOOD question examples (USE THESE STYLES):
+    - "What is the primary purpose of [main concept from document]?"
+    - "Which of the following best defines [key term from document]?"
+    - "What is the normal range for [important value mentioned]?"
+    - "Which classification does [key item] belong to?"
+    - "What is the main function of [core concept]?"
+    - "How does [concept A] relate to [concept B]?"
+
+    BAD question examples (DO NOT USE):
+    - "A 65-year-old patient presents with chest pain..." (NCLEX-style)
+    - "On page 5, what example is given..." (trivial detail)
+    - "Which of these was mentioned in the document..." (not testing understanding)
+    - Questions about minor details that don't test core understanding
+
+    {existing_topics_instruction}
+    TOPIC ASSIGNMENT:
+    - Assign a SPECIFIC topic/subject to this question based on what it tests
+    - The topic should be 2-4 words maximum
+    - Be specific and descriptive (e.g., "Cardiac Medications" not "Medicine")
+    - CRITICAL: Write the topic in {language} (same language as the quiz)
+    - IF EXISTING TOPICS WERE PROVIDED ABOVE, try to match to one of those first!
+
+    Return ONLY valid JSON (no markdown wrapper):
+    {{
+        "question": "Direct factual question in {language}",
+        "questionType": "mcq",
+        "quizMode": "knowledge",
+        "options": [
+            "A) First option",
+            "B) Second option",
+            "C) Third option",
+            "D) Fourth option"
+        ],
+        "answer": "X) The correct option",
+        "justification": "<strong>Option X is correct</strong> because [factual explanation].<br><br><strong>Option A is incorrect</strong> because [why it's factually wrong].<br><strong>Option B is incorrect</strong> because [why it's factually wrong].<br><strong>Option C is incorrect</strong> because [why it's factually wrong].",
+        "topic": "Specific Topic Name",
+        "metadata": {{
+            "sourceLanguage": "{language}",
+            "topic": "{topic}",
+            "category": "nursing",
+            "difficulty": "{difficulty}",
+            "quizMode": "knowledge",
+            "correctAnswerIndex": 0,
+            "sourceDocument": "conversational_generation",
+            "keywords": ["relevant", "keywords"]
+        }}
+    }}
+
+    Formatting Rules (CRITICAL):
+    - Use <strong>bold</strong> for every "Option X is..." statement
+    - Keep explanations concise and factual
+    - MUST include the "topic" field at the root level of the JSON
+    - MUST include "quizMode": "knowledge" in the response
+    """
+    else:
+        # NCLEX MODE (default): Clinical judgment questions with scenarios
+        template_str = """
     You are a {language}-speaking nursing quiz generator creating NCLEX-style questions.
 
     Generate **EXACTLY ONE high-quality multiple choice question** about: {topic}
@@ -1426,7 +1588,7 @@ async def _generate_single_question(
     - Create 4 plausible options (A-D) where ALL options could seem reasonable to a novice
     - The correct answer should be the BEST choice based on evidence-based practice
     {existing_topics_instruction}
-    ?? TOPIC ASSIGNMENT:
+    TOPIC ASSIGNMENT:
     - Assign a SPECIFIC topic/subject to this question based on what it tests
     - The topic should be 2-4 words maximum
     - Be specific and descriptive (e.g., "Cardiac Medications" not "Medicine")
@@ -1442,19 +1604,21 @@ async def _generate_single_question(
       * "Infection Control"
     - Examples of good topics in French:
       * "Anatomie Cardiaque"
-      * "Pression Art?rielle"
-      * "?valuation des Plaies"
+      * "Pression Arterielle"
+      * "Evaluation des Plaies"
       * "Gestion de la Douleur"
-      * "?quilibre Hydrique"
-      * "Contr?le des Infections"
+      * "Equilibre Hydrique"
+      * "Controle des Infections"
     - Examples of BAD topics:
-      * "General Knowledge" / "Connaissances G?n?rales" (too broad)
+      * "General Knowledge" / "Connaissances Generales" (too broad)
       * "Chapter 5" / "Chapitre 5" (not descriptive)
       * "Various Topics" / "Sujets Divers" (meaningless)
 
-    ?? Return ONLY valid JSON (no markdown wrapper):
-    {
+    Return ONLY valid JSON (no markdown wrapper):
+    {{
         "question": "Detailed clinical scenario in {language}",
+        "questionType": "mcq",
+        "quizMode": "nclex",
         "options": [
             "A) First option",
             "B) Second option",
@@ -1464,25 +1628,31 @@ async def _generate_single_question(
         "answer": "X) The correct option",
         "justification": "<strong>Option X is correct</strong> because [1-2 sentences explaining why this is the BEST evidence-based choice].<br><br><strong>Option A is incorrect</strong> because [1 sentence explaining the clinical flaw].<br><strong>Option B is incorrect</strong> because [1 sentence explaining the clinical flaw].<br><strong>Option C is incorrect</strong> because [1 sentence explaining the clinical flaw].",
         "topic": "Specific Topic Name",
-        "metadata": {
+        "metadata": {{
             "sourceLanguage": "{language}",
             "topic": "{topic}",
             "category": "nursing",
             "difficulty": "{difficulty}",
+            "quizMode": "nclex",
             "correctAnswerIndex": 0,
             "sourceDocument": "conversational_generation",
             "keywords": ["relevant", "keywords"]
-        }
-    }
+        }}
+    }}
 
-    ?? Formatting Rules (CRITICAL):
-    - Use **bold** for every "Option X is..." statement
+    Formatting Rules (CRITICAL):
+    - Use <strong>bold</strong> for every "Option X is..." statement
     - Maintain parallel structure (all start the same way)
     - Keep each explanation to 1-2 sentences
     - Test application and analysis, not just recall
     - MUST include the "topic" field at the root level of the JSON
     """
-)
+
+    prompt = PromptTemplate(
+        input_variables=["content", "topic", "difficulty", "question_num", "language",
+                    "questions_to_avoid", "answer_instruction", "existing_topics_instruction"],
+        template=template_str
+    )
 
     rendered_prompt = prompt.format(
         content=content,
@@ -1495,30 +1665,8 @@ async def _generate_single_question(
         existing_topics_instruction=existing_topics_instruction
     )
 
-    gemini_model = _get_gemini_model(model_env_var="GEMINI_QUIZ_MODEL", default_model="gemini-2.5-flash")
-    if gemini_model:
-        try:
-            response = gemini_model.generate_content(
-                rendered_prompt,
-                generation_config={
-                    "temperature": 0.7,
-                    "max_output_tokens": 2000,
-                },
-            )
-            result_text = getattr(response, "text", "") or ""
-            cleaned = result_text.strip().strip("```json").strip("```").strip()
-            parsed_question = json.loads(cleaned)
-
-            answer = parsed_question.get('answer', '')
-            if answer:
-                answer_letter = answer[0]
-                parsed_question.setdefault('metadata', {})
-                parsed_question['metadata']['correctAnswerIndex'] = max(0, min(3, ord(answer_letter.upper()) - ord('A')))
-            return parsed_question
-        except Exception as e:
-            print(f"? Gemini generation failed, falling back to OpenAI: {e}")
-
-    llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
+    # Use OpenAI gpt-4.1-nano for quiz generation (cheapest model with reliable JSON output)
+    llm = ChatOpenAI(model="gpt-4.1-nano", temperature=0.7)
     chain = prompt | llm | StrOutputParser()
     
     try:

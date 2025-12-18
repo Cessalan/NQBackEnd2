@@ -104,13 +104,112 @@ Context:
     }}
 }}
 
-📌 Critical Rules:
+Critical Rules:
 1. The "questionType" field MUST be "sata"
 2. The "answer" field MUST be an ARRAY of correct options (not a single string)
 3. Include EXACTLY {num_correct} correct answers in the array
 4. The "scoringType" should be "partial" for NCLEX-style scoring
 5. Write everything in {language}
 6. Each correct answer in the array must exactly match an option from the options list
+"""
+
+# ============================================
+# KNOWLEDGE MODE SATA PROMPT TEMPLATE
+# ============================================
+
+SATA_KNOWLEDGE_PROMPT_TEMPLATE = """
+You are a {language}-speaking nursing quiz generator creating KNOWLEDGE TEST SATA (Select All That Apply) questions.
+
+Generate **EXACTLY ONE factual SATA question** about: {topic}
+
+Difficulty: {difficulty}
+Question number: {question_num}
+
+CRITICAL - DO NOT repeat these questions:
+{questions_to_avoid}
+
+Context:
+{content}
+
+IMPORTANT - This is a KNOWLEDGE TEST, NOT an NCLEX exam:
+- Ask DIRECT questions testing factual recall
+- DO NOT use patient scenarios or clinical situations
+- DO NOT start questions with "A nurse is caring for..." or "A patient presents with..."
+- Test facts, classifications, definitions, lists, and categories
+- Questions should be "Which of the following are TRUE?" style
+
+GOOD question examples (USE THESE STYLES):
+- "Which of the following are symptoms of hypoglycemia? (Select all that apply)"
+- "Which medications are classified as loop diuretics? (Select all that apply)"
+- "Which of the following are normal laboratory values? (Select all that apply)"
+- "Which cranial nerves are involved in eye movement? (Select all that apply)"
+
+BAD question examples (DO NOT USE - these are NCLEX-style):
+- "A patient presents with low blood sugar. The nurse should anticipate..."
+- "Which nursing interventions are appropriate for a patient with..."
+
+SATA KNOWLEDGE QUESTION REQUIREMENTS:
+
+1. **Question Format:**
+   - End the question with "(Select all that apply)" or the French equivalent
+   - Ask a DIRECT factual question, NOT a clinical scenario
+   - Focus on facts, definitions, lists, or classifications
+
+2. **Options (MUST have exactly 5-6 options):**
+   - Provide 5-6 plausible options (A through E or F)
+   - EXACTLY {num_correct} options should be factually correct
+   - Incorrect options should be common misconceptions or factually wrong
+   - Mix up the order - don't cluster correct answers together
+
+3. **Answer Array:**
+   - List ALL correct options in the "answer" field as an array
+   - Example: ["A) First correct option", "C) Third correct option"]
+
+4. **Justification Format:**
+   - Explain why EACH option is correct or incorrect with factual reasoning
+   - Use <strong>bold</strong> for option labels
+   - Be concise and factual
+
+TOPIC ASSIGNMENT:
+- Assign a SPECIFIC topic/subject to this question
+- The topic should be 2-4 words maximum in {language}
+- Be specific (e.g., "Loop Diuretics" not "Medications")
+
+Return ONLY valid JSON (no markdown wrapper):
+{{
+    "question": "Which of the following are symptoms of hypoglycemia? (Select all that apply)",
+    "questionType": "sata",
+    "quizMode": "knowledge",
+    "options": [
+        "A) Tremors",
+        "B) Bradycardia",
+        "C) Diaphoresis",
+        "D) Confusion",
+        "E) Hypertension",
+        "F) Pallor"
+    ],
+    "answer": ["A) Tremors", "C) Diaphoresis", "D) Confusion", "F) Pallor"],
+    "justification": "<strong>A, C, D, and F are correct.</strong> Tremors, diaphoresis (sweating), confusion, and pallor are classic symptoms of hypoglycemia due to sympathetic nervous system activation and neuroglycopenia.<br><br><strong>B (Bradycardia) is incorrect</strong> because hypoglycemia causes tachycardia, not bradycardia.<br><br><strong>E (Hypertension) is incorrect</strong> because hypertension is not a typical symptom of hypoglycemia.",
+    "topic": "Hypoglycemia Symptoms",
+    "scoringType": "partial",
+    "metadata": {{
+        "sourceLanguage": "{language}",
+        "questionType": "sata",
+        "quizMode": "knowledge",
+        "category": "nursing",
+        "difficulty": "{difficulty}",
+        "numCorrectOptions": {num_correct},
+        "sourceDocument": "conversational_generation"
+    }}
+}}
+
+Critical Rules:
+1. The "questionType" field MUST be "sata"
+2. The "quizMode" field MUST be "knowledge"
+3. The "answer" field MUST be an ARRAY of correct options (not a single string)
+4. Include EXACTLY {num_correct} correct answers in the array
+5. Write everything in {language}
+6. DO NOT include patient scenarios - keep it factual
 """
 
 
@@ -124,7 +223,8 @@ async def generate_sata_question(
     question_num: int,
     language: str,
     content_context: str = "",
-    questions_to_avoid: list = None
+    questions_to_avoid: list = None,
+    quiz_mode: str = "knowledge"
 ) -> dict:
     """
     Generate a single SATA (Select All That Apply) question using LLM.
@@ -136,6 +236,8 @@ async def generate_sata_question(
         language: Language for the question ("english" or "french")
         content_context: Optional document content to base questions on
         questions_to_avoid: List of previous questions to avoid duplication
+        quiz_mode: "knowledge" for factual recall questions (default),
+                   "nclex" for clinical judgment questions
 
     Returns:
         dict: Complete SATA question object with all required fields
@@ -145,7 +247,8 @@ async def generate_sata_question(
             topic="Diabetes Management",
             difficulty="medium",
             question_num=1,
-            language="english"
+            language="english",
+            quiz_mode="knowledge"  # For factual questions
         )
 
         # Returns:
@@ -195,7 +298,14 @@ async def generate_sata_question(
     print(f"⚡ Difficulty: {difficulty}")
     print(f"✓ Target correct answers: {num_correct}")
     print(f"🌐 Language: {language}")
+    print(f"🎮 Quiz mode: {quiz_mode}")
     print(f"{'='*60}\n")
+
+    # Select template based on quiz mode
+    if quiz_mode == "knowledge":
+        template_to_use = SATA_KNOWLEDGE_PROMPT_TEMPLATE
+    else:
+        template_to_use = SATA_PROMPT_TEMPLATE
 
     # Create prompt
     prompt = PromptTemplate(
@@ -203,7 +313,7 @@ async def generate_sata_question(
             "content", "topic", "difficulty", "question_num",
             "language", "questions_to_avoid", "num_correct"
         ],
-        template=SATA_PROMPT_TEMPLATE
+        template=template_to_use
     )
 
     # Use GPT-4o for high-quality NCLEX questions
