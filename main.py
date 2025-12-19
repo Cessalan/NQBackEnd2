@@ -467,6 +467,14 @@ async def handle_websocket_message(chat_id: str, message: dict, websocket: WebSo
         # Serum persists across retries
         await process_game_retry(chat_id, message, websocket)
 
+    # ============================================
+    # MICRO-RATIONALE HANDLER
+    # Generate short, encouraging feedback after quiz answer
+    # Uses GPT-4.1-nano for speed, with instant fallback
+    # ============================================
+    elif message_type == "micro_rationale_request":
+        await process_micro_rationale(chat_id, message, websocket)
+
     else:
         # Unknown message type
         await websocket.send_text(json.dumps({
@@ -580,6 +588,7 @@ async def process_chat_message(chat_id: str, message: dict, websocket: WebSocket
 
 
 # ============================================================================
+# UNUSED FOR NOW, WE GAVE UP ON THE GAMIFICATION IDEA, Code kept in case there is an opportunity for this in the future
 # GAME MODE FUNCTIONS
 # These functions handle the gamified quiz flow where users collect serum
 # by answering NCLEX-style questions correctly to save a sick child.
@@ -986,6 +995,168 @@ async def process_game_retry(chat_id: str, message: dict, websocket: WebSocket):
         await websocket.send_text(json.dumps({
             "type": "error",
             "message": f"Retry failed: {str(e)}"
+        }))
+
+
+# ============================================================================
+# MICRO-RATIONALE HANDLER
+# Generate short, encouraging feedback using GPT-4.1-nano
+# ============================================================================
+
+# Static fallbacks for instant response when GPT-nano is slow/fails
+MICRO_RATIONALE_FALLBACKS = {
+    "correct": {
+        "en": {
+            "encouragement": "Nice — that's a core clinical priority.",
+            "rationale": "The priority is addressing life-threatening problems first."
+        },
+        "fr": {
+            "encouragement": "Bien joué — c'est une priorité clinique essentielle.",
+            "rationale": "La priorité est de traiter d'abord les problèmes vitaux."
+        }
+    },
+    "incorrect": {
+        "en": {
+            "encouragement": "Good attempt — this is a common exam trap.",
+            "rationale": "Focus on the most critical intervention first."
+        },
+        "fr": {
+            "encouragement": "Bonne tentative — c'est un piège d'examen courant.",
+            "rationale": "Concentrez-vous d'abord sur l'intervention la plus critique."
+        }
+    }
+}
+
+
+async def process_micro_rationale(chat_id: str, message: dict, websocket: WebSocket):
+    """
+    Generate short, encouraging feedback for quiz answers using GPT-4.1-nano.
+
+    Hard constraints:
+    - Encouragement: ≤ 12 words
+    - Rationale: ≤ 2 sentences
+    - No lists, no option-by-option breakdown
+    - Must return in <300ms or use fallback
+
+    Message format from frontend:
+    {
+        "type": "micro_rationale_request",
+        "question": "What is the primary purpose...",
+        "correct_answer": "To quickly determine...",
+        "selected_answer": "To assess the patient's...",
+        "is_correct": false,
+        "topic": "Emergency Evaluation",
+        "original_rationale": "Option C is correct because...",
+        "language": "en"
+    }
+    """
+    try:
+        # Extract data from message
+        question = message.get("question", "")
+        correct_answer = message.get("correct_answer", "")
+        selected_answer = message.get("selected_answer", "")
+        is_correct = message.get("is_correct", False)
+        topic = message.get("topic", "General")
+        original_rationale = message.get("original_rationale", "")
+        language = message.get("language", "en")
+
+        # Ensure language is supported
+        lang = language if language in ["en", "fr"] else "en"
+
+        # Get fallback based on correctness
+        fallback_key = "correct" if is_correct else "incorrect"
+        fallback = MICRO_RATIONALE_FALLBACKS[fallback_key][lang]
+
+        print(f"🎯 Micro-rationale request: {'correct' if is_correct else 'incorrect'} answer")
+
+        try:
+            # Use GPT-4.1-nano for fastest response
+            llm = ChatOpenAI(model="gpt-4.1-nano", temperature=0.7, request_timeout=0.5)
+
+            # Build tone instruction
+            if is_correct:
+                tone = "Supportive and confirming. Reinforce why this was the right choice."
+            else:
+                tone = "Supportive and non-judgmental. Normalize the mistake, explain briefly."
+
+            # Build prompt - minimal, focused
+            prompt = f"""Quiz feedback generator. Keep responses SHORT and ENCOURAGING.
+
+Question: {question[:300]}
+Correct answer: {correct_answer[:150]}
+User selected: {selected_answer[:150]}
+User was: {"CORRECT" if is_correct else "INCORRECT"}
+Topic: {topic}
+
+{f"Original rationale to condense: {original_rationale[:400]}" if original_rationale else ""}
+
+HARD CONSTRAINTS:
+- Encouragement: ≤ 12 words, {tone}
+- Rationale: ≤ 2 sentences explaining the key concept
+- NO lists, NO "Option A/B/C", NO "According to..."
+- Be warm, brief, human
+
+Return ONLY valid JSON:
+{{"encouragement": "...", "rationale": "..."}}"""
+
+            # Race against timeout
+            result = await asyncio.wait_for(
+                llm.ainvoke(prompt),
+                timeout=0.5  # 500ms hard limit
+            )
+
+            # Parse response
+            response_text = result.content.strip()
+
+            # Extract JSON from response
+            import re
+            if response_text.startswith("{"):
+                parsed = json.loads(response_text)
+            else:
+                # Try to extract JSON from response
+                json_match = re.search(r'\{[^}]+\}', response_text)
+                if json_match:
+                    parsed = json.loads(json_match.group())
+                else:
+                    raise ValueError("No JSON found in response")
+
+            # Send successful response
+            await websocket.send_text(json.dumps({
+                "type": "micro_rationale_response",
+                "data": {
+                    "encouragement": parsed.get("encouragement", fallback["encouragement"])[:100],
+                    "rationale": parsed.get("rationale", fallback["rationale"])[:250],
+                    "source": "gpt-nano"
+                }
+            }))
+
+            print(f"✅ Micro-rationale generated via GPT-nano")
+            return
+
+        except asyncio.TimeoutError:
+            print("⚠️ GPT-nano timeout, using fallback")
+        except Exception as e:
+            print(f"⚠️ GPT-nano error: {e}, using fallback")
+
+        # Fallback response
+        await websocket.send_text(json.dumps({
+            "type": "micro_rationale_response",
+            "data": {
+                **fallback,
+                "source": "fallback"
+            }
+        }))
+
+    except Exception as e:
+        print(f"❌ Micro-rationale error: {e}")
+        # Return generic fallback on total failure
+        await websocket.send_text(json.dumps({
+            "type": "micro_rationale_response",
+            "data": {
+                "encouragement": "Keep going — you're learning!",
+                "rationale": "Each question helps build your understanding.",
+                "source": "error_fallback"
+            }
         }))
 
 
@@ -1434,16 +1605,30 @@ async def upload_multiple_files(
                 if file_insights:
                     try:
                         # -----------------------------------------
-                        # STEP 1: Collect all topics from uploaded files
+                        # STEP 1: Collect all topics and educational insights from uploaded files
                         # These were already extracted during file processing
                         # -----------------------------------------
                         all_topics = []
+                        all_insights = []
                         for filename, insights in file_insights.items():
                             if insights and insights.get("topics"):
                                 all_topics.extend(insights.get("topics", []))
+                            if insights and insights.get("insights"):
+                                all_insights.extend(insights.get("insights", []))
 
-                        # Remove duplicates, keep max 5 for readability
+                        # Remove duplicates, keep max 5 topics and 3 insights for readability
                         unique_topics = list(set(all_topics))[:5]
+                        # Deduplicate insights by topic
+                        seen_topics = set()
+                        unique_insights = []
+                        for insight in all_insights:
+                            topic = insight.get("topic", "")
+                            if topic not in seen_topics:
+                                seen_topics.add(topic)
+                                unique_insights.append(insight)
+                            if len(unique_insights) >= 3:
+                                break
+
                         filenames = [f["filename"] for f in valid_files]
                         file_count = len(valid_files)
 
@@ -1472,12 +1657,15 @@ async def upload_multiple_files(
                             "type": "post_upload_message",
                             "message": friendly_message,
                             "topics": unique_topics,
+                            "insights": unique_insights,  # Educational insights for orientation flow
                             "filenames": filenames,
                             "file_count": file_count,
                             "actions": actions
                         }) + "\n"
 
                         print(f"✅ Post-upload message sent to frontend (frontend saves to Firebase)")
+                        print(f"   Topics: {unique_topics}")
+                        print(f"   Educational insights: {len(unique_insights)}")
 
                     except Exception as post_upload_error:
                         # Non-critical - user can still chat even if this fails
@@ -1646,28 +1834,55 @@ async def extract_file_insights_from_text(
         # Use GPT-4o-mini for fast, cheap analysis                
         llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
         
-        # Determine response language        
-        prompt = f"""Analyze this nursing/medical document excerpt and extract key information in {prompt_language}.
+        # Determine response language
+        prompt = f"""Analyze this document and identify its CORE PURPOSE in {prompt_language}.
 
         Document: {filename}
         Content sample:
-        {sample_text[:2000]}
+        {sample_text[:2500]}
+
+        CRITICAL: Focus on the MAIN THESIS or CENTRAL QUESTION of this document.
+        - What is the document trying to teach or prove?
+        - What is the key relationship or concept being explored?
+        - Ignore metadata (demographics, methodology details, sample sizes) - focus on the CONCLUSION or MAIN TEACHING POINT.
+
+        Example of what we want:
+        - Document about sleep and testosterone → Topic: "Sleep deprivation reduces testosterone levels"
+        - Document about ABCDE assessment → Topic: "Emergency patient assessment protocol"
+        - NOT: "Demographics, education levels, sample characteristics" (these are details, not the core topic)
 
         Identify:
-        1. Main topics (3-5 broad themes)
-        2. Specific concepts (5-10 specific medical/nursing terms or procedures)
-        3. Document type (textbook, lecture notes, clinical guide, reference, etc.)
+        1. Core topic (1-3 MAIN subjects this document is fundamentally about - the central thesis)
+        2. Key concepts (5-10 important terms or findings the student needs to remember)
+        3. Document type (research paper, textbook, clinical guide, lecture notes, etc.)
+        4. Key insights - For each core topic, extract what the student MUST learn:
+           - topic: The main subject (e.g. "Sleep and Testosterone", "ABCDE Assessment")
+           - insight: The key finding or teaching point (1 sentence - what should the student remember?)
+           - key_points: 2-4 specific facts, steps, or conclusions FROM the document
+           - context: Where/when this knowledge applies
 
-        Return ONLY valid JSON with content in this language {prompt_language}:
+        IMPORTANT:
+        - Topics should answer "What is this document ABOUT?" not "What variables were measured?"
+        - key_points should be actionable knowledge, not methodology details
+
+        Return ONLY valid JSON with content in {prompt_language}:
         {{
-        "topics": ["topic1", "topic2", "topic3"],
-        "concepts": ["concept1", "concept2", ...],
-        "document_type": "type"
+        "topics": ["Core topic 1", "Core topic 2"],
+        "concepts": ["key term 1", "key term 2", ...],
+        "document_type": "type",
+        "insights": [
+            {{
+                "topic": "Main subject of document",
+                "insight": "The key finding or teaching point",
+                "key_points": ["Important fact 1", "Important fact 2", "Important fact 3"],
+                "context": "Where this knowledge is applied"
+            }}
+        ]
         }}
         """
         
         response = await llm.ainvoke([
-            {"role": "system", "content": f"You extract key information from medical documents. Return only valid JSON with all content in {prompt_language}."},
+            {"role": "system", "content": f"You are an expert tutor who identifies the CORE PURPOSE and MAIN THESIS of educational documents. Focus on what the student needs to LEARN, not on research methodology or metadata. Return only valid JSON with all content in {prompt_language}."},
             {"role": "user", "content": prompt}
         ])
         
@@ -1681,13 +1896,15 @@ async def extract_file_insights_from_text(
             insights = {
                 "topics": [default_topic],
                 "concepts": [],
-                "document_type": default_type
+                "document_type": default_type,
+                "insights": []
             }
         
         print(f"✅ Extracted insights from {filename}:")
         print(f"   Topics: {insights.get('topics', [])}")
         print(f"   Concepts: {insights.get('concepts', [])[:3]}...")
-        
+        print(f"   Educational insights: {len(insights.get('insights', []))} generated")
+
         # Stream insight batch to frontend
         updates.append({
             "type": "insight_batch",
@@ -1695,7 +1912,8 @@ async def extract_file_insights_from_text(
             "filename": filename,
             "topics": insights.get("topics", []),
             "concepts": insights.get("concepts", [])[:5],  # Limit to 5 for UX
-            "document_type": insights.get("document_type", "")
+            "document_type": insights.get("document_type", ""),
+            "insights": insights.get("insights", [])[:3]  # Limit to 3 educational insights
         })
         
         return insights

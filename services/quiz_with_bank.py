@@ -218,6 +218,8 @@ async def stream_quiz_with_bank(
         bank_questions = []
         from_bank_count = 0
     else:
+        
+        print(f"Looking in the Bank for Questions!")
         logger.info(
             f"Checking Question Bank: topic='{topic}', lang='{language}', "
             f"diff='{difficulty}', count={num_questions}, qtype='{primary_question_type}'"
@@ -300,6 +302,29 @@ async def stream_quiz_with_bank(
                 If this is a broad topic (like 'research design', 'pharmacology', 'cardiac care'),
                 ensure you test diverse subtopics and concepts within that domain."""
 
+        # ═══════════════════════════════════════════════════════════════
+        # 🔍 DEDUPLICATION DEBUG - Remove after fixing
+        # ═══════════════════════════════════════════════════════════════
+        print(f"\n{'='*60}")
+        print(f"🔍 [DEDUP DEBUG] Checking session.quizzes...")
+        print(f"   session.quizzes exists: {session.quizzes is not None}")
+        print(f"   session.quizzes type: {type(session.quizzes)}")
+        print(f"   session.quizzes count: {len(session.quizzes) if session.quizzes else 0}")
+
+        if session.quizzes and len(session.quizzes) > 0:
+            first_quiz = session.quizzes[-1]  # Most recent
+            print(f"   Last quiz keys: {list(first_quiz.keys()) if isinstance(first_quiz, dict) else 'NOT A DICT'}")
+            
+            quiz_data = first_quiz.get('quiz_data') if isinstance(first_quiz, dict) else None
+            print(f"   quiz_data type: {type(quiz_data)}")
+            
+            if isinstance(quiz_data, list) and len(quiz_data) > 0:
+                print(f"   quiz_data[0] keys: {list(quiz_data[0].keys()) if isinstance(quiz_data[0], dict) else 'NOT A DICT'}")
+                print(f"   quiz_data[0]['question'][:50]: {quiz_data[0].get('question', 'NO QUESTION KEY')[:50] if isinstance(quiz_data[0], dict) else 'N/A'}")
+            elif isinstance(quiz_data, dict):
+                print(f"   quiz_data is DICT with keys: {list(quiz_data.keys())}")
+        print(f"{'='*60}\n")
+        # ═══════════════════════════════════════════════════════════════
         # Get previous questions for deduplication
         generated_questions = _extract_previous_questions(session=session, limit=30)
 

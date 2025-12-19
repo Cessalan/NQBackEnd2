@@ -429,6 +429,15 @@ class NursingTutor:
                                             "total_generated": chunk.get("total_generated")
                                         }) + "\n"
 
+                                # Persist generated quiz in session for deduplication on follow-up prompts
+                                try:
+                                    self.session.quizzes.append({
+                                        "quiz_data": all_questions,
+                                        "timestamp": datetime.now().isoformat()
+                                    })
+                                except Exception as e:
+                                    print(f"Failed to cache quiz in session for dedupe: {e}")
+
                                 # Quiz is done - don't generate suggestions after quiz
                                 return
 

@@ -1666,7 +1666,7 @@ async def _generate_single_question(
     )
 
     # Use OpenAI gpt-4.1-nano for quiz generation (cheapest model with reliable JSON output)
-    llm = ChatOpenAI(model="gpt-4.1-nano", temperature=0.7)
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
     chain = prompt | llm | StrOutputParser()
     
     try:
@@ -1716,35 +1716,35 @@ async def _generate_single_question(
 def _extract_previous_questions(session: PersistentSessionContext, limit: int = 15) -> list:
     """
     Extract question text from recent quiz history for deduplication.
-    
+
     Args:
         session: Current session context
         limit: Maximum number of previous questions to return
-    
+
     Returns:
         List of question strings from previous quizzes
     """
     previous_questions = []
-    
+
     if not session.quizzes:
         return []
-    
+
     # Get last 3 quiz sessions
     for quiz_session in session.quizzes[-3:]:
         quiz_data = quiz_session.get('quiz_data', {})
-        
+
         # Handle both dict and list formats
         if isinstance(quiz_data, dict) and 'quiz' in quiz_data:
             questions = quiz_data['quiz']
         else:
             questions = quiz_data
-        
+
         # Extract question text
         if isinstance(questions, list):
             for q in questions:
                 if isinstance(q, dict) and 'question' in q:
                     previous_questions.append(q['question'])
-    
+
     # Return most recent questions up to limit
     return previous_questions[-limit:]
 
