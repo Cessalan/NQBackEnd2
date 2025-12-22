@@ -55,3 +55,35 @@ class SectionRequest(BaseModel):
     topic: str
     chat_id: str
     context: str
+
+
+# ============================================================================
+# STUDY MODE REQUESTS
+# These support the Duolingo-style study journey feature
+# ============================================================================
+
+class StudyPlanRequest(BaseModel):
+    """
+    Request to generate a personalized study path.
+
+    The AI analyzes uploaded documents and creates a learning path
+    with different node types: lessons, flashcards, quizzes, and audio.
+    """
+    chat_id: str                          # Chat ID where documents were uploaded
+    upload_ids: Optional[List[str]] = []  # Optional: specific upload IDs to focus on
+    language: str = "en"                  # Language for content generation
+
+
+class StudyItemRequest(BaseModel):
+    """
+    Request to generate content for a single study node.
+
+    Content is generated on-demand when user clicks a node,
+    not all at once (saves cost, feels more dynamic).
+    """
+    chat_id: str                          # Chat ID for context
+    node_type: str                        # "lesson" | "flashcard" | "quiz" | "audio"
+    node_label: str                       # Topic/label for this node (e.g., "Cardiac Medications")
+    context_tags: Optional[List[str]] = []  # Tags for better context
+    asked_hashes: Optional[List[str]] = []  # Previously shown content hashes (anti-repeat)
+    language: str = "en"                  # Language for content

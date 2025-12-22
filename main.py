@@ -2465,7 +2465,443 @@ async def generate_section(request: SectionRequest):
     except Exception as e:
         print(f"Error generating section: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-        
+
+
+# ============================================================================
+# STUDY MODE ENDPOINTS
+# Duolingo-style learning path generation
+# ============================================================================
+
+from models.requests import StudyPlanRequest, StudyItemRequest
+import hashlib
+
+@app.post("/study/plan")
+async def generate_study_plan(request: StudyPlanRequest):
+    """
+    Generate a personalized study path based on uploaded documents.
+
+    HOW IT WORKS:
+    1. Get file insights (topics, concepts) from the session
+    2. Use LLM to create a logical learning sequence
+    3. Return a list of nodes (lesson, flashcard, quiz, audio)
+
+    Each node has:
+    - id: unique identifier
+    - type: "lesson" | "flashcard" | "quiz" | "audio"
+    - label: topic name shown to user
+    - tags: context tags for content generation
+    - difficulty: 1-3 scale
+    - status: "locked" | "available" | "completed"
+
+    Frontend will store this in Firestore and track progress.
+    """
+    print(f"\n{'='*60}")
+    print(f"📚 STUDY PATH GENERATION - chat_id: {request.chat_id}")
+    print(f"{'='*60}")
+
+    try:
+        # ------------------------------------------
+        # STEP 1: Get or create session & load insights
+        # ------------------------------------------
+        if request.chat_id not in ACTIVE_SESSIONS:
+            ACTIVE_SESSIONS[request.chat_id] = NursingTutor(request.chat_id)
+            await ACTIVE_SESSIONS[request.chat_id].load_file_insights_from_firebase()
+            print(f"🆕 Created new session for study plan")
+
+        session = ACTIVE_SESSIONS[request.chat_id]
+        file_insights = getattr(session.session, "file_insights", {})
+
+        # ------------------------------------------
+        # STEP 2: Collect all topics and concepts
+        # ------------------------------------------
+        all_topics = []
+        all_concepts = []
+
+        for filename, insights in file_insights.items():
+            if insights:
+                all_topics.extend(insights.get("topics", []))
+                all_concepts.extend(insights.get("concepts", []))
+
+        # Remove duplicates
+        unique_topics = list(set(all_topics))[:8]  # Max 8 topics for manageable path
+        unique_concepts = list(set(all_concepts))[:15]
+
+        print(f"📊 Found {len(unique_topics)} topics: {unique_topics}")
+        print(f"📊 Found {len(unique_concepts)} concepts")
+
+        # ------------------------------------------
+        # STEP 3: Fallback if no insights found
+        # ------------------------------------------
+        if not unique_topics:
+            # Try to get context from vectorstore
+            if session.session.vectorstore:
+                docs = session.session.vectorstore.similarity_search("main topics", k=5)
+                context_text = "\n".join([doc.page_content[:500] for doc in docs])
+
+                # Quick LLM call to extract topics
+                llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
+                topic_prompt = f"""Extract 3-5 main study topics from this content. Return as JSON array of strings.
+
+Content:
+{context_text[:2000]}
+
+Return ONLY: ["Topic 1", "Topic 2", "Topic 3"]"""
+
+                topic_response = await llm.ainvoke([{"role": "user", "content": topic_prompt}])
+                try:
+                    unique_topics = json.loads(topic_response.content.strip())
+                except:
+                    unique_topics = ["General Medical Knowledge"]
+
+        # ------------------------------------------
+        # STEP 4: Generate learning path with LLM
+        # ------------------------------------------
+        prompt_language = _language_for_prompt(request.language)
+
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.5)
+
+        path_prompt = f"""You are an expert learning path designer. Create a Duolingo-style study path for these topics.
+
+TOPICS TO COVER: {unique_topics}
+KEY CONCEPTS: {unique_concepts[:10]}
+
+RULES:
+1. Create 8-12 nodes total
+2. Start with a LESSON to introduce the first topic
+3. Follow each lesson with FLASHCARDS or QUIZ to reinforce
+4. Include at least one AUDIO node for variety
+5. Progress from easier to harder content
+6. End with a comprehensive QUIZ
+
+NODE TYPES:
+- "lesson": Short explanation (5-8 lines) with key points
+- "flashcard": Single front/back card for memorization
+- "quiz": Multiple choice question with rationale
+- "audio": Topic for audio explanation (1-2 min)
+
+Return ONLY valid JSON array in {prompt_language}:
+[
+  {{"id": "node_1", "type": "lesson", "label": "Introduction to [Topic]", "tags": ["intro", "basics"], "difficulty": 1}},
+  {{"id": "node_2", "type": "flashcard", "label": "Key Term: [Term]", "tags": ["vocabulary"], "difficulty": 1}},
+  {{"id": "node_3", "type": "quiz", "label": "Quick Check: [Topic]", "tags": ["assessment"], "difficulty": 1}},
+  ...
+]
+
+IMPORTANT:
+- "label" should be clear and specific (what the user will see)
+- "tags" help with content generation later
+- "difficulty" is 1 (easy), 2 (medium), or 3 (hard)
+- Labels should be in {prompt_language}"""
+
+        response = await llm.ainvoke([{"role": "user", "content": path_prompt}])
+
+        # Parse the response
+        path_json = response.content.strip()
+
+        # Clean markdown code blocks if present
+        if path_json.startswith("```"):
+            path_json = path_json.split("```")[1]
+            if path_json.startswith("json"):
+                path_json = path_json[4:]
+            path_json = path_json.strip()
+
+        nodes = json.loads(path_json)
+
+        # ------------------------------------------
+        # STEP 5: Add status and validate structure
+        # ------------------------------------------
+        for i, node in enumerate(nodes):
+            # First node is available, rest are locked
+            node["status"] = "available" if i == 0 else "locked"
+
+            # Ensure required fields exist
+            if "id" not in node:
+                node["id"] = f"node_{i+1}"
+            if "difficulty" not in node:
+                node["difficulty"] = 1 + (i // 4)  # Gradually increase
+            if "tags" not in node:
+                node["tags"] = []
+
+        print(f"✅ Generated study path with {len(nodes)} nodes")
+        for node in nodes:
+            print(f"   - {node['type']}: {node['label']}")
+
+        # ------------------------------------------
+        # STEP 6: Return the study path
+        # ------------------------------------------
+        return {
+            "nodes": nodes,
+            "topics": unique_topics,
+            "total_nodes": len(nodes),
+            "estimated_time_minutes": len(nodes) * 3  # ~3 min per node
+        }
+
+    except Exception as e:
+        print(f"❌ Study path generation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/study/generate-item")
+async def generate_study_item(request: StudyItemRequest):
+    """
+    Generate content for a single study node on-demand.
+
+    WHY ON-DEMAND:
+    - Saves cost (only generate what user actually views)
+    - Feels more dynamic and personalized
+    - Uses anti-repeat hashes to avoid duplicate content
+
+    CONTENT TYPES:
+    - lesson: {title, body, keyPoints[]}
+    - flashcard: {front, back}
+    - quiz: {question, options[], correctIndex, rationale}
+    - audio: {topic, intent, suggestedDuration}
+
+    Returns:
+    - type: the node type
+    - content: the generated content object
+    - hash: content hash for anti-repeat tracking
+    """
+    print(f"\n{'='*60}")
+    print(f"📝 STUDY ITEM GENERATION - {request.node_type}: {request.node_label}")
+    print(f"{'='*60}")
+
+    try:
+        # ------------------------------------------
+        # STEP 1: Get session and vectorstore context
+        # ------------------------------------------
+        if request.chat_id not in ACTIVE_SESSIONS:
+            ACTIVE_SESSIONS[request.chat_id] = NursingTutor(request.chat_id)
+            await ACTIVE_SESSIONS[request.chat_id].load_file_insights_from_firebase()
+
+        session = ACTIVE_SESSIONS[request.chat_id]
+
+        # Load vectorstore if needed
+        if session.session.vectorstore is None:
+            loaded_vs = await vectorstore_manager.load_combined_vectorstore_from_firebase(request.chat_id)
+            if loaded_vs:
+                session.session.vectorstore = loaded_vs
+
+        # ------------------------------------------
+        # STEP 2: Search for relevant context
+        # ------------------------------------------
+        context = ""
+        if session.session.vectorstore:
+            # Search for content related to this node's topic
+            search_query = f"{request.node_label} {' '.join(request.context_tags)}"
+            docs = session.session.vectorstore.similarity_search(search_query, k=4)
+            context = "\n\n".join([doc.page_content for doc in docs])
+            print(f"📚 Found {len(docs)} relevant chunks for context")
+
+        # ------------------------------------------
+        # STEP 3: Generate content based on type
+        # ------------------------------------------
+        prompt_language = _language_for_prompt(request.language)
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.6)
+
+        content = None
+
+        if request.node_type == "lesson":
+            content = await _generate_lesson(
+                llm, request.node_label, context, prompt_language, request.asked_hashes
+            )
+
+        elif request.node_type == "flashcard":
+            content = await _generate_flashcard(
+                llm, request.node_label, context, prompt_language, request.asked_hashes
+            )
+
+        elif request.node_type == "quiz":
+            content = await _generate_quiz_item(
+                llm, request.node_label, context, prompt_language, request.asked_hashes
+            )
+
+        elif request.node_type == "audio":
+            content = await _generate_audio_config(
+                llm, request.node_label, context, prompt_language
+            )
+
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown node type: {request.node_type}")
+
+        # ------------------------------------------
+        # STEP 4: Generate content hash for anti-repeat
+        # ------------------------------------------
+        content_str = json.dumps(content, sort_keys=True)
+        content_hash = hashlib.md5(content_str.encode()).hexdigest()[:12]
+
+        print(f"✅ Generated {request.node_type} content (hash: {content_hash})")
+
+        return {
+            "type": request.node_type,
+            "content": content,
+            "hash": content_hash
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Study item generation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# STUDY ITEM GENERATION HELPERS
+# Each function generates a specific content type
+# ============================================================================
+
+async def _generate_lesson(llm, label: str, context: str, language: str, asked_hashes: list) -> dict:
+    """
+    Generate a short lesson (5-8 lines) with key takeaways.
+
+    Think of it like a Duolingo "tip" before exercises.
+    """
+    prompt = f"""Create a SHORT lesson about: {label}
+
+CONTEXT FROM STUDENT'S DOCUMENTS:
+{context[:2000] if context else "No specific context - use general knowledge"}
+
+REQUIREMENTS:
+1. Title: Clear, engaging title
+2. Body: 5-8 sentences explaining the topic
+3. Key Points: 3 bullet points to remember
+
+Write in {language}. Be concise but educational.
+Focus on the "why" not just "what".
+
+Return ONLY valid JSON:
+{{
+  "title": "Lesson title here",
+  "body": "The explanation paragraph here. Keep it clear and engaging...",
+  "keyPoints": ["Point 1", "Point 2", "Point 3"]
+}}"""
+
+    response = await llm.ainvoke([{"role": "user", "content": prompt}])
+
+    # Parse response
+    content_json = response.content.strip()
+    if content_json.startswith("```"):
+        content_json = content_json.split("```")[1]
+        if content_json.startswith("json"):
+            content_json = content_json[4:]
+        content_json = content_json.strip()
+
+    return json.loads(content_json)
+
+
+async def _generate_flashcard(llm, label: str, context: str, language: str, asked_hashes: list) -> dict:
+    """
+    Generate a single flashcard (front/back).
+
+    Front: Question or term
+    Back: Answer or definition
+    """
+    prompt = f"""Create ONE flashcard about: {label}
+
+CONTEXT FROM STUDENT'S DOCUMENTS:
+{context[:1500] if context else "No specific context - use general knowledge"}
+
+REQUIREMENTS:
+- Front: A question or key term (short, clear)
+- Back: The answer or definition (concise but complete)
+- Make it memorable and useful for studying
+
+Write in {language}.
+
+Return ONLY valid JSON:
+{{
+  "front": "What is [concept]?",
+  "back": "The answer explaining the concept..."
+}}"""
+
+    response = await llm.ainvoke([{"role": "user", "content": prompt}])
+
+    content_json = response.content.strip()
+    if content_json.startswith("```"):
+        content_json = content_json.split("```")[1]
+        if content_json.startswith("json"):
+            content_json = content_json[4:]
+        content_json = content_json.strip()
+
+    return json.loads(content_json)
+
+
+async def _generate_quiz_item(llm, label: str, context: str, language: str, asked_hashes: list) -> dict:
+    """
+    Generate a multiple choice question with rationale.
+
+    NCLEX-style: tests understanding, not just memorization.
+    """
+    prompt = f"""Create ONE multiple choice question about: {label}
+
+CONTEXT FROM STUDENT'S DOCUMENTS:
+{context[:2000] if context else "No specific context - use general knowledge"}
+
+REQUIREMENTS:
+- Question: Clear, tests understanding (not just recall)
+- 4 options (A, B, C, D format)
+- Only ONE correct answer
+- Include rationale explaining WHY the answer is correct
+
+Write in {language}. NCLEX-style if this is nursing/medical content.
+
+Return ONLY valid JSON:
+{{
+  "question": "The question text here?",
+  "options": ["A) Option 1", "B) Option 2", "C) Option 3", "D) Option 4"],
+  "correctIndex": 1,
+  "rationale": "Option B is correct because..."
+}}"""
+
+    response = await llm.ainvoke([{"role": "user", "content": prompt}])
+
+    content_json = response.content.strip()
+    if content_json.startswith("```"):
+        content_json = content_json.split("```")[1]
+        if content_json.startswith("json"):
+            content_json = content_json[4:]
+        content_json = content_json.strip()
+
+    return json.loads(content_json)
+
+
+async def _generate_audio_config(llm, label: str, context: str, language: str) -> dict:
+    """
+    Generate configuration for an audio lesson.
+
+    This returns the TOPIC and INTENT, not the actual audio.
+    The frontend will use this to call the existing audio generation endpoint.
+    """
+    prompt = f"""Create an audio lesson config for: {label}
+
+CONTEXT:
+{context[:1000] if context else "No specific context"}
+
+Return a configuration for a 1-2 minute audio explanation.
+
+Return ONLY valid JSON:
+{{
+  "topic": "Clear topic title for audio",
+  "intent": "teach",
+  "suggestedDuration": 2
+}}"""
+
+    response = await llm.ainvoke([{"role": "user", "content": prompt}])
+
+    content_json = response.content.strip()
+    if content_json.startswith("```"):
+        content_json = content_json.split("```")[1]
+        if content_json.startswith("json"):
+            content_json = content_json[4:]
+        content_json = content_json.strip()
+
+    return json.loads(content_json)
+
+
 @app.post("/chat/generate-title", response_model=GenerateTitleResponse)
 async def generate_chat_title(request: GenerateTitleRequest):
     
