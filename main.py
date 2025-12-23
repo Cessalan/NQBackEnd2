@@ -2795,78 +2795,158 @@ Return ONLY valid JSON:
 
 async def _generate_flashcard(llm, label: str, context: str, language: str, asked_hashes: list) -> dict:
     """
-    Generate a single flashcard (front/back).
+    Generate 5 high-quality flashcards for a single node using the enhanced generator.
 
-    Front: Question or term
-    Back: Answer or definition
+    Uses the _generate_single_flashcard from flashcard_tools which produces:
+    - Scannable answers with bullets and bold formatting
+    - Topic assignment for organization
+    - Better deduplication across cards
+
+    Returns an object with a 'cards' array containing 5 flashcards.
+    Each card has front/back/topic.
     """
-    prompt = f"""Create ONE flashcard about: {label}
+    from tools.flashcard_tools import _generate_single_flashcard
 
-CONTEXT FROM STUDENT'S DOCUMENTS:
-{context[:1500] if context else "No specific context - use general knowledge"}
+    # Build content context for the generator
+    if context:
+        content_context = f"Document content:\n{context[:15000]}"
+    else:
+        content_context = f"""You are generating flashcards about: {label}
 
-REQUIREMENTS:
-- Front: A question or key term (short, clear)
-- Back: The answer or definition (concise but complete)
-- Make it memorable and useful for studying
+        Cover key concepts, definitions, and important facts that students need to memorize.
+        If this is a broad topic, ensure diverse coverage of subtopics."""
 
-Write in {language}.
+    cards = []
+    generated_fronts = []
+    existing_topics = []
 
-Return ONLY valid JSON:
-{{
-  "front": "What is [concept]?",
-  "back": "The answer explaining the concept..."
-}}"""
+    # Generate 5 flashcards one at a time for better quality
+    for card_num in range(1, 6):
+        flashcard_data = await _generate_single_flashcard(
+            content=content_context,
+            topic=label,
+            card_num=card_num,
+            language=language,
+            cards_to_avoid=generated_fronts,
+            existing_topics=existing_topics
+        )
 
-    response = await llm.ainvoke([{"role": "user", "content": prompt}])
+        if flashcard_data:
+            # Track front for deduplication
+            generated_fronts.append(flashcard_data['front'])
 
-    content_json = response.content.strip()
-    if content_json.startswith("```"):
-        content_json = content_json.split("```")[1]
-        if content_json.startswith("json"):
-            content_json = content_json[4:]
-        content_json = content_json.strip()
+            # Track topic for consistency
+            card_topic = flashcard_data.get('topic', '')
+            if card_topic and card_topic not in existing_topics:
+                existing_topics.append(card_topic)
 
-    return json.loads(content_json)
+            cards.append(flashcard_data)
+            print(f"✅ Flashcard {card_num}/5 generated - Topic: {flashcard_data.get('topic', 'N/A')}")
+
+    # Ensure we have at least some cards
+    if not cards:
+        # Fallback to simple generation if enhanced method fails
+        print("⚠️ Enhanced flashcard generation failed, using fallback")
+        cards = [
+            {"front": f"What is {label}?", "back": f"Definition of {label}...", "topic": label},
+            {"front": f"Key features of {label}?", "back": f"The key features are...", "topic": label},
+            {"front": f"Why is {label} important?", "back": f"It is important because...", "topic": label},
+            {"front": f"How is {label} applied?", "back": f"It is applied by...", "topic": label},
+            {"front": f"Common mistakes with {label}?", "back": f"Common mistakes include...", "topic": label}
+        ]
+
+    print(f"📇 Generated {len(cards)} high-quality flashcards")
+    return {"cards": cards}
 
 
 async def _generate_quiz_item(llm, label: str, context: str, language: str, asked_hashes: list) -> dict:
     """
-    Generate a multiple choice question with rationale.
+    Generate 5 high-quality multiple choice questions for a single node.
 
-    NCLEX-style: tests understanding, not just memorization.
+    Uses the _generate_single_question from quiztools which produces:
+    - Random answer positioning (not always B or C)
+    - Topic assignment for organization
+    - Better justifications with bold formatting
+    - Knowledge mode (factual recall, not NCLEX scenarios)
+
+    Returns an object with a 'questions' array containing 5 quiz questions.
+    Each question has: question, options, correctIndex, rationale, topic.
     """
-    prompt = f"""Create ONE multiple choice question about: {label}
+    import random
+    from tools.quiztools import _generate_single_question
 
-CONTEXT FROM STUDENT'S DOCUMENTS:
-{context[:2000] if context else "No specific context - use general knowledge"}
+    # Build content context for the generator
+    if context:
+        content_context = f"Document content:\n{context[:12000]}"
+    else:
+        content_context = f"""You are generating questions about: {label}
 
-REQUIREMENTS:
-- Question: Clear, tests understanding (not just recall)
-- 4 options (A, B, C, D format)
-- Only ONE correct answer
-- Include rationale explaining WHY the answer is correct
+            If this is a broad topic (like 'research design', 'pharmacology', 'cardiac care'),
+            ensure you test diverse subtopics and concepts within that domain."""
 
-Write in {language}. NCLEX-style if this is nursing/medical content.
+    questions = []
+    generated_question_texts = []
+    existing_topics = []
 
-Return ONLY valid JSON:
-{{
-  "question": "The question text here?",
-  "options": ["A) Option 1", "B) Option 2", "C) Option 3", "D) Option 4"],
-  "correctIndex": 1,
-  "rationale": "Option B is correct because..."
-}}"""
+    # Generate 5 questions one at a time for better quality
+    for question_num in range(1, 6):
+        # Random answer position for each question
+        random_target_letter = random.choice(['A', 'B', 'C', 'D'])
 
-    response = await llm.ainvoke([{"role": "user", "content": prompt}])
+        question_data = await _generate_single_question(
+            content=content_context,
+            topic=label,
+            difficulty="medium",
+            question_num=question_num,
+            language=language,
+            questions_to_avoid=generated_question_texts,
+            target_letter=random_target_letter,
+            existing_topics=existing_topics,
+            quiz_mode="knowledge"  # Use knowledge mode for study path (factual, not NCLEX scenarios)
+        )
 
-    content_json = response.content.strip()
-    if content_json.startswith("```"):
-        content_json = content_json.split("```")[1]
-        if content_json.startswith("json"):
-            content_json = content_json[4:]
-        content_json = content_json.strip()
+        if question_data:
+            # Track question text for deduplication
+            generated_question_texts.append(question_data['question'])
 
-    return json.loads(content_json)
+            # Track topic for consistency
+            question_topic = question_data.get('topic', '')
+            if question_topic and question_topic not in existing_topics:
+                existing_topics.append(question_topic)
+
+            # Convert format for frontend compatibility
+            # Frontend expects: { question, options, correctIndex, rationale }
+            answer = question_data.get('answer', 'A)')
+            answer_letter = answer[0] if answer else 'A'
+            correct_index = ord(answer_letter) - ord('A')
+
+            formatted_question = {
+                "question": question_data['question'],
+                "options": question_data['options'],
+                "correctIndex": correct_index,
+                "rationale": question_data.get('justification', ''),
+                "topic": question_data.get('topic', label)
+            }
+
+            questions.append(formatted_question)
+            print(f"✅ Question {question_num}/5 generated - Answer: {answer_letter}, Topic: {formatted_question['topic']}")
+
+    # Ensure we have at least some questions
+    if not questions:
+        # Fallback to simple generation if enhanced method fails
+        print("⚠️ Enhanced quiz generation failed, using fallback")
+        questions = [
+            {
+                "question": f"What is the primary purpose of {label}?",
+                "options": ["A) Option 1", "B) Option 2", "C) Option 3", "D) Option 4"],
+                "correctIndex": 0,
+                "rationale": f"Option A is correct because it describes {label}.",
+                "topic": label
+            }
+        ]
+
+    print(f"❓ Generated {len(questions)} high-quality quiz questions")
+    return {"questions": questions}
 
 
 async def _generate_audio_config(llm, label: str, context: str, language: str) -> dict:
