@@ -69,7 +69,14 @@ from core.language import LanguageDetector
 
 from services.vectorstore_manager import vectorstore_manager
 
+# Study mode imports - reuse existing streaming generators
+from models.session import PersistentSessionContext
+from tools.quiztools import set_session_context, get_session, load_files_for_chat, get_chat_vectorstore
+from services.quiz_with_bank import stream_quiz_with_bank
+from tools.flashcard_tools import stream_flashcards
+
 import json
+import hashlib
 
 # Custom PowerPoint loader that doesn't need NLTK
 class SimplePowerPointLoader:
@@ -2472,7 +2479,7 @@ async def generate_section(request: SectionRequest):
 # Duolingo-style learning path generation
 # ============================================================================
 
-from models.requests import StudyPlanRequest, StudyItemRequest
+from models.requests import StudyPlanRequest, StudyItemRequest, StudyAudioRequest
 import hashlib
 
 @app.post("/study/plan")
@@ -2670,55 +2677,46 @@ async def generate_study_item(request: StudyItemRequest):
 
     try:
         # ------------------------------------------
-        # STEP 1: Get session and vectorstore context
+        # STEP 1: Setup session using PersistentSessionContext
+        # This mirrors the orchestrator's session setup for consistency
         # ------------------------------------------
-        if request.chat_id not in ACTIVE_SESSIONS:
-            ACTIVE_SESSIONS[request.chat_id] = NursingTutor(request.chat_id)
-            await ACTIVE_SESSIONS[request.chat_id].load_file_insights_from_firebase()
-
-        session = ACTIVE_SESSIONS[request.chat_id]
-
-        # Load vectorstore if needed
-        if session.session.vectorstore is None:
-            loaded_vs = await vectorstore_manager.load_combined_vectorstore_from_firebase(request.chat_id)
-            if loaded_vs:
-                session.session.vectorstore = loaded_vs
+        session = await _setup_study_session(request.chat_id, request.language)
 
         # ------------------------------------------
-        # STEP 2: Search for relevant context
+        # STEP 2: Generate content based on type
+        # Uses the SAME streaming generators as chat tools
         # ------------------------------------------
-        context = ""
-        if session.session.vectorstore:
-            # Search for content related to this node's topic
-            search_query = f"{request.node_label} {' '.join(request.context_tags)}"
-            docs = session.session.vectorstore.similarity_search(search_query, k=4)
-            context = "\n\n".join([doc.page_content for doc in docs])
-            print(f"📚 Found {len(docs)} relevant chunks for context")
-
-        # ------------------------------------------
-        # STEP 3: Generate content based on type
-        # ------------------------------------------
-        prompt_language = _language_for_prompt(request.language)
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.6)
-
         content = None
 
         if request.node_type == "lesson":
-            content = await _generate_lesson(
-                llm, request.node_label, context, prompt_language, request.asked_hashes
+            # Lessons use enhanced context retrieval (k=1000)
+            content = await _generate_lesson_with_context(
+                session, request.node_label, request.language
             )
 
         elif request.node_type == "flashcard":
-            content = await _generate_flashcard(
-                llm, request.node_label, context, prompt_language, request.asked_hashes
+            # Flashcards use stream_flashcards (same as chat tools)
+            content = await _generate_flashcard_via_stream(
+                session, request.node_label, num_cards=5
             )
 
         elif request.node_type == "quiz":
-            content = await _generate_quiz_item(
-                llm, request.node_label, context, prompt_language, request.asked_hashes
+            # Quizzes use stream_quiz_with_bank (same as chat tools)
+            content = await _generate_quiz_via_stream(
+                session, request.node_label, num_questions=5
             )
 
         elif request.node_type == "audio":
+            # Audio config generation (actual audio generated separately)
+            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.6)
+            prompt_language = _language_for_prompt(request.language)
+
+            # Get context for audio config
+            context = ""
+            if session.vectorstore:
+                docs = session.vectorstore.similarity_search(query=request.node_label, k=100)
+                context = "\n\n".join([doc.page_content for doc in docs])[:1000]
+
             content = await _generate_audio_config(
                 llm, request.node_label, context, prompt_language
             )
@@ -2749,9 +2747,191 @@ async def generate_study_item(request: StudyItemRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/study/generate-item-stream")
+async def generate_study_item_stream(request: StudyItemRequest):
+    """
+    SSE streaming endpoint for study mode content generation.
+    Provides real-time progress updates to frontend.
+
+    This is an OPTIONAL enhancement - the regular /study/generate-item
+    endpoint works fine for most use cases.
+
+    Streams status updates in the same format as chat tools:
+    - {"status": "generating", "current": 1, "total": 5}
+    - {"status": "question_ready", "question": {...}}
+    - {"status": "complete", "content": {...}}
+    """
+    print(f"\n{'='*60}")
+    print(f"🌊 STUDY ITEM STREAMING - {request.node_type}: {request.node_label}")
+    print(f"{'='*60}")
+
+    async def stream_generator():
+        try:
+            # Setup session
+            session = await _setup_study_session(request.chat_id, request.language)
+
+            # Determine source
+            source = "documents" if session.documents and session.vectorstore else "scratch"
+
+            if request.node_type == "quiz":
+                # Stream quiz generation
+                questions = []
+                async for chunk in stream_quiz_with_bank(
+                    topic=request.node_label,
+                    difficulty="medium",
+                    num_questions=5,
+                    source=source,
+                    session=session,
+                    chat_id=session.chat_id,
+                    question_types=["mcq"],
+                    quiz_mode="knowledge"
+                ):
+                    # Forward status updates to frontend
+                    yield f"data: {json.dumps(chunk)}\n\n"
+
+                    # Collect questions for final response
+                    if chunk.get("status") == "question_ready":
+                        question = chunk.get("question")
+                        if question:
+                            answer = question.get('answer', 'A)')
+                            answer_letter = answer[0] if answer else 'A'
+                            correct_index = ord(answer_letter) - ord('A')
+                            questions.append({
+                                "question": question.get('question', ''),
+                                "options": question.get('options', []),
+                                "correctIndex": correct_index,
+                                "rationale": question.get('justification', ''),
+                                "topic": question.get('topic', request.node_label)
+                            })
+
+                # Send final content
+                content = {"questions": questions}
+                content_hash = hashlib.md5(json.dumps(content, sort_keys=True).encode()).hexdigest()[:12]
+                yield f"data: {json.dumps({'status': 'complete', 'type': 'quiz', 'content': content, 'hash': content_hash})}\n\n"
+
+            elif request.node_type == "flashcard":
+                # Stream flashcard generation
+                cards = []
+                async for chunk in stream_flashcards(
+                    topic=request.node_label,
+                    num_cards=5,
+                    source=source,
+                    session=session,
+                    chat_id=session.chat_id
+                ):
+                    yield f"data: {json.dumps(chunk)}\n\n"
+
+                    if chunk.get("status") == "flashcard_ready":
+                        flashcard = chunk.get("flashcard")
+                        if flashcard:
+                            cards.append({
+                                "front": flashcard.get("front", ""),
+                                "back": flashcard.get("back", ""),
+                                "topic": flashcard.get("topic", request.node_label)
+                            })
+
+                content = {"cards": cards}
+                content_hash = hashlib.md5(json.dumps(content, sort_keys=True).encode()).hexdigest()[:12]
+                yield f"data: {json.dumps({'status': 'complete', 'type': 'flashcard', 'content': content, 'hash': content_hash})}\n\n"
+
+            elif request.node_type == "lesson":
+                # Lessons don't have a streaming generator, generate synchronously
+                yield f"data: {json.dumps({'status': 'generating', 'message': 'Creating lesson...'})}\n\n"
+
+                content = await _generate_lesson_with_context(
+                    session, request.node_label, request.language
+                )
+                content_hash = hashlib.md5(json.dumps(content, sort_keys=True).encode()).hexdigest()[:12]
+                yield f"data: {json.dumps({'status': 'complete', 'type': 'lesson', 'content': content, 'hash': content_hash})}\n\n"
+
+            elif request.node_type == "audio":
+                yield f"data: {json.dumps({'status': 'generating', 'message': 'Preparing audio config...'})}\n\n"
+
+                llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.6)
+                prompt_language = _language_for_prompt(request.language)
+                context = ""
+                if session.vectorstore:
+                    docs = session.vectorstore.similarity_search(query=request.node_label, k=100)
+                    context = "\n\n".join([doc.page_content for doc in docs])[:1000]
+
+                content = await _generate_audio_config(
+                    llm, request.node_label, context, prompt_language
+                )
+                content_hash = hashlib.md5(json.dumps(content, sort_keys=True).encode()).hexdigest()[:12]
+                yield f"data: {json.dumps({'status': 'complete', 'type': 'audio', 'content': content, 'hash': content_hash})}\n\n"
+
+        except Exception as e:
+            print(f"❌ Study item streaming failed: {e}")
+            import traceback
+            traceback.print_exc()
+            yield f"data: {json.dumps({'status': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        stream_generator(),
+        media_type="text/event-stream"
+    )
+
+
+@app.post("/study/generate-audio")
+async def generate_study_audio(request: StudyAudioRequest):
+    """
+    Generate audio content for a study mode node.
+
+    This is a streaming endpoint that yields progress updates and finally
+    the audio data (base64 encoded).
+
+    Reuses the same AudioGenerator as the chat tools for consistency.
+    """
+    print(f"\n{'='*60}")
+    print(f"🎵 STUDY AUDIO GENERATION - {request.topic}")
+    print(f"{'='*60}")
+
+    async def stream_generator():
+        try:
+            # Setup session
+            session = await _setup_study_session(request.chat_id, request.language)
+
+            # Import AudioGenerator
+            from services.audio_generator import AudioGenerator
+            generator = AudioGenerator(session)
+
+            # Convert duration from int minutes to string format (e.g., "2min")
+            duration_str = f"{request.duration}min"
+
+            # Stream audio generation
+            async for chunk in generator.generate_audio_stream(
+                topic=request.topic,
+                intent=request.intent,
+                duration=duration_str,
+                language=request.language
+            ):
+                # chunk already has \n at end, strip it and format properly for SSE
+                chunk_clean = chunk.rstrip('\n')
+
+                # Log when sending audio_ready (large payload)
+                if '"status": "audio_ready"' in chunk_clean:
+                    print(f"📤 Sending audio_ready response ({len(chunk_clean)} bytes)")
+
+                yield f"data: {chunk_clean}\n\n"
+
+            print("✅ Audio stream complete")
+
+        except Exception as e:
+            print(f"❌ Study audio generation failed: {e}")
+            import traceback
+            traceback.print_exc()
+            yield f"data: {json.dumps({'status': 'audio_error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        stream_generator(),
+        media_type="text/event-stream"
+    )
+
+
 # ============================================================================
-# STUDY ITEM GENERATION HELPERS
-# Each function generates a specific content type
+# STUDY ITEM GENERATION HELPERS (LEGACY)
+# These are kept for backward compatibility but the new streaming wrappers
+# above are preferred as they use the same generators as chat tools
 # ============================================================================
 
 async def _generate_lesson(llm, label: str, context: str, language: str, asked_hashes: list) -> dict:
@@ -2972,6 +3152,189 @@ Return ONLY valid JSON:
 
     response = await llm.ainvoke([{"role": "user", "content": prompt}])
 
+    content_json = response.content.strip()
+    if content_json.startswith("```"):
+        content_json = content_json.split("```")[1]
+        if content_json.startswith("json"):
+            content_json = content_json[4:]
+        content_json = content_json.strip()
+
+    return json.loads(content_json)
+
+
+# ============================================================================
+# STUDY MODE - STREAMING GENERATOR WRAPPERS
+# These functions reuse the same generators as the chat tools for consistency
+# ============================================================================
+
+async def _setup_study_session(chat_id: str, language: str = "en") -> PersistentSessionContext:
+    """
+    Create a properly configured session for study mode that mirrors
+    the orchestrator's session setup. This ensures document context
+    is available to the streaming generators.
+    """
+    session = PersistentSessionContext(chat_id)
+    session.user_language = language
+
+    # Load vectorstore (document embeddings) - same as orchestrator
+    session.vectorstore = get_chat_vectorstore(chat_id)
+
+    # Load file list - same as orchestrator
+    session.documents = load_files_for_chat(chat_id)
+
+    # Set as global context for tools to access
+    set_session_context(session)
+
+    print(f"📚 Study session setup: {len(session.documents)} documents, vectorstore: {session.vectorstore is not None}")
+
+    return session
+
+
+async def _generate_quiz_via_stream(
+    session: PersistentSessionContext,
+    topic: str,
+    num_questions: int = 5
+) -> dict:
+    """
+    Generate quiz questions using stream_quiz_with_bank.
+    Collects all results before returning (sync response for study mode).
+
+    Uses the SAME generator as the chat tools, ensuring:
+    - Document context via k=1000 similarity search
+    - Proper deduplication
+    - Consistent question quality
+    """
+    questions = []
+
+    # Determine source based on available documents
+    source = "documents" if session.documents and session.vectorstore else "scratch"
+
+    print(f"🎯 Generating quiz via stream_quiz_with_bank: topic='{topic}', source='{source}'")
+
+    async for chunk in stream_quiz_with_bank(
+        topic=topic,
+        difficulty="medium",
+        num_questions=num_questions,
+        source=source,
+        session=session,
+        chat_id=session.chat_id,
+        question_types=["mcq"],  # Study mode uses MCQ
+        quiz_mode="knowledge"    # Study mode uses knowledge mode (factual questions)
+    ):
+        if chunk.get("status") == "question_ready":
+            question = chunk.get("question")
+            if question:
+                # Convert format for frontend compatibility
+                answer = question.get('answer', 'A)')
+                answer_letter = answer[0] if answer else 'A'
+                correct_index = ord(answer_letter) - ord('A')
+
+                formatted_question = {
+                    "question": question.get('question', ''),
+                    "options": question.get('options', []),
+                    "correctIndex": correct_index,
+                    "rationale": question.get('justification', ''),
+                    "topic": question.get('topic', topic)
+                }
+                questions.append(formatted_question)
+                print(f"✅ Quiz question {len(questions)}/{num_questions} collected")
+
+    print(f"❓ Generated {len(questions)} quiz questions via streaming generator")
+    return {"questions": questions}
+
+
+async def _generate_flashcard_via_stream(
+    session: PersistentSessionContext,
+    topic: str,
+    num_cards: int = 5
+) -> dict:
+    """
+    Generate flashcards using stream_flashcards.
+    Collects all results before returning (sync response for study mode).
+
+    Uses the SAME generator as the chat tools, ensuring:
+    - Document context via k=1000 similarity search
+    - Proper deduplication
+    - Consistent flashcard quality
+    """
+    cards = []
+
+    # Determine source based on available documents
+    source = "documents" if session.documents and session.vectorstore else "scratch"
+
+    print(f"📇 Generating flashcards via stream_flashcards: topic='{topic}', source='{source}'")
+
+    async for chunk in stream_flashcards(
+        topic=topic,
+        num_cards=num_cards,
+        source=source,
+        session=session,
+        chat_id=session.chat_id
+    ):
+        if chunk.get("status") == "flashcard_ready":
+            flashcard = chunk.get("flashcard")
+            if flashcard:
+                cards.append({
+                    "front": flashcard.get("front", ""),
+                    "back": flashcard.get("back", ""),
+                    "topic": flashcard.get("topic", topic)
+                })
+                print(f"✅ Flashcard {len(cards)}/{num_cards} collected")
+
+    print(f"📇 Generated {len(cards)} flashcards via streaming generator")
+    return {"cards": cards}
+
+
+async def _generate_lesson_with_context(
+    session: PersistentSessionContext,
+    topic: str,
+    language: str
+) -> dict:
+    """
+    Generate lesson using document context properly.
+    Uses the SAME document retrieval pattern as other tools (k=1000).
+    """
+    # Use same retrieval pattern as flashcards/quizzes: k=1000
+    context = ""
+    if session.vectorstore:
+        docs = session.vectorstore.similarity_search(query=topic, k=1000)
+        full_text = "\n\n".join([doc.page_content for doc in docs])
+        context = full_text[:15000]  # Same limit as flashcards
+        print(f"📚 Lesson context: {len(docs)} chunks, {len(context)} chars")
+
+    # Fallback to general knowledge if no documents
+    if not context:
+        context = f"Generate educational content about: {topic}"
+        print(f"💡 Lesson: No documents, using general knowledge")
+
+    # Generate lesson with proper context
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.6)
+    prompt_language = _language_for_prompt(language)
+
+    prompt = f"""Create a SHORT lesson about: {topic}
+
+CONTEXT FROM STUDENT'S DOCUMENTS:
+{context[:5000]}
+
+REQUIREMENTS:
+1. Title: Clear, engaging title
+2. Body: 5-8 sentences explaining the topic
+3. Key Points: 3 bullet points to remember
+
+Write in {prompt_language}. Be concise but educational.
+Focus on the "why" not just "what".
+USE THE DOCUMENT CONTEXT to make the lesson specific and relevant.
+
+Return ONLY valid JSON:
+{{
+  "title": "Lesson title here",
+  "body": "The explanation paragraph here. Keep it clear and engaging...",
+  "keyPoints": ["Point 1", "Point 2", "Point 3"]
+}}"""
+
+    response = await llm.ainvoke([{"role": "user", "content": prompt}])
+
+    # Parse response
     content_json = response.content.strip()
     if content_json.startswith("```"):
         content_json = content_json.split("```")[1]

@@ -87,3 +87,12 @@ class StudyItemRequest(BaseModel):
     context_tags: Optional[List[str]] = []  # Tags for better context
     asked_hashes: Optional[List[str]] = []  # Previously shown content hashes (anti-repeat)
     language: str = "en"                  # Language for content
+
+
+class StudyAudioRequest(BaseModel):
+    """Request to generate audio for a study node"""
+    chat_id: str
+    topic: str
+    intent: str = "teach"
+    duration: int = 2  # Duration in minutes
+    language: str = "en"
