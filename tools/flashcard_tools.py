@@ -268,83 +268,42 @@ async def _generate_single_flashcard(
     prompt = PromptTemplate(
         input_variables=["content", "topic", "card_num", "language", "cards_to_avoid", "existing_topics"],
         template="""
-You are a {language}-speaking educational flashcard generator creating SCANNABLE, EASY-TO-READ content.
+You are creating flashcard {card_num} in {language}.
 
-Generate **EXACTLY ONE high-quality flashcard** about: {topic}
+🚨 CRITICAL: USE ONLY DOCUMENT CONTENT - NO HALLUCINATION!
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{content}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Card number: {card_num}
-
-CRITICAL - DO NOT repeat these flashcard fronts:
+🚫 ALREADY ASKED - DO NOT REPEAT THESE CONCEPTS:
 {cards_to_avoid}
 
-Context:
-{content}
+⚠️ YOU MUST ASK ABOUT A DIFFERENT CONCEPT!
+- Find a NEW term/definition not in the list above
+- Each flashcard must test a UNIQUE piece of information
+- If you repeat a concept, the flashcard will be rejected
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📋 ANSWER FORMAT RULES (CRITICAL!)
+🎯 ULTRA-SHORT FORMAT (MAX 40 WORDS!)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-The "back" (answer) MUST be:
-✅ SHORT & SCANNABLE - Max 3-5 bullet points or 2-3 short sentences
-✅ USE BULLET POINTS (•) - Break information into digestible chunks
-✅ BOLD KEY TERMS - Wrap important words in **bold**
-✅ NO WALLS OF TEXT - If longer than 4 lines, use bullets
+FRONT: One clear question (max 12 words)
+BACK: 2-3 bullet points, 5-8 words each
 
-FORMAT EXAMPLES:
-
-❌ BAD (wall of text):
-"Digoxin toxicity presents with nausea, vomiting, visual disturbances like yellow-green halos, and cardiac arrhythmias including bradycardia. Nurses should check apical pulse for one full minute before administration and hold if HR is below 60 bpm in adults."
-
-✅ GOOD (scannable):
-"**Key Signs:**
-• Nausea & vomiting
-• Yellow-green visual halos
-• Bradycardia / arrhythmias
-
-**Nursing Action:** Check apical pulse × 1 min → Hold if HR < 60"
-
-✅ GOOD (concise sentences):
-"**Digoxin toxicity** causes GI upset + yellow-green halos + arrhythmias.
-
-**Always check:** Apical pulse × 1 full minute before giving. Hold if HR < 60 bpm."
+Example:
+FRONT: "Qu'est-ce que la bradycardie?"
+BACK: "• **Bradycardie** = FC < 60 bpm
+• Cause: bloc cardiaque, médicaments"
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Requirements:
-- Front: Clear, focused question (1-2 sentences max)
-- Back: SCANNABLE answer using bullets/bold (see format rules above)
-- Topic: 2-4 word category in {language}
-- Hint: Optional 1-sentence hint
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🎯 TOPIC ASSIGNMENT (VERY IMPORTANT!)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-EXISTING TOPICS already used in this flashcard set:
-{existing_topics}
-
-RULES FOR TOPIC ASSIGNMENT:
-1. **FIRST: Check if this flashcard fits an EXISTING topic** - If it does, use that EXACT topic name (same spelling, capitalization)
-2. **ONLY create a new topic** if the content is genuinely different from all existing topics
-3. Topic must be 2-4 words, specific and descriptive
-4. Write in {language}
-
-❌ DO NOT create variations like:
-- "Types de Démences" vs "Types de démences" (capitalization)
-- "Critères Diagnostiques" vs "Critères Diagnostics" (spelling)
-- "Risk Factors" vs "Facteurs de Risque" (language mixing)
-
-✅ REUSE existing topics when the content fits!
-
-📤 Return ONLY valid JSON (no markdown wrapper):
+📤 Return ONLY JSON:
 {{
-    "front": "Clear question in {language}",
-    "back": "Scannable answer with **bold** and • bullets in {language}",
-    "topic": "Use existing topic if applicable OR create new one",
-    "hint": "Optional hint"
-}}
-
-Generate your flashcard in {language}:"""
+    "front": "Short question about NEW concept",
+    "back": "• **Term** = brief definition",
+    "topic": "{existing_topics}",
+    "hint": null
+}}"""
     )
 
     # Use gpt-4.1-nano for flashcard generation (cost-effective for structured JSON output)

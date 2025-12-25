@@ -2537,67 +2537,102 @@ async def generate_study_plan(request: StudyPlanRequest):
         print(f"📊 Found {len(unique_concepts)} concepts")
 
         # ------------------------------------------
-        # STEP 3: Fallback if no insights found
+        # STEP 3: ALWAYS extract topics from actual document content
         # ------------------------------------------
+        document_content = ""
+        if session.session.vectorstore:
+            # Get comprehensive document content
+            docs = session.session.vectorstore.similarity_search("main topics concepts definitions", k=1000)
+            document_content = "\n\n".join([doc.page_content for doc in docs])[:15000]
+            print(f"📄 Retrieved {len(docs)} document chunks for topic extraction")
+
+        # Extract CORE topics from the actual document
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
+
+        topic_extraction_prompt = f"""Analyze this document and extract the 3-5 MAIN TOPICS that the student needs to learn.
+
+🚨 CRITICAL: Only extract topics that are ACTUALLY IN the document below.
+DO NOT invent topics. DO NOT add general knowledge.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DOCUMENT CONTENT:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{document_content[:8000]}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+RULES:
+1. Identify the 3-5 MAIN TOPICS/SECTIONS in this document
+2. Use the EXACT terminology from the document
+3. Topics should be what the document is teaching (not generic categories)
+4. Order from foundational to advanced
+
+Return ONLY valid JSON:
+{{
+    "main_topics": ["Topic 1 from document", "Topic 2 from document", "Topic 3 from document"],
+    "key_terms": ["term1", "term2", "term3", "term4", "term5"]
+}}"""
+
+        topic_response = await llm.ainvoke([{"role": "user", "content": topic_extraction_prompt}])
+
+        try:
+            topic_json = topic_response.content.strip()
+            if topic_json.startswith("```"):
+                topic_json = topic_json.split("```")[1]
+                if topic_json.startswith("json"):
+                    topic_json = topic_json[4:]
+                topic_json = topic_json.strip()
+
+            extracted = json.loads(topic_json)
+            unique_topics = extracted.get("main_topics", unique_topics)[:5]
+            key_terms = extracted.get("key_terms", [])[:10]
+            print(f"✅ Extracted topics from document: {unique_topics}")
+            print(f"✅ Key terms: {key_terms}")
+        except Exception as e:
+            print(f"⚠️ Topic extraction failed: {e}, using file insights")
+            key_terms = unique_concepts[:10]
+
         if not unique_topics:
-            # Try to get context from vectorstore
-            if session.session.vectorstore:
-                docs = session.session.vectorstore.similarity_search("main topics", k=5)
-                context_text = "\n".join([doc.page_content[:500] for doc in docs])
-
-                # Quick LLM call to extract topics
-                llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
-                topic_prompt = f"""Extract 3-5 main study topics from this content. Return as JSON array of strings.
-
-Content:
-{context_text[:2000]}
-
-Return ONLY: ["Topic 1", "Topic 2", "Topic 3"]"""
-
-                topic_response = await llm.ainvoke([{"role": "user", "content": topic_prompt}])
-                try:
-                    unique_topics = json.loads(topic_response.content.strip())
-                except:
-                    unique_topics = ["General Medical Knowledge"]
+            unique_topics = ["Document Overview"]
 
         # ------------------------------------------
         # STEP 4: Generate learning path with LLM
         # ------------------------------------------
         prompt_language = _language_for_prompt(request.language)
 
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.5)
+        path_prompt = f"""Create a Duolingo-style study path for this document.
 
-        path_prompt = f"""You are an expert learning path designer. Create a Duolingo-style study path for these topics.
+🚨 CRITICAL: The study path MUST be structured around these CORE TOPICS from the student's document:
+{unique_topics}
 
-TOPICS TO COVER: {unique_topics}
-KEY CONCEPTS: {unique_concepts[:10]}
+KEY TERMS to include: {key_terms}
 
-RULES:
-1. Create 8-12 nodes total
-2. Start with a LESSON to introduce the first topic
-3. Follow each lesson with FLASHCARDS or QUIZ to reinforce
-4. Include at least one AUDIO node for variety
-5. Progress from easier to harder content
-6. End with a comprehensive QUIZ
+STRUCTURE RULES:
+1. Create ONE learning unit per main topic (3-5 units total)
+2. Each unit follows this pattern:
+   - LESSON: Introduce the topic (content comes from document)
+   - FLASHCARD: Key terms and definitions from that topic
+   - QUIZ: Test understanding of that specific topic
+
+3. Total: 9-15 nodes (3 nodes per topic)
+4. Progress through topics in logical order
 
 NODE TYPES:
-- "lesson": Short explanation (5-8 lines) with key points
-- "flashcard": Single front/back card for memorization
-- "quiz": Multiple choice question with rationale
-- "audio": Topic for audio explanation (1-2 min)
+- "lesson": Introduction to ONE topic from the document
+- "flashcard": Key terms from that topic (will generate 12 cards)
+- "quiz": Questions testing that topic (will generate 12 questions)
 
 Return ONLY valid JSON array in {prompt_language}:
 [
-  {{"id": "node_1", "type": "lesson", "label": "Introduction to [Topic]", "tags": ["intro", "basics"], "difficulty": 1}},
-  {{"id": "node_2", "type": "flashcard", "label": "Key Term: [Term]", "tags": ["vocabulary"], "difficulty": 1}},
-  {{"id": "node_3", "type": "quiz", "label": "Quick Check: [Topic]", "tags": ["assessment"], "difficulty": 1}},
-  ...
+  {{"id": "node_1", "type": "lesson", "label": "{unique_topics[0] if unique_topics else 'Topic 1'}", "tags": ["topic1"], "difficulty": 1}},
+  {{"id": "node_2", "type": "flashcard", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Vocabulaire", "tags": ["topic1", "terms"], "difficulty": 1}},
+  {{"id": "node_3", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Quiz", "tags": ["topic1", "assessment"], "difficulty": 1}},
+  ... (repeat for each main topic)
 ]
 
 IMPORTANT:
-- "label" should be clear and specific (what the user will see)
-- "tags" help with content generation later
-- "difficulty" is 1 (easy), 2 (medium), or 3 (hard)
+- Node labels MUST reference the actual topics from the document
+- DO NOT create generic labels like "Introduction to Medicine"
+- Use the EXACT topic names from the document
 - Labels should be in {prompt_language}"""
 
         response = await llm.ainvoke([{"role": "user", "content": path_prompt}])
@@ -2697,13 +2732,13 @@ async def generate_study_item(request: StudyItemRequest):
         elif request.node_type == "flashcard":
             # Flashcards use stream_flashcards (same as chat tools)
             content = await _generate_flashcard_via_stream(
-                session, request.node_label, num_cards=5
+                session, request.node_label, num_cards=12
             )
 
         elif request.node_type == "quiz":
             # Quizzes use stream_quiz_with_bank (same as chat tools)
             content = await _generate_quiz_via_stream(
-                session, request.node_label, num_questions=5
+                session, request.node_label, num_questions=12
             )
 
         elif request.node_type == "audio":
@@ -2779,7 +2814,7 @@ async def generate_study_item_stream(request: StudyItemRequest):
                 async for chunk in stream_quiz_with_bank(
                     topic=request.node_label,
                     difficulty="medium",
-                    num_questions=5,
+                    num_questions=12,
                     source=source,
                     session=session,
                     chat_id=session.chat_id,
@@ -2814,7 +2849,7 @@ async def generate_study_item_stream(request: StudyItemRequest):
                 cards = []
                 async for chunk in stream_flashcards(
                     topic=request.node_label,
-                    num_cards=5,
+                    num_cards=12,
                     source=source,
                     session=session,
                     chat_id=session.chat_id
@@ -2936,28 +2971,48 @@ async def generate_study_audio(request: StudyAudioRequest):
 
 async def _generate_lesson(llm, label: str, context: str, language: str, asked_hashes: list) -> dict:
     """
-    Generate a short lesson (5-8 lines) with key takeaways.
+    Generate a MULTI-PAGE lesson with swipeable cards.
 
-    Think of it like a Duolingo "tip" before exercises.
+    Duolingo-style - ONE concept per page, fun and engaging!
+    STRICT: Only use content from provided documents.
     """
-    prompt = f"""Create a SHORT lesson about: {label}
+    prompt = f"""Create a MULTI-PAGE lesson about: {label}
 
-CONTEXT FROM STUDENT'S DOCUMENTS:
-{context[:2000] if context else "No specific context - use general knowledge"}
+🚨 CRITICAL: USE ONLY THIS DOCUMENT CONTENT - DO NOT HALLUCINATE!
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{context[:8000] if context else "ERROR: No document context provided"}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-REQUIREMENTS:
-1. Title: Clear, engaging title
-2. Body: 5-8 sentences explaining the topic
-3. Key Points: 3 bullet points to remember
+RULES:
+1. ONLY teach concepts that appear in the document above
+2. Use the EXACT terminology from the document
+3. If a concept is not in the document, DO NOT include it
+4. Quote or paraphrase directly from the document content
 
-Write in {language}. Be concise but educational.
-Focus on the "why" not just "what".
+STYLE: Duolingo-style swipeable cards. ONE concept per page.
+
+STRUCTURE:
+- Page 1: Introduction (what topic is this about, from the document)
+- Pages 2-5: ONE key concept per page FROM THE DOCUMENT
+- Last page: Quick summary of what was taught
+
+EACH PAGE MUST HAVE:
+- "title": Short catchy title (3-5 words)
+- "content": 1-2 sentences MAX with **bold** key terms FROM THE DOCUMENT
+- "highlight": The ONE thing to remember (optional)
+
+Write in {language}.
 
 Return ONLY valid JSON:
 {{
-  "title": "Lesson title here",
-  "body": "The explanation paragraph here. Keep it clear and engaging...",
-  "keyPoints": ["Point 1", "Point 2", "Point 3"]
+  "title": "Main Lesson Title",
+  "pages": [
+    {{"title": "👋 Welcome!", "content": "...", "highlight": null}},
+    {{"title": "Key Point 1", "content": "...", "highlight": "..."}},
+    {{"title": "Key Point 2", "content": "...", "highlight": "..."}},
+    {{"title": "Key Point 3", "content": "...", "highlight": "..."}},
+    {{"title": "🎯 Summary", "content": "...", "highlight": null}}
+  ]
 }}"""
 
     response = await llm.ainvoke([{"role": "user", "content": prompt}])
@@ -2975,14 +3030,14 @@ Return ONLY valid JSON:
 
 async def _generate_flashcard(llm, label: str, context: str, language: str, asked_hashes: list) -> dict:
     """
-    Generate 5 high-quality flashcards for a single node using the enhanced generator.
+    Generate 12 high-quality flashcards for a single node using the enhanced generator.
 
     Uses the _generate_single_flashcard from flashcard_tools which produces:
-    - Scannable answers with bullets and bold formatting
+    - Ultra-short, scannable answers with bullets and bold formatting
     - Topic assignment for organization
     - Better deduplication across cards
 
-    Returns an object with a 'cards' array containing 5 flashcards.
+    Returns an object with a 'cards' array containing 12 flashcards.
     Each card has front/back/topic.
     """
     from tools.flashcard_tools import _generate_single_flashcard
@@ -3000,8 +3055,8 @@ async def _generate_flashcard(llm, label: str, context: str, language: str, aske
     generated_fronts = []
     existing_topics = []
 
-    # Generate 5 flashcards one at a time for better quality
-    for card_num in range(1, 6):
+    # Generate 12 flashcards one at a time for better quality
+    for card_num in range(1, 13):
         flashcard_data = await _generate_single_flashcard(
             content=content_context,
             topic=label,
@@ -3021,7 +3076,7 @@ async def _generate_flashcard(llm, label: str, context: str, language: str, aske
                 existing_topics.append(card_topic)
 
             cards.append(flashcard_data)
-            print(f"✅ Flashcard {card_num}/5 generated - Topic: {flashcard_data.get('topic', 'N/A')}")
+            print(f"✅ Flashcard {card_num}/12 generated - Topic: {flashcard_data.get('topic', 'N/A')}")
 
     # Ensure we have at least some cards
     if not cards:
@@ -3041,7 +3096,7 @@ async def _generate_flashcard(llm, label: str, context: str, language: str, aske
 
 async def _generate_quiz_item(llm, label: str, context: str, language: str, asked_hashes: list) -> dict:
     """
-    Generate 5 high-quality multiple choice questions for a single node.
+    Generate 12 high-quality multiple choice questions for a single node.
 
     Uses the _generate_single_question from quiztools which produces:
     - Random answer positioning (not always B or C)
@@ -3049,7 +3104,7 @@ async def _generate_quiz_item(llm, label: str, context: str, language: str, aske
     - Better justifications with bold formatting
     - Knowledge mode (factual recall, not NCLEX scenarios)
 
-    Returns an object with a 'questions' array containing 5 quiz questions.
+    Returns an object with a 'questions' array containing 12 quiz questions.
     Each question has: question, options, correctIndex, rationale, topic.
     """
     import random
@@ -3068,8 +3123,8 @@ async def _generate_quiz_item(llm, label: str, context: str, language: str, aske
     generated_question_texts = []
     existing_topics = []
 
-    # Generate 5 questions one at a time for better quality
-    for question_num in range(1, 6):
+    # Generate 12 questions one at a time for better quality
+    for question_num in range(1, 13):
         # Random answer position for each question
         random_target_letter = random.choice(['A', 'B', 'C', 'D'])
 
@@ -3109,7 +3164,7 @@ async def _generate_quiz_item(llm, label: str, context: str, language: str, aske
             }
 
             questions.append(formatted_question)
-            print(f"✅ Question {question_num}/5 generated - Answer: {answer_letter}, Topic: {formatted_question['topic']}")
+            print(f"✅ Question {question_num}/12 generated - Answer: {answer_letter}, Topic: {formatted_question['topic']}")
 
     # Ensure we have at least some questions
     if not questions:
@@ -3293,43 +3348,70 @@ async def _generate_lesson_with_context(
     """
     Generate lesson using document context properly.
     Uses the SAME document retrieval pattern as other tools (k=1000).
+    STRICT: Only generates content from the uploaded documents.
     """
     # Use same retrieval pattern as flashcards/quizzes: k=1000
     context = ""
     if session.vectorstore:
         docs = session.vectorstore.similarity_search(query=topic, k=1000)
         full_text = "\n\n".join([doc.page_content for doc in docs])
-        context = full_text[:15000]  # Same limit as flashcards
+        context = full_text[:12000]  # Increased limit for better coverage
         print(f"📚 Lesson context: {len(docs)} chunks, {len(context)} chars")
 
-    # Fallback to general knowledge if no documents
+    # If no documents, we cannot generate - this should not happen in study mode
     if not context:
-        context = f"Generate educational content about: {topic}"
-        print(f"💡 Lesson: No documents, using general knowledge")
+        print(f"⚠️ WARNING: No document context for lesson on '{topic}'")
+        context = "NO DOCUMENT CONTENT AVAILABLE"
 
     # Generate lesson with proper context
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.6)
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.5)  # Lower temp for accuracy
     prompt_language = _language_for_prompt(language)
 
-    prompt = f"""Create a SHORT lesson about: {topic}
+    prompt = f"""Create a MULTI-PAGE lesson about: {topic}
 
-CONTEXT FROM STUDENT'S DOCUMENTS:
-{context[:5000]}
+🚨🚨🚨 CRITICAL INSTRUCTION 🚨🚨🚨
+You MUST ONLY use information from the document content below.
+DO NOT add any information from your general knowledge.
+DO NOT hallucinate or make up facts.
+If something is not in the document, DO NOT include it.
 
-REQUIREMENTS:
-1. Title: Clear, engaging title
-2. Body: 5-8 sentences explaining the topic
-3. Key Points: 3 bullet points to remember
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STUDENT'S DOCUMENT CONTENT (USE ONLY THIS):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{context[:10000]}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Write in {prompt_language}. Be concise but educational.
-Focus on the "why" not just "what".
-USE THE DOCUMENT CONTEXT to make the lesson specific and relevant.
+STRICT RULES:
+1. Extract ONLY facts/concepts that appear in the document above
+2. Use the EXACT terminology and definitions from the document
+3. Every "content" field must be paraphrased from the document
+4. Every "highlight" must quote or summarize document content
+5. If the document doesn't cover enough for 5 pages, use fewer pages
+
+STYLE: Duolingo-style swipeable cards. ONE concept per page.
+
+STRUCTURE:
+- Page 1: Introduction to the topic (based on document)
+- Pages 2-4: ONE key concept per page FROM THE DOCUMENT
+- Last page: Summary of document concepts taught
+
+EACH PAGE:
+- "title": Short catchy title (3-5 words)
+- "content": 1-2 sentences with **bold** key terms FROM DOCUMENT
+- "highlight": Key fact FROM DOCUMENT (or null)
+
+Write in {prompt_language}.
 
 Return ONLY valid JSON:
 {{
-  "title": "Lesson title here",
-  "body": "The explanation paragraph here. Keep it clear and engaging...",
-  "keyPoints": ["Point 1", "Point 2", "Point 3"]
+  "title": "Main Lesson Title",
+  "pages": [
+    {{"title": "👋 Welcome!", "content": "...", "highlight": null}},
+    {{"title": "Key Point 1", "content": "...", "highlight": "..."}},
+    {{"title": "Key Point 2", "content": "...", "highlight": "..."}},
+    {{"title": "Key Point 3", "content": "...", "highlight": "..."}},
+    {{"title": "🎯 Summary", "content": "...", "highlight": null}}
+  ]
 }}"""
 
     response = await llm.ainvoke([{"role": "user", "content": prompt}])

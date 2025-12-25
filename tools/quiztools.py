@@ -1459,6 +1459,11 @@ async def _generate_single_question(
         template_str = """
     You are a {language}-speaking nursing quiz generator creating KNOWLEDGE TEST questions.
 
+    🚨🚨🚨 CRITICAL: USE ONLY THE DOCUMENT CONTENT BELOW 🚨🚨🚨
+    DO NOT add facts from your general knowledge.
+    DO NOT hallucinate or make up information.
+    ONLY test concepts that appear in the document.
+
     Generate **EXACTLY ONE factual multiple choice question** about: {topic}
 
     Difficulty: {difficulty}
@@ -1469,8 +1474,11 @@ async def _generate_single_question(
     CRITICAL - DO NOT repeat these questions:
     {questions_to_avoid}
 
-    Context (from student's uploaded document):
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    STUDENT'S DOCUMENT CONTENT (USE ONLY THIS - NO HALLUCINATION):
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     {content}
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     🎯 QUESTION PRIORITY - FOCUS ON CORE CONCEPTS FIRST:
 
