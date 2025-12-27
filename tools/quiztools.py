@@ -13,9 +13,64 @@ from typing import AsyncGenerator
 import os, tempfile
 import json
 import random
+import numpy as np
 
 #to format llm response into string
 from langchain_core.output_parsers import StrOutputParser
+
+
+# ============================================
+# COSINE SIMILARITY DEDUPLICATION UTILITIES
+# ============================================
+
+def cosine_similarity(vec1: np.ndarray, vec2: np.ndarray) -> float:
+    """Calculate cosine similarity between two vectors."""
+    dot_product = np.dot(vec1, vec2)
+    norm1 = np.linalg.norm(vec1)
+    norm2 = np.linalg.norm(vec2)
+    if norm1 == 0 or norm2 == 0:
+        return 0.0
+    return dot_product / (norm1 * norm2)
+
+
+def is_duplicate_question(
+    new_text: str,
+    existing_texts: List[str],
+    existing_embeddings: List[np.ndarray],
+    embeddings_model: OpenAIEmbeddings,
+    threshold: float = 0.85
+) -> bool:
+    """
+    Check if new_text is too similar to any existing text using cosine similarity.
+
+    Args:
+        new_text: The new question to check
+        existing_texts: List of existing questions
+        existing_embeddings: Pre-computed embeddings for existing texts
+        embeddings_model: OpenAI embeddings model
+        threshold: Similarity threshold (0.85 = 85% similar considered duplicate)
+
+    Returns:
+        True if the new text is a duplicate, False otherwise
+    """
+    if not existing_texts or not existing_embeddings:
+        return False
+
+    try:
+        # Get embedding for new text
+        new_embedding = np.array(embeddings_model.embed_query(new_text))
+
+        # Check similarity against all existing embeddings
+        for i, existing_emb in enumerate(existing_embeddings):
+            similarity = cosine_similarity(new_embedding, existing_emb)
+            if similarity >= threshold:
+                print(f"🔄 Duplicate question detected! Similarity: {similarity:.2f} with: '{existing_texts[i][:50]}...'")
+                return True
+
+        return False
+    except Exception as e:
+        print(f"⚠️ Error checking question similarity: {e}")
+        return False  # On error, allow the question (fail open)
 
 # firebase that stores data needed for context (conversation)
 from firebase_admin import firestore
@@ -1266,25 +1321,35 @@ async def stream_quiz_questions(
             If this is a broad topic (like 'research design', 'pharmacology', 'cardiac care'),
             ensure you test diverse subtopics and concepts within that domain."""
 
-    # Track previously generated questions (for deduplication only)
-    generated_questions = _extract_previous_questions(session=session, limit=30)
+    # Track questions for deduplication (current quiz only - no previous sessions)
+    generated_questions = []
+    generated_embeddings = []  # Store embeddings for cosine similarity deduplication
+
+    # Initialize embeddings model for deduplication
+    embeddings_model = OpenAIEmbeddings()
 
     # Distribute question types across the quiz
     # e.g., for 10 questions with ["mcq", "sata"], might get:
     # ['mcq', 'mcq', 'sata', 'mcq', 'mcq', 'sata', 'mcq', 'mcq', 'sata', 'mcq']
     question_type_sequence = distribute_question_types(num_questions, question_types)
-    print(f"≡ƒô¥ Question type distribution: {question_type_sequence}")
+    print(f"📊 Question type distribution: {question_type_sequence}")
 
-    # Generate questions one at a time
-    for question_num in range(1, num_questions + 1):
+    # Generate questions one at a time with deduplication
+    questions_generated = 0
+    attempts = 0
+    max_attempts = num_questions * 3  # Prevent infinite loops
 
-        # ≡ƒ¢æ Check cancellation before generating each question
+    while questions_generated < num_questions and attempts < max_attempts:
+        question_num = questions_generated + 1
+        attempts += 1
+
+        # Check cancellation before generating each question
         if is_cancelled():
-            print(f"≡ƒ¢æ Quiz generation cancelled at question {question_num}/{num_questions}")
+            print(f"🛑 Quiz generation cancelled at question {question_num}/{num_questions}")
             return  # Stop generating questions
 
         # Get the question type for this question
-        current_question_type = question_type_sequence[question_num - 1]
+        current_question_type = question_type_sequence[questions_generated]
 
         # Yield progress with question type info
         yield {
@@ -1299,7 +1364,7 @@ async def stream_quiz_questions(
         # Generate based on question type
         if current_question_type == "sata":
             # Generate SATA question
-            print(f"≡ƒö╖ Q{question_num}: Generating SATA question")
+            print(f"🔷 Q{question_num}: Generating SATA question")
             question_data = await generate_sata_question(
                 topic=topic,
                 difficulty=difficulty,
@@ -1310,7 +1375,7 @@ async def stream_quiz_questions(
             )
         elif current_question_type == "casestudy":
             # Generate Case Study / NGN question
-            print(f"≡ƒÅÑ Q{question_num}: Generating Case Study question")
+            print(f"🏥 Q{question_num}: Generating Case Study question")
             question_data = await generate_casestudy_question(
                 topic=topic,
                 difficulty=difficulty,
@@ -1321,11 +1386,11 @@ async def stream_quiz_questions(
             )
         else:
             # Generate MCQ question (default)
-            print(f"≡ƒö╢ Q{question_num}: Generating MCQ question")
+            print(f"🔶 Q{question_num}: Generating MCQ question")
 
-            # ≡ƒÄ▓ Simply pick a random letter for each question
+            # Simply pick a random letter for each question
             random_target_letter = random.choice(['A', 'B', 'C', 'D'])
-            print(f"≡ƒÄ▓ Randomly assigned correct answer position = {random_target_letter}")
+            print(f"🎲 Randomly assigned correct answer position = {random_target_letter}")
 
             question_data = await _generate_single_question(
                 content=content_context,
@@ -1342,7 +1407,30 @@ async def stream_quiz_questions(
                 question_data['questionType'] = 'mcq'
 
         if question_data:
-            generated_questions.append(question_data['question'])
+            question_text = question_data['question']
+
+            # Check for duplicate using cosine similarity
+            if generated_questions and is_duplicate_question(
+                new_text=question_text,
+                existing_texts=generated_questions,
+                existing_embeddings=generated_embeddings,
+                embeddings_model=embeddings_model,
+                threshold=0.85
+            ):
+                print(f"⚠️ Duplicate question detected, regenerating... (attempt {attempts})")
+                continue  # Skip this question and try again
+
+            # Not a duplicate - add to tracking lists
+            generated_questions.append(question_text)
+
+            # Store embedding for future comparisons
+            try:
+                new_embedding = np.array(embeddings_model.embed_query(question_text))
+                generated_embeddings.append(new_embedding)
+            except Exception as e:
+                print(f"⚠️ Failed to store question embedding: {e}")
+
+            questions_generated += 1
 
             # Log success
             q_type = question_data.get('questionType', 'mcq')
@@ -1357,20 +1445,20 @@ async def stream_quiz_questions(
                 answer_letter = answer[0] if answer else 'A'
                 print(f"Γ£à Q{question_num} MCQ generated - Correct answer: {answer_letter}")
 
-            # ≡ƒ¢æ Check cancellation before yielding question
+            # Check cancellation before yielding question
             if is_cancelled():
-                print(f"≡ƒ¢æ Quiz generation cancelled after question {question_num} generated")
+                print(f"🛑 Quiz generation cancelled after question {questions_generated} generated")
                 return
 
             yield {
                 "status": "question_ready",
                 "question": question_data,
-                "index": question_num - 1
+                "index": questions_generated - 1
             }
 
     yield {
         "status": "quiz_complete",
-        "total_generated": num_questions,
+        "total_generated": questions_generated,
         "question_types_used": list(set(question_type_sequence))
     }
 async def _generate_single_question(

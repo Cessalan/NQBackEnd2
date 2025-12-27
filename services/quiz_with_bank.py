@@ -42,14 +42,18 @@ import asyncio
 import random
 import logging
 import traceback
+import numpy as np
 from typing import AsyncGenerator, Dict, Any, List, Optional
 
+from langchain_openai import OpenAIEmbeddings
 from models.session import PersistentSessionContext
 from services.question_bank import question_bank
 from tools.quiztools import (
     _generate_single_question,
     _extract_previous_questions,
-    get_connection_manager
+    get_connection_manager,
+    cosine_similarity,
+    is_duplicate_question
 )
 
 # Set up logging - make it visible in console
@@ -325,22 +329,42 @@ async def stream_quiz_with_bank(
                 print(f"   quiz_data is DICT with keys: {list(quiz_data.keys())}")
         print(f"{'='*60}\n")
         # ═══════════════════════════════════════════════════════════════
-        # Get previous questions for deduplication
-        generated_questions = _extract_previous_questions(session=session, limit=30)
+        # Track questions for deduplication (current quiz only)
+        generated_questions = []
+        generated_embeddings = []
 
-        # Add bank question texts to avoid duplicating those too
+        # Initialize embeddings model for cosine similarity deduplication
+        embeddings_model = OpenAIEmbeddings()
+
+        # Add bank question texts and their embeddings to avoid duplicating those
         for q in bank_questions:
-            generated_questions.append(q.get("question", ""))
+            q_text = q.get("question", "")
+            if q_text:
+                generated_questions.append(q_text)
+                try:
+                    q_embedding = np.array(embeddings_model.embed_query(q_text))
+                    generated_embeddings.append(q_embedding)
+                except Exception as e:
+                    logger.warning(f"Failed to compute embedding for bank question: {e}")
+
+        if generated_questions:
+            logger.info(f"📊 Initialized deduplication with {len(generated_questions)} bank questions")
 
         # Distribute question types for remaining questions
         # This ensures a good mix of MCQ and SATA if both are requested
         remaining_type_sequence = distribute_question_types(questions_to_generate, question_types)
         logger.info(f"Question type distribution for remaining: {remaining_type_sequence}")
 
-        # Generate remaining questions one at a time
-        for i in range(questions_to_generate):
+        # Track generation attempts for retry logic
+        max_attempts_per_question = 3
+
+        # Generate remaining questions one at a time using while loop for retry support
+        questions_generated_count = 0
+        type_index = 0
+
+        while questions_generated_count < questions_to_generate and type_index < len(remaining_type_sequence):
             current_question_num = question_index + 1
-            current_question_type = remaining_type_sequence[i]
+            current_question_type = remaining_type_sequence[type_index]
 
             # Check cancellation before generating
             if is_cancelled():
@@ -356,78 +380,112 @@ async def stream_quiz_with_bank(
                 "question_type": current_question_type
             }
 
+            # Try generating with retry logic for duplicates
             question_data = None
+            is_duplicate = True
+            attempts = 0
 
-            # Generate based on question type
-            if current_question_type == "sata":
-                # Generate SATA question
-                logger.info(f"Generating SATA question {current_question_num} (mode: {quiz_mode})")
-                question_data = await generate_sata_question(
-                    topic=topic,
-                    difficulty=difficulty,
-                    question_num=current_question_num,
-                    language=session.user_language,
-                    content_context=content_context,
-                    questions_to_avoid=generated_questions,
-                    quiz_mode=quiz_mode
-                )
-            elif current_question_type == "casestudy":
-                # Generate Case Study / NGN question
-                logger.info(f"Generating Case Study question {current_question_num}")
-                question_data = await generate_casestudy_question(
-                    topic=topic,
-                    difficulty=difficulty,
-                    question_num=current_question_num,
-                    language=session.user_language,
-                    content_context=content_context,
-                    questions_to_avoid=generated_questions
-                )
-            elif current_question_type == "unfoldingcase" or current_question_type == "unfoldingCase":
-                # Generate Unfolding Case Study (NGN 6-item format)
-                # This is an advanced format with multiple items per case
-                logger.info(f"Generating Unfolding Case Study {current_question_num}")
-                question_data = await generate_unfolding_casestudy(
-                    topic=topic,
-                    difficulty=difficulty,
-                    language=session.user_language or "english",
-                    questions_to_avoid=generated_questions
-                )
-            else:
-                # Generate MCQ question (default)
-                logger.info(f"Generating MCQ question {current_question_num} (mode: {quiz_mode})")
+            while is_duplicate and attempts < max_attempts_per_question:
+                attempts += 1
 
-                # Randomly assign correct answer position
-                random_target_letter = random.choice(['A', 'B', 'C', 'D'])
+                # Generate based on question type
+                if current_question_type == "sata":
+                    # Generate SATA question
+                    logger.info(f"Generating SATA question {current_question_num} (mode: {quiz_mode}, attempt {attempts})")
+                    question_data = await generate_sata_question(
+                        topic=topic,
+                        difficulty=difficulty,
+                        question_num=current_question_num,
+                        language=session.user_language,
+                        content_context=content_context,
+                        questions_to_avoid=generated_questions,
+                        quiz_mode=quiz_mode
+                    )
+                elif current_question_type == "casestudy":
+                    # Generate Case Study / NGN question
+                    logger.info(f"Generating Case Study question {current_question_num} (attempt {attempts})")
+                    question_data = await generate_casestudy_question(
+                        topic=topic,
+                        difficulty=difficulty,
+                        question_num=current_question_num,
+                        language=session.user_language,
+                        content_context=content_context,
+                        questions_to_avoid=generated_questions
+                    )
+                elif current_question_type == "unfoldingcase" or current_question_type == "unfoldingCase":
+                    # Generate Unfolding Case Study (NGN 6-item format)
+                    logger.info(f"Generating Unfolding Case Study {current_question_num} (attempt {attempts})")
+                    question_data = await generate_unfolding_casestudy(
+                        topic=topic,
+                        difficulty=difficulty,
+                        language=session.user_language or "english",
+                        questions_to_avoid=generated_questions
+                    )
+                else:
+                    # Generate MCQ question (default)
+                    logger.info(f"Generating MCQ question {current_question_num} (mode: {quiz_mode}, attempt {attempts})")
 
-                logger.debug(
-                    f"Generating Q{current_question_num}: target answer = {random_target_letter}"
-                )
+                    # Randomly assign correct answer position
+                    random_target_letter = random.choice(['A', 'B', 'C', 'D'])
 
-                # Generate the question via LLM
-                question_data = await _generate_single_question(
-                    content=content_context,
-                    topic=topic,
-                    difficulty=difficulty,
-                    question_num=current_question_num,
-                    language=session.user_language,
-                    questions_to_avoid=generated_questions,
-                    target_letter=random_target_letter,
-                    existing_topics=existing_topics,  # Pass user's existing topics
-                    quiz_mode=quiz_mode  # Pass quiz mode for NCLEX vs Knowledge
-                )
+                    # Generate the question via LLM
+                    question_data = await _generate_single_question(
+                        content=content_context,
+                        topic=topic,
+                        difficulty=difficulty,
+                        question_num=current_question_num,
+                        language=session.user_language,
+                        questions_to_avoid=generated_questions,
+                        target_letter=random_target_letter,
+                        existing_topics=existing_topics,
+                        quiz_mode=quiz_mode
+                    )
 
-                # Ensure MCQ has questionType field
-                if question_data and 'questionType' not in question_data:
-                    question_data['questionType'] = 'mcq'
+                    # Ensure MCQ has questionType field
+                    if question_data and 'questionType' not in question_data:
+                        question_data['questionType'] = 'mcq'
 
+                # Check for duplicate using cosine similarity
+                if question_data:
+                    question_text = question_data['question']
+
+                    if generated_questions and is_duplicate_question(
+                        new_text=question_text,
+                        existing_texts=generated_questions,
+                        existing_embeddings=generated_embeddings,
+                        embeddings_model=embeddings_model,
+                        threshold=0.85
+                    ):
+                        logger.warning(f"⚠️ Duplicate question detected for Q{current_question_num}, regenerating... (attempt {attempts})")
+                        is_duplicate = True
+                    else:
+                        is_duplicate = False
+                else:
+                    # Failed to generate, try again
+                    is_duplicate = True
+
+            # Accept the question if we have one (even if duplicate after max retries)
+            # Better to have a slightly similar question than to skip entirely
             if question_data:
-                # Add to deduplication list
-                generated_questions.append(question_data['question'])
+                # Add to deduplication lists
+                question_text = question_data['question']
+                generated_questions.append(question_text)
+
+                # Store embedding for future comparisons
+                try:
+                    new_embedding = np.array(embeddings_model.embed_query(question_text))
+                    generated_embeddings.append(new_embedding)
+                except Exception as e:
+                    logger.warning(f"Failed to store question embedding: {e}")
 
                 # Check cancellation before yielding
                 if is_cancelled():
                     logger.info(f"Quiz generation cancelled after generating question {current_question_num}")
                     return
+
+                # Log if we're accepting a duplicate after max retries
+                if is_duplicate:
+                    logger.warning(f"⚠️ Accepting duplicate Q{current_question_num} after {max_attempts_per_question} attempts (better than skipping)")
 
                 # Yield the question
                 yield {
@@ -442,30 +500,15 @@ async def stream_quiz_with_bank(
 
                 q_type = question_data.get('questionType', 'mcq')
                 logger.info(
-                    f"Generated Q{current_question_num} ({q_type}): {question_data['question'][:50]}..."
+                    f"✅ Generated Q{current_question_num} ({q_type}): {question_data['question'][:50]}..."
                 )
 
-                # ==========================================
-                # PHASE 5: SAVE TO BANK IN BACKGROUND
-                # ==========================================
-                # Use the question's assigned topic if the quiz-level topic is empty
-                # This happens in game mode where topic="" means "use all documents"
-                question_topic = question_data.get("topic", "") or topic
-                if not question_topic:
-                    question_topic = "general nursing"  # Fallback
-
-                # Fire and forget - don't wait for this to complete
-                asyncio.create_task(
-                    _save_question_to_bank(
-                        question_data=question_data,
-                        topic=question_topic,  # Use question-specific topic
-                        language=language,
-                        difficulty=difficulty,
-                        chat_id=chat_id
-                    )
-                )
+                # Increment counters for successful generation
+                questions_generated_count += 1
+                type_index += 1
             else:
-                logger.warning(f"Failed to generate question {current_question_num}")
+                logger.warning(f"❌ Failed to generate any question for Q{current_question_num} after {max_attempts_per_question} attempts, skipping...")
+                type_index += 1  # Move to next question type anyway
 
     # ==========================================
     # PHASE 6: SIGNAL COMPLETION
