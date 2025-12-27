@@ -42,24 +42,122 @@ import asyncio
 import random
 import logging
 import traceback
-import numpy as np
 from typing import AsyncGenerator, Dict, Any, List, Optional
 
-from langchain_openai import OpenAIEmbeddings
+from langchain_openai import ChatOpenAI
 from models.session import PersistentSessionContext
 from services.question_bank import question_bank
 from tools.quiztools import (
     _generate_single_question,
-    _extract_previous_questions,
-    get_connection_manager,
-    cosine_similarity,
-    is_duplicate_question
+    get_connection_manager
 )
 
 # Set up logging - make it visible in console
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+
+# ==========================================
+# CONCEPT EXTRACTION FOR GUARANTEED UNIQUE QUESTIONS
+# ==========================================
+
+async def extract_concepts_from_content(
+    content: str,
+    topic: str,
+    num_concepts: int,
+    language: str = "english",
+    quiz_mode: str = "knowledge"
+) -> List[str]:
+    """
+    Extract distinct, testable concepts from document content.
+
+    This is Step 1 of the concept-first approach:
+    1. Extract N unique concepts from the document
+    2. Generate one question per concept (guarantees no duplicates)
+
+    Args:
+        content: Document content or topic description
+        topic: The main topic being studied
+        num_concepts: Number of concepts to extract
+        language: Language for the concepts
+        quiz_mode: "knowledge" for factual concepts, "nclex" for clinical scenarios
+
+    Returns:
+        List of distinct concept strings
+    """
+    llm = ChatOpenAI(
+        model="gpt-4o-mini",
+        temperature=0.7  # Some creativity for diverse concepts
+    )
+
+    # Different prompts for knowledge vs NCLEX mode
+    if quiz_mode == "nclex":
+        prompt = f"""You are a nursing education expert. From the following content about "{topic}",
+extract exactly {num_concepts} DISTINCT clinical scenarios or nursing situations that could be tested.
+
+Each concept should be:
+- A specific clinical situation (e.g., "Patient with acute MI showing signs of cardiogenic shock")
+- Focused on nursing assessment, intervention, or prioritization
+- Different enough from other concepts to create unique questions
+- Testable with a single question
+
+Content:
+{content[:8000]}
+
+Return ONLY a JSON array of {num_concepts} concept strings. No explanations.
+Example format: ["Concept 1 description", "Concept 2 description", ...]
+
+Language: {language}
+"""
+    else:
+        prompt = f"""You are an education expert. From the following content about "{topic}",
+extract exactly {num_concepts} DISTINCT factual concepts that could be tested.
+
+Each concept should be:
+- A specific, testable fact or principle (e.g., "The normal range for adult heart rate")
+- Different enough from other concepts to create unique questions
+- Clear and focused on one idea
+
+Content:
+{content[:8000]}
+
+Return ONLY a JSON array of {num_concepts} concept strings. No explanations.
+Example format: ["Concept 1 description", "Concept 2 description", ...]
+
+Language: {language}
+"""
+
+    try:
+        response = await llm.ainvoke(prompt)
+        response_text = response.content.strip()
+
+        # Clean up response - handle markdown code blocks
+        if response_text.startswith("```"):
+            # Remove markdown code block markers
+            lines = response_text.split("\n")
+            response_text = "\n".join(lines[1:-1]) if len(lines) > 2 else response_text
+
+        # Parse JSON
+        import json
+        concepts = json.loads(response_text)
+
+        if isinstance(concepts, list) and len(concepts) > 0:
+            logger.info(f"✅ Extracted {len(concepts)} concepts for quiz generation")
+            for i, concept in enumerate(concepts[:5]):  # Log first 5
+                logger.info(f"   Concept {i+1}: {concept[:60]}...")
+            return concepts[:num_concepts]  # Ensure we don't exceed requested count
+        else:
+            logger.warning(f"⚠️ Concept extraction returned invalid format: {type(concepts)}")
+            return []
+
+    except json.JSONDecodeError as e:
+        logger.error(f"❌ Failed to parse concept extraction response: {e}")
+        logger.error(f"   Response was: {response_text[:200]}...")
+        return []
+    except Exception as e:
+        logger.error(f"❌ Concept extraction failed: {e}")
+        return []
 
 
 async def stream_quiz_with_bank(
@@ -290,10 +388,11 @@ async def stream_quiz_with_bank(
 
     # ==========================================
     # PHASE 4: GENERATE REMAINING QUESTIONS VIA LLM
+    # Using CONCEPT-FIRST approach for guaranteed unique questions
     # ==========================================
 
     if questions_to_generate > 0:
-        logger.info(f"Generating {questions_to_generate} questions via LLM...")
+        logger.info(f"Generating {questions_to_generate} questions via LLM (concept-first approach)...")
 
         # Build content context based on source
         if source == "documents" and session.vectorstore:
@@ -306,186 +405,118 @@ async def stream_quiz_with_bank(
                 If this is a broad topic (like 'research design', 'pharmacology', 'cardiac care'),
                 ensure you test diverse subtopics and concepts within that domain."""
 
-        # ═══════════════════════════════════════════════════════════════
-        # 🔍 DEDUPLICATION DEBUG - Remove after fixing
-        # ═══════════════════════════════════════════════════════════════
+        # ==========================================
+        # STEP 1: Extract unique concepts FIRST
+        # This guarantees no duplicate questions!
+        # ==========================================
+        logger.info(f"🧠 Step 1: Extracting {questions_to_generate} unique concepts...")
         print(f"\n{'='*60}")
-        print(f"🔍 [DEDUP DEBUG] Checking session.quizzes...")
-        print(f"   session.quizzes exists: {session.quizzes is not None}")
-        print(f"   session.quizzes type: {type(session.quizzes)}")
-        print(f"   session.quizzes count: {len(session.quizzes) if session.quizzes else 0}")
-
-        if session.quizzes and len(session.quizzes) > 0:
-            first_quiz = session.quizzes[-1]  # Most recent
-            print(f"   Last quiz keys: {list(first_quiz.keys()) if isinstance(first_quiz, dict) else 'NOT A DICT'}")
-            
-            quiz_data = first_quiz.get('quiz_data') if isinstance(first_quiz, dict) else None
-            print(f"   quiz_data type: {type(quiz_data)}")
-            
-            if isinstance(quiz_data, list) and len(quiz_data) > 0:
-                print(f"   quiz_data[0] keys: {list(quiz_data[0].keys()) if isinstance(quiz_data[0], dict) else 'NOT A DICT'}")
-                print(f"   quiz_data[0]['question'][:50]: {quiz_data[0].get('question', 'NO QUESTION KEY')[:50] if isinstance(quiz_data[0], dict) else 'N/A'}")
-            elif isinstance(quiz_data, dict):
-                print(f"   quiz_data is DICT with keys: {list(quiz_data.keys())}")
+        print(f"🧠 [CONCEPT-FIRST] Extracting {questions_to_generate} concepts from content...")
         print(f"{'='*60}\n")
-        # ═══════════════════════════════════════════════════════════════
-        # Track questions for deduplication (current quiz only)
-        generated_questions = []
-        generated_embeddings = []
 
-        # Initialize embeddings model for cosine similarity deduplication
-        embeddings_model = OpenAIEmbeddings()
+        concepts = await extract_concepts_from_content(
+            content=content_context,
+            topic=topic,
+            num_concepts=questions_to_generate,
+            language=session.user_language or "english",
+            quiz_mode=quiz_mode
+        )
 
-        # Add bank question texts and their embeddings to avoid duplicating those
-        for q in bank_questions:
-            q_text = q.get("question", "")
-            if q_text:
-                generated_questions.append(q_text)
-                try:
-                    q_embedding = np.array(embeddings_model.embed_query(q_text))
-                    generated_embeddings.append(q_embedding)
-                except Exception as e:
-                    logger.warning(f"Failed to compute embedding for bank question: {e}")
+        if not concepts:
+            logger.warning("⚠️ Concept extraction failed, falling back to topic-only generation")
+            # Fallback: generate simple concept placeholders
+            concepts = [f"Aspect {i+1} of {topic}" for i in range(questions_to_generate)]
 
-        if generated_questions:
-            logger.info(f"📊 Initialized deduplication with {len(generated_questions)} bank questions")
+        logger.info(f"✅ Got {len(concepts)} concepts, generating one question per concept...")
 
         # Distribute question types for remaining questions
-        # This ensures a good mix of MCQ and SATA if both are requested
         remaining_type_sequence = distribute_question_types(questions_to_generate, question_types)
-        logger.info(f"Question type distribution for remaining: {remaining_type_sequence}")
+        logger.info(f"Question type distribution: {remaining_type_sequence}")
 
-        # Track generation attempts for retry logic
-        max_attempts_per_question = 3
+        # Track generated questions (no longer needed for deduplication, but kept for logging)
+        generated_questions = []
 
-        # Generate remaining questions one at a time using while loop for retry support
-        questions_generated_count = 0
-        type_index = 0
-
-        while questions_generated_count < questions_to_generate and type_index < len(remaining_type_sequence):
+        # ==========================================
+        # STEP 2: Generate one question per concept
+        # No retry loops needed - concepts are already unique!
+        # ==========================================
+        for concept_idx, concept in enumerate(concepts):
             current_question_num = question_index + 1
-            current_question_type = remaining_type_sequence[type_index]
+            current_question_type = remaining_type_sequence[concept_idx] if concept_idx < len(remaining_type_sequence) else "mcq"
 
             # Check cancellation before generating
             if is_cancelled():
                 logger.info(f"Quiz generation cancelled at question {current_question_num}")
                 return
 
-            # Yield progress update with question type info
+            # Yield progress update
             yield {
                 "status": "generating",
                 "current": current_question_num,
                 "total": num_questions,
                 "source": "llm",
-                "question_type": current_question_type
+                "question_type": current_question_type,
+                "concept": concept[:50]  # Include concept in status for debugging
             }
 
-            # Try generating with retry logic for duplicates
+            logger.info(f"📝 Q{current_question_num}: Generating {current_question_type} about: {concept[:60]}...")
+
             question_data = None
-            is_duplicate = True
-            attempts = 0
 
-            while is_duplicate and attempts < max_attempts_per_question:
-                attempts += 1
+            # Generate based on question type, passing the specific concept
+            if current_question_type == "sata":
+                question_data = await generate_sata_question(
+                    topic=concept,  # Use concept as topic for focused generation
+                    difficulty=difficulty,
+                    question_num=current_question_num,
+                    language=session.user_language,
+                    content_context=content_context,
+                    questions_to_avoid=generated_questions,
+                    quiz_mode=quiz_mode
+                )
+            elif current_question_type == "casestudy":
+                question_data = await generate_casestudy_question(
+                    topic=concept,
+                    difficulty=difficulty,
+                    question_num=current_question_num,
+                    language=session.user_language,
+                    content_context=content_context,
+                    questions_to_avoid=generated_questions
+                )
+            elif current_question_type == "unfoldingcase" or current_question_type == "unfoldingCase":
+                question_data = await generate_unfolding_casestudy(
+                    topic=concept,
+                    difficulty=difficulty,
+                    language=session.user_language or "english",
+                    questions_to_avoid=generated_questions
+                )
+            else:
+                # Generate MCQ question (default)
+                random_target_letter = random.choice(['A', 'B', 'C', 'D'])
 
-                # Generate based on question type
-                if current_question_type == "sata":
-                    # Generate SATA question
-                    logger.info(f"Generating SATA question {current_question_num} (mode: {quiz_mode}, attempt {attempts})")
-                    question_data = await generate_sata_question(
-                        topic=topic,
-                        difficulty=difficulty,
-                        question_num=current_question_num,
-                        language=session.user_language,
-                        content_context=content_context,
-                        questions_to_avoid=generated_questions,
-                        quiz_mode=quiz_mode
-                    )
-                elif current_question_type == "casestudy":
-                    # Generate Case Study / NGN question
-                    logger.info(f"Generating Case Study question {current_question_num} (attempt {attempts})")
-                    question_data = await generate_casestudy_question(
-                        topic=topic,
-                        difficulty=difficulty,
-                        question_num=current_question_num,
-                        language=session.user_language,
-                        content_context=content_context,
-                        questions_to_avoid=generated_questions
-                    )
-                elif current_question_type == "unfoldingcase" or current_question_type == "unfoldingCase":
-                    # Generate Unfolding Case Study (NGN 6-item format)
-                    logger.info(f"Generating Unfolding Case Study {current_question_num} (attempt {attempts})")
-                    question_data = await generate_unfolding_casestudy(
-                        topic=topic,
-                        difficulty=difficulty,
-                        language=session.user_language or "english",
-                        questions_to_avoid=generated_questions
-                    )
-                else:
-                    # Generate MCQ question (default)
-                    logger.info(f"Generating MCQ question {current_question_num} (mode: {quiz_mode}, attempt {attempts})")
+                question_data = await _generate_single_question(
+                    content=content_context,
+                    topic=concept,  # Use concept as topic for focused generation
+                    difficulty=difficulty,
+                    question_num=current_question_num,
+                    language=session.user_language,
+                    questions_to_avoid=generated_questions,
+                    target_letter=random_target_letter,
+                    existing_topics=existing_topics,
+                    quiz_mode=quiz_mode
+                )
 
-                    # Randomly assign correct answer position
-                    random_target_letter = random.choice(['A', 'B', 'C', 'D'])
+                if question_data and 'questionType' not in question_data:
+                    question_data['questionType'] = 'mcq'
 
-                    # Generate the question via LLM
-                    question_data = await _generate_single_question(
-                        content=content_context,
-                        topic=topic,
-                        difficulty=difficulty,
-                        question_num=current_question_num,
-                        language=session.user_language,
-                        questions_to_avoid=generated_questions,
-                        target_letter=random_target_letter,
-                        existing_topics=existing_topics,
-                        quiz_mode=quiz_mode
-                    )
-
-                    # Ensure MCQ has questionType field
-                    if question_data and 'questionType' not in question_data:
-                        question_data['questionType'] = 'mcq'
-
-                # Check for duplicate using cosine similarity
-                if question_data:
-                    question_text = question_data['question']
-
-                    if generated_questions and is_duplicate_question(
-                        new_text=question_text,
-                        existing_texts=generated_questions,
-                        existing_embeddings=generated_embeddings,
-                        embeddings_model=embeddings_model,
-                        threshold=0.85
-                    ):
-                        logger.warning(f"⚠️ Duplicate question detected for Q{current_question_num}, regenerating... (attempt {attempts})")
-                        is_duplicate = True
-                    else:
-                        is_duplicate = False
-                else:
-                    # Failed to generate, try again
-                    is_duplicate = True
-
-            # Accept the question if we have one (even if duplicate after max retries)
-            # Better to have a slightly similar question than to skip entirely
             if question_data:
-                # Add to deduplication lists
-                question_text = question_data['question']
-                generated_questions.append(question_text)
-
-                # Store embedding for future comparisons
-                try:
-                    new_embedding = np.array(embeddings_model.embed_query(question_text))
-                    generated_embeddings.append(new_embedding)
-                except Exception as e:
-                    logger.warning(f"Failed to store question embedding: {e}")
+                # Track for logging
+                generated_questions.append(question_data['question'])
 
                 # Check cancellation before yielding
                 if is_cancelled():
                     logger.info(f"Quiz generation cancelled after generating question {current_question_num}")
                     return
-
-                # Log if we're accepting a duplicate after max retries
-                if is_duplicate:
-                    logger.warning(f"⚠️ Accepting duplicate Q{current_question_num} after {max_attempts_per_question} attempts (better than skipping)")
 
                 # Yield the question
                 yield {
@@ -499,16 +530,9 @@ async def stream_quiz_with_bank(
                 question_index += 1
 
                 q_type = question_data.get('questionType', 'mcq')
-                logger.info(
-                    f"✅ Generated Q{current_question_num} ({q_type}): {question_data['question'][:50]}..."
-                )
-
-                # Increment counters for successful generation
-                questions_generated_count += 1
-                type_index += 1
+                logger.info(f"✅ Q{current_question_num} ({q_type}): {question_data['question'][:50]}...")
             else:
-                logger.warning(f"❌ Failed to generate any question for Q{current_question_num} after {max_attempts_per_question} attempts, skipping...")
-                type_index += 1  # Move to next question type anyway
+                logger.warning(f"❌ Failed to generate question for concept: {concept[:50]}...")
 
     # ==========================================
     # PHASE 6: SIGNAL COMPLETION
