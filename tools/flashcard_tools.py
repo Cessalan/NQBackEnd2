@@ -12,12 +12,11 @@ Based on frontend requirements in ChatFlashcard.js
 
 from typing import Dict, Any, Optional, AsyncGenerator, List
 from langchain_core.tools import tool
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 import json
 import random
-import numpy as np
 
 # Import session management from quiztools
 from tools.quiztools import (
@@ -25,60 +24,6 @@ from tools.quiztools import (
     PersistentSessionContext,
     get_connection_manager
 )
-
-
-# ============================================
-# COSINE SIMILARITY DEDUPLICATION UTILITIES
-# ============================================
-
-def cosine_similarity(vec1: np.ndarray, vec2: np.ndarray) -> float:
-    """Calculate cosine similarity between two vectors."""
-    dot_product = np.dot(vec1, vec2)
-    norm1 = np.linalg.norm(vec1)
-    norm2 = np.linalg.norm(vec2)
-    if norm1 == 0 or norm2 == 0:
-        return 0.0
-    return dot_product / (norm1 * norm2)
-
-
-def is_duplicate(
-    new_text: str,
-    existing_texts: List[str],
-    existing_embeddings: List[np.ndarray],
-    embeddings_model: OpenAIEmbeddings,
-    threshold: float = 0.85
-) -> bool:
-    """
-    Check if new_text is too similar to any existing text using cosine similarity.
-
-    Args:
-        new_text: The new flashcard front/question to check
-        existing_texts: List of existing flashcard fronts/questions
-        existing_embeddings: Pre-computed embeddings for existing texts
-        embeddings_model: OpenAI embeddings model
-        threshold: Similarity threshold (0.85 = 85% similar considered duplicate)
-
-    Returns:
-        True if the new text is a duplicate, False otherwise
-    """
-    if not existing_texts or not existing_embeddings:
-        return False
-
-    try:
-        # Get embedding for new text
-        new_embedding = np.array(embeddings_model.embed_query(new_text))
-
-        # Check similarity against all existing embeddings
-        for i, existing_emb in enumerate(existing_embeddings):
-            similarity = cosine_similarity(new_embedding, existing_emb)
-            if similarity >= threshold:
-                print(f"🔄 Duplicate detected! Similarity: {similarity:.2f} with: '{existing_texts[i][:50]}...'")
-                return True
-
-        return False
-    except Exception as e:
-        print(f"⚠️ Error checking similarity: {e}")
-        return False  # On error, allow the card (fail open)
 
 
 @tool
@@ -203,24 +148,16 @@ async def stream_flashcards(
         "total": num_cards
     }
 
-    # Track generated flashcards for deduplication
+    # Track generated flashcards for prompt-based deduplication
     generated_fronts = []
-    generated_embeddings = []  # Store embeddings for cosine similarity
     # Track existing topics to avoid duplicates/variations
     existing_topics = []
 
-    # Initialize embeddings model for deduplication
-    embeddings_model = OpenAIEmbeddings()
-    max_retries = 3  # Max retries for duplicate cards
-
     # Generate flashcards one at a time
     cards_generated = 0
-    attempts = 0
-    max_attempts = num_cards * 3  # Prevent infinite loops
 
-    while cards_generated < num_cards and attempts < max_attempts:
+    while cards_generated < num_cards:
         card_num = cards_generated + 1
-        attempts += 1
 
         # Check cancellation
         if is_cancelled():
@@ -247,26 +184,8 @@ async def stream_flashcards(
         if flashcard_data:
             front_text = flashcard_data['front']
 
-            # Check for duplicate using cosine similarity
-            if generated_fronts and is_duplicate(
-                new_text=front_text,
-                existing_texts=generated_fronts,
-                existing_embeddings=generated_embeddings,
-                embeddings_model=embeddings_model,
-                threshold=0.85
-            ):
-                print(f"⚠️ Duplicate flashcard detected, regenerating... (attempt {attempts})")
-                continue  # Skip this card and try again
-
-            # Not a duplicate - add to tracking lists
+            # Add to tracking lists (prompt-based deduplication handles uniqueness)
             generated_fronts.append(front_text)
-
-            # Store embedding for future comparisons
-            try:
-                new_embedding = np.array(embeddings_model.embed_query(front_text))
-                generated_embeddings.append(new_embedding)
-            except Exception as e:
-                print(f"⚠️ Failed to store embedding: {e}")
 
             # Track the topic for future flashcards (avoid duplicates)
             card_topic = flashcard_data.get('topic', '')
