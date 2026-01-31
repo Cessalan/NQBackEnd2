@@ -31,28 +31,54 @@ class NursingTutor:
         self.llm_with_tools = self.llm.bind_tools(tools)
     
     async def process_message(
-        self, 
-        user_input: str, 
-        language: str = "english"
+        self,
+        user_input: str,
+        language: str = "english",
+        pre_fetched_context: dict = None
     ):
         """
         Process student message with proper streaming for simple responses,
-        non-streaming for tool calls
+        non-streaming for tool calls.
+
+        Args:
+            user_input: The user's message text
+            language: Detected language of the input (e.g., 'english', 'french')
+            pre_fetched_context: Optional pre-fetched context from main.py to avoid
+                                 duplicate Firebase queries. If provided, we skip
+                                 the get_chat_context_from_db() call here.
+                                 Expected format: {
+                                     'conversation': [...],
+                                     'quizzes': [...],
+                                     'study_sheets': [...]
+                                 }
         """
         try:
             # Update session language
             self.session.user_language = language
-                  
-            full_context_from_db = await get_chat_context_from_db(self.session.chat_id)
-            
+
+            # ═══════════════════════════════════════════════════════════════════
+            # OPTIMIZATION: Use pre-fetched context if available
+            # ═══════════════════════════════════════════════════════════════════
+            # If main.py already fetched the context (to avoid duplicate Firebase calls),
+            # use that instead of fetching again. This saves ~300-800ms per message.
+            # ═══════════════════════════════════════════════════════════════════
+            if pre_fetched_context is not None:
+                # Use the context that was already fetched by main.py
+                full_context_from_db = pre_fetched_context
+                print("📦 Using pre-fetched context (skipped duplicate Firebase query)")
+            else:
+                # Fallback: fetch context if not provided (for backwards compatibility)
+                full_context_from_db = await get_chat_context_from_db(self.session.chat_id)
+                print("🔄 Fetched context from Firebase (no pre-fetched context provided)")
+
             # Add user message to history
-            try:               
+            try:
                 if(full_context_from_db["conversation"]):
                     #print("CONTEXT PREV CONVO",full_context_from_db["conversation"])
                     self.session.message_history = full_context_from_db["conversation"][-15:]
             except Exception as e:
                 print("error during conversation context creation",e)
-                
+
             # add quizzes history to context
             try:
                 if(full_context_from_db["quizzes"]):
@@ -605,18 +631,25 @@ class NursingTutor:
                 "content": response_content if 'response_content' in locals() else response.content,
                 "timestamp": datetime.now().isoformat()
             })
-            
-            # create prompt suggestions based on the context
-            suggestions = await self._generate_dynamic_suggestions()
-            
-            print( f"PROMPTS SUGGESTIONS CREATED: {suggestions}")
-            
-            # send them to the user
-            if suggestions:
-                yield json.dumps({
-                    "status": "suggested_prompts",
-                    "suggestions": suggestions
-                }) + "\n"
+
+            # ═══════════════════════════════════════════════════════════════════
+            # DISABLED: Prompt suggestions generation
+            # ═══════════════════════════════════════════════════════════════════
+            # Commenting out to save tokens - analytics showed low usage.
+            # This was calling gpt-4o-mini after every response to generate
+            # 4-5 suggested follow-up prompts, costing ~500-1000 tokens per message.
+            # Can be re-enabled if needed by uncommenting the code below.
+            # ═══════════════════════════════════════════════════════════════════
+            # suggestions = await self._generate_dynamic_suggestions()
+            #
+            # print(f"PROMPTS SUGGESTIONS CREATED: {suggestions}")
+            #
+            # # send them to the user
+            # if suggestions:
+            #     yield json.dumps({
+            #         "status": "suggested_prompts",
+            #         "suggestions": suggestions
+            #     }) + "\n"
 
             # Final response status
             yield json.dumps({
