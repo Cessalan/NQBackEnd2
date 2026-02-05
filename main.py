@@ -2603,7 +2603,7 @@ async def generate_section(request: SectionRequest):
 
 # ============================================================================
 # STUDY MODE ENDPOINTS
-# Duolingo-style learning path generation
+# Duolingo-style learning path generation (NOT USED FOR CHATINTERFACE, IT IS FOR STUDY PLAN VERY SEPARATE)
 # ============================================================================
 
 from models.requests import StudyPlanRequest, StudyItemRequest, StudyAudioRequest

@@ -362,6 +362,56 @@ class NursingTutor:
                             print("🎯 Quiz tool called - checking for streaming")
                             print(f"📋 Tool arguments received from LLM: {tool_args}")
                             print(f"🔍 Empathetic message in args: {tool_args.get('empathetic_message', 'NOT FOUND')}")
+
+                            def transform_question_for_frontend(q: dict) -> dict:
+                                """Transform question to StudyQuizCard-compatible format.
+
+                                StudyQuizCard expects:
+                                - correctIndex: number (0-indexed)
+                                - rationale: string (HTML)
+
+                                Backend provides:
+                                - answer: string like "A) Option text" or just "A"
+                                - justification: string (HTML rationale)
+                                - metadata.correctAnswerIndex: number (if available)
+                                """
+                                transformed = dict(q)  # Copy original
+
+                                # 1. Extract correctIndex
+                                correct_index = -1
+
+                                # Strategy 1: Use metadata.correctAnswerIndex if available
+                                if q.get('metadata') and isinstance(q['metadata'], dict):
+                                    idx = q['metadata'].get('correctAnswerIndex')
+                                    if idx is not None and isinstance(idx, int):
+                                        correct_index = idx
+
+                                # Strategy 2: Parse from answer field
+                                if correct_index == -1:
+                                    answer = q.get('answer', '')
+                                    if isinstance(answer, str) and len(answer) > 0:
+                                        # Extract first letter (handles "A", "A)", "A. text", etc.)
+                                        first_char = answer.strip()[0].upper()
+                                        if first_char in 'ABCDEF':
+                                            correct_index = ord(first_char) - ord('A')
+
+                                # Strategy 3: If answer is a number
+                                if correct_index == -1:
+                                    answer = q.get('answer')
+                                    if isinstance(answer, int):
+                                        correct_index = answer
+                                    elif isinstance(answer, str) and answer.isdigit():
+                                        correct_index = int(answer)
+
+                                transformed['correctIndex'] = correct_index
+
+                                # 2. Copy justification to rationale
+                                if 'justification' in q:
+                                    transformed['rationale'] = q['justification']
+
+                                print(f"🔄 Transformed question: correctIndex={correct_index}, has rationale={bool(transformed.get('rationale'))}")
+                                return transformed
+
                             # creates parameters we will need for the quizz, and start streaming
                             from tools.quiztools import generate_quiz_stream
                             result = await generate_quiz_stream.ainvoke(tool_args)
@@ -434,7 +484,9 @@ class NursingTutor:
 
                                     elif chunk.get("status") == "question_ready":
                                         # Send complete question to frontend
-                                        question = chunk.get("question")
+                                        # Transform to StudyQuizCard-compatible format
+                                        raw_question = chunk.get("question")
+                                        question = transform_question_for_frontend(raw_question)
                                         all_questions.append(question)
 
                                         value = { "status": "quiz_question",
@@ -679,11 +731,18 @@ class NursingTutor:
 
         🚨🚨🚨 CRITICAL QUIZ/EXAM RULE - READ THIS FIRST 🚨🚨🚨
 
-        When a user asks for ANY of these, you MUST use the generate_quiz_stream tool:
+        When a user REQUESTS or ASKS FOR new questions/quizzes, you MUST use the generate_quiz_stream tool:
         - "quiz", "quiz me", "test me", "exam", "exam question", "practice question"
         - "make me a question", "give me questions", "create questions"
         - "NCLEX question", "practice test", "mock exam"
-        - Any variation asking for questions, quizzes, tests, or exams
+        - Requests like "give me", "create", "generate", "start" + questions/quiz/test
+
+        ⚠️ DO NOT trigger quiz generation when the user is ASKING ABOUT previous questions:
+        - "were those questions based on my document?" → Answer the question normally
+        - "where did those questions come from?" → Explain the source
+        - "why was that question hard?" → Discuss the question
+        - "what topics did those questions cover?" → Provide information
+        These are META-QUESTIONS about existing content, NOT requests for new quizzes!
 
         ❌ NEVER respond with a text-formatted question like this:
         "Question: A 16-year-old female presents..."
@@ -719,6 +778,23 @@ class NursingTutor:
                                 ⚠️ IMPORTANT: If unsure, ALWAYS default to quiz_mode="knowledge"
                                 Knowledge mode = direct factual questions (e.g., "What is the normal potassium range?")
                                 NCLEX mode = clinical scenarios (e.g., "A 65-year-old patient presents with...")
+
+                                📄 SOURCE PREFERENCE PARAMETER (source_preference) - CRITICAL:
+                                **DEFAULT WHEN DOCUMENTS EXIST**: source_preference="documents"
+                                When the student has uploaded documents, ALWAYS set source_preference="documents" unless they explicitly ask for general knowledge questions.
+
+                                ✅ Use source_preference="documents" (DEFAULT when docs exist):
+                                   - "quiz me", "test me on this" → use their uploaded content
+                                   - "give me questions" → base questions on their materials
+                                   - Any quiz request when student has uploaded files
+
+                                ✅ Use source_preference="scratch" ONLY when user EXPLICITLY says:
+                                   - "quiz me on general knowledge"
+                                   - "give me questions NOT from my document"
+                                   - "test me on [topic] from your knowledge"
+
+                                🚨 CRITICAL: If the student has documents uploaded and asks for a quiz WITHOUT specifying source,
+                                ALWAYS use source_preference="documents" - the questions MUST be based on their uploaded content!
         - generate_flashcards_stream: Create flashcards for active recall and memorization (HARD LIMIT: max 15 cards per set)
                                       **CRITICAL**: If user asks for >15 cards, inform them: "I can create up to 15 flashcards per set. Would you like me to make 15 flashcards on [topic]?"
                                       **If user asks for ≤15 cards OR just says "make flashcards"**: Generate IMMEDIATELY without asking
@@ -1008,9 +1084,15 @@ class NursingTutor:
             * Never automatically create a study sheet
         
         4. **Ambiguity Handling:**
-        - If uncertain, ask: "Would you like me to (a) search your materials, 
+        - If uncertain, ask: "Would you like me to (a) search your materials,
             (b) create a study sheet, or (c) quiz you on this topic?"
-       - For quiz creation using the generate_quiz_stream tool, prioritize using the student's uploaded documents and the UPLOADED FILE INSIGHTS below
+
+        🚨 CRITICAL DOCUMENT-FIRST RULE FOR QUIZZES:
+        When the student has uploaded documents and asks for a quiz/questions:
+        - ALWAYS set source_preference="documents" in generate_quiz_stream
+        - Generate questions BASED ON THE ACTUAL CONTENT of their uploaded files
+        - Use the UPLOADED FILE INSIGHTS below to understand what's in their documents
+        - DO NOT generate generic/random questions - use their specific materials!
 
         Current session:
         - Conversation so far {self.session.message_history if self.session.message_history else "no conversation yet"}
