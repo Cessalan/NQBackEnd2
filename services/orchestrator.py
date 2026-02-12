@@ -1,7 +1,7 @@
 from langchain_openai import ChatOpenAI
 from tools.quiztools import NursingTools, set_session_context
 from models.session import PersistentSessionContext
-from typing import AsyncGenerator
+from typing import AsyncGenerator, List, Dict, Any
 from datetime import datetime
 from tools.quiztools import search_documents,summarize_document,get_chat_context_from_db
 import json
@@ -29,6 +29,41 @@ class NursingTutor:
         )
         
         self.llm_with_tools = self.llm.bind_tools(tools)
+
+    def _sanitize_message_history(self, conversation: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+        """Keep only recent conversational turns and trim oversized payloads."""
+        sanitized: List[Dict[str, str]] = []
+        for item in conversation[-12:]:
+            if not isinstance(item, dict):
+                continue
+            role = item.get("role")
+            content = item.get("content")
+            if role not in {"user", "assistant"} or not isinstance(content, str):
+                continue
+
+            cleaned = content.strip()
+            if not cleaned:
+                continue
+
+            # Skip serialized UI payloads to avoid polluting context quality.
+            lowered = cleaned.lower()
+            if "\"quiz_data\"" in lowered or "\"flashcard_data\"" in lowered:
+                continue
+
+            if len(cleaned) > 1500:
+                cleaned = cleaned[:1500] + "…"
+
+            sanitized.append({"role": role, "content": cleaned})
+
+        return sanitized
+
+    def _build_messages(self, system_prompt: str, user_input: str) -> List[Dict[str, str]]:
+        """Construct the final message stack sent to the model."""
+        return [
+            {"role": "system", "content": system_prompt},
+            *self.session.message_history,
+            {"role": "user", "content": user_input.strip()}
+        ]
     
     async def process_message(
         self,
@@ -71,11 +106,12 @@ class NursingTutor:
                 full_context_from_db = await get_chat_context_from_db(self.session.chat_id)
                 print("🔄 Fetched context from Firebase (no pre-fetched context provided)")
 
-            # Add user message to history
+            # Add user message to history (compact/clean to reduce token + latency)
             try:
                 if(full_context_from_db["conversation"]):
-                    #print("CONTEXT PREV CONVO",full_context_from_db["conversation"])
-                    self.session.message_history = full_context_from_db["conversation"][-15:]
+                    self.session.message_history = self._sanitize_message_history(
+                        full_context_from_db["conversation"]
+                    )
             except Exception as e:
                 print("error during conversation context creation",e)
 
@@ -139,11 +175,7 @@ class NursingTutor:
 
             messages = []
             try:
-                messages = [
-                    {"role": "system", "content": system_prompt},
-                    *self.session.message_history,
-                    {"role": "user", "content": user_input}
-                ]
+                messages = self._build_messages(system_prompt, user_input)
             except Exception as e:
                 print("Error when building message",e)
                         

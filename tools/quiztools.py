@@ -101,8 +101,15 @@ _CURRENT_SESSION: Optional[PersistentSessionContext] = None
 def set_session_context(session: PersistentSessionContext):
     """Set the current session context for tool access"""
     global _CURRENT_SESSION
-    session.vectorstore = get_chat_vectorstore(session.chat_id)
-    session.documents = load_files_for_chat(session.chat_id)
+    # Keep existing in-memory vectorstore (already hydrated by websocket flow).
+    # Reloading on every message is expensive and causes repeated Firebase I/O.
+    if not session.documents:
+        session.documents = load_files_for_chat(session.chat_id)
+
+    # Fallback only: if vectorstore is missing but we have documents, try loading once.
+    if session.vectorstore is None and session.documents:
+        session.vectorstore = get_chat_vectorstore(session.chat_id)
+
     _CURRENT_SESSION = session
 
 def get_session() -> PersistentSessionContext:
@@ -888,8 +895,7 @@ def get_chat_vectorstore(
     Search vector store for relevant chunks to create summary
     """
     try:
-        session = get_session()
-        if(session.documents):
+        if load_files_for_chat(chat_id):
             with tempfile.TemporaryDirectory() as tempdir:
                 # Use same pattern as your working code
                 bucket = storage.bucket()
