@@ -22,5 +22,8 @@ class PersistentSessionContext:
     message_history: List[tuple] = field(default_factory=list)
     tool_calls: List[Dict] = field(default_factory=list)
     studysheet_history: str = field(default="")
-    previously_generate_questions_in_quiz = []
+    # FIX: Changed from class-level `= []` to instance-level `field(default_factory=list)`
+    # The old code shared one list across ALL sessions, causing cross-user contamination
+    # in question deduplication. Now each session has its own isolated list.
+    previously_generate_questions_in_quiz: List[str] = field(default_factory=list)
     file_insights: Dict[str, Dict] = field(default_factory=dict)  # {filename: {topics, concepts, doc_type}}

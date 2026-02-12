@@ -94,22 +94,77 @@ def get_connection_manager():
 def get_firestore_client():
     return firestore.client()
 
-# Global session access - this will be injected by NursingTutor
+# ============================================================================
+# COROUTINE-SAFE SESSION CONTEXT
+# ============================================================================
+# Using contextvars for async-safe session management. This prevents race
+# conditions where User A's session could be overwritten by User B when
+# processing messages concurrently.
+#
+# The old global _CURRENT_SESSION approach was unsafe in async environments.
+# contextvars provides proper isolation per async task/coroutine.
+# ============================================================================
+import contextvars
+
+# Context variable for coroutine-safe session access
+_session_context: contextvars.ContextVar[Optional[PersistentSessionContext]] = contextvars.ContextVar(
+    'session_context', default=None
+)
+
+# Keep the old global as a fallback for backwards compatibility
 _CURRENT_SESSION: Optional[PersistentSessionContext] = None
 
-    
+
 def set_session_context(session: PersistentSessionContext):
-    """Set the current session context for tool access"""
+    """
+    Set the current session context for tool access.
+
+    OPTIMIZATIONS:
+    1. Only download vectorstore/documents if not already cached
+       (Previously downloading from Firebase on EVERY message, ~1-3s wasted)
+    2. Uses contextvars for coroutine-safe access (prevents race conditions
+       when multiple users send messages simultaneously)
+    """
     global _CURRENT_SESSION
-    session.vectorstore = get_chat_vectorstore(session.chat_id)
-    session.documents = load_files_for_chat(session.chat_id)
+
+    # Only load vectorstore if not already cached in session
+    if session.vectorstore is None:
+        print(f"📥 set_session_context: Loading vectorstore for {session.chat_id} (not cached)")
+        session.vectorstore = get_chat_vectorstore(session.chat_id)
+    else:
+        print(f"✅ set_session_context: Using cached vectorstore for {session.chat_id}")
+
+    # Only load documents list if empty (avoids redundant Firebase list_blobs)
+    if not session.documents:
+        print(f"📥 set_session_context: Loading documents list for {session.chat_id}")
+        session.documents = load_files_for_chat(session.chat_id)
+    else:
+        print(f"✅ set_session_context: Using cached documents list ({len(session.documents)} files)")
+
+    # Set both the context variable (for async safety) and the global (for backwards compatibility)
+    _session_context.set(session)
     _CURRENT_SESSION = session
+    print(f"🔒 Session context set for chat_id: {session.chat_id} (coroutine-safe)")
+
 
 def get_session() -> PersistentSessionContext:
-    """Get current session context"""
-    if _CURRENT_SESSION is None:
-        raise RuntimeError("No session context available. This is a system error.")
-    return _CURRENT_SESSION
+    """
+    Get current session context.
+
+    Uses contextvars for coroutine-safe access. Falls back to global
+    if context variable is not set (backwards compatibility).
+    """
+    # Try context variable first (coroutine-safe)
+    session = _session_context.get()
+    if session is not None:
+        return session
+
+    # Fallback to global (backwards compatibility)
+    if _CURRENT_SESSION is not None:
+        print("⚠️ get_session: Using global fallback (context var not set)")
+        return _CURRENT_SESSION
+
+    raise RuntimeError("No session context available. This is a system error.")
 
 
 def _get_gemini_model(model_env_var: str = "GEMINI_MODEL", default_model: str = "gemini-2.5-flash"):

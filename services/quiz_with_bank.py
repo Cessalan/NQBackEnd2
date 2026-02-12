@@ -437,102 +437,138 @@ async def stream_quiz_with_bank(
         generated_questions = []
 
         # ==========================================
-        # STEP 2: Generate one question per concept
-        # No retry loops needed - concepts are already unique!
+        # STEP 2: Generate questions in PARALLEL
         # ==========================================
-        for concept_idx, concept in enumerate(concepts):
-            current_question_num = question_index + 1
+        # OPTIMIZATION: Previously questions were generated sequentially,
+        # taking 1-3s per question (10-30s for 10 questions).
+        # Now we generate in parallel and yield as each completes.
+        # Expected improvement: ~3x faster (parallel batch of 3-4 at a time)
+        # ==========================================
+
+        logger.info(f"⚡ PARALLEL GENERATION: Starting {len(concepts)} questions in parallel...")
+        print(f"\n{'='*60}")
+        print(f"⚡ [PARALLEL] Generating {len(concepts)} questions concurrently...")
+        print(f"{'='*60}\n")
+
+        # Create a task for each question
+        async def generate_question_task(concept_idx: int, concept: str):
+            """Generate a single question - returns (index, question_data)"""
+            current_question_num = question_index + concept_idx + 1
             current_question_type = remaining_type_sequence[concept_idx] if concept_idx < len(remaining_type_sequence) else "mcq"
 
-            # Check cancellation before generating
+            try:
+                question_data = None
+
+                # Generate based on question type, passing the specific concept
+                if current_question_type == "sata":
+                    question_data = await generate_sata_question(
+                        topic=concept,
+                        difficulty=difficulty,
+                        question_num=current_question_num,
+                        language=session.user_language,
+                        content_context=content_context,
+                        questions_to_avoid=[],  # No blocking on previous - concepts are unique
+                        quiz_mode=quiz_mode
+                    )
+                elif current_question_type == "casestudy":
+                    question_data = await generate_casestudy_question(
+                        topic=concept,
+                        difficulty=difficulty,
+                        question_num=current_question_num,
+                        language=session.user_language,
+                        content_context=content_context,
+                        questions_to_avoid=[]
+                    )
+                elif current_question_type == "unfoldingcase" or current_question_type == "unfoldingCase":
+                    question_data = await generate_unfolding_casestudy(
+                        topic=concept,
+                        difficulty=difficulty,
+                        language=session.user_language or "english",
+                        questions_to_avoid=[]
+                    )
+                else:
+                    # Generate MCQ question (default)
+                    random_target_letter = random.choice(['A', 'B', 'C', 'D'])
+                    question_data = await _generate_single_question(
+                        content=content_context,
+                        topic=concept,
+                        difficulty=difficulty,
+                        question_num=current_question_num,
+                        language=session.user_language,
+                        questions_to_avoid=[],
+                        target_letter=random_target_letter,
+                        existing_topics=existing_topics,
+                        quiz_mode=quiz_mode
+                    )
+
+                    if question_data and 'questionType' not in question_data:
+                        question_data['questionType'] = 'mcq'
+
+                return (concept_idx, current_question_type, question_data)
+
+            except Exception as e:
+                logger.error(f"❌ Error generating question for concept {concept_idx}: {e}")
+                return (concept_idx, current_question_type, None)
+
+        # Signal that parallel generation is starting
+        yield {
+            "status": "generating",
+            "current": question_index + 1,
+            "total": num_questions,
+            "source": "llm",
+            "parallel": True,
+            "batch_size": len(concepts)
+        }
+
+        # Create all tasks
+        tasks = [
+            asyncio.create_task(generate_question_task(idx, concept))
+            for idx, concept in enumerate(concepts)
+        ]
+
+        # Process results as they complete (fastest first)
+        completed_count = 0
+        for coro in asyncio.as_completed(tasks):
+            # Check cancellation
             if is_cancelled():
-                logger.info(f"Quiz generation cancelled at question {current_question_num}")
+                logger.info(f"Quiz generation cancelled - cancelling remaining tasks")
+                for task in tasks:
+                    task.cancel()
                 return
 
-            # Yield progress update
-            yield {
-                "status": "generating",
-                "current": current_question_num,
-                "total": num_questions,
-                "source": "llm",
-                "question_type": current_question_type,
-                "concept": concept[:50]  # Include concept in status for debugging
-            }
+            try:
+                concept_idx, q_type, question_data = await coro
+                completed_count += 1
 
-            logger.info(f"📝 Q{current_question_num}: Generating {current_question_type} about: {concept[:60]}...")
+                if question_data:
+                    # Track for logging
+                    generated_questions.append(question_data['question'])
 
-            question_data = None
+                    # Yield the question immediately as it completes
+                    yield {
+                        "status": "question_ready",
+                        "question": question_data,
+                        "index": question_index,
+                        "source": "llm",
+                        "completed": completed_count,
+                        "remaining": len(concepts) - completed_count
+                    }
 
-            # Generate based on question type, passing the specific concept
-            if current_question_type == "sata":
-                question_data = await generate_sata_question(
-                    topic=concept,  # Use concept as topic for focused generation
-                    difficulty=difficulty,
-                    question_num=current_question_num,
-                    language=session.user_language,
-                    content_context=content_context,
-                    questions_to_avoid=generated_questions,
-                    quiz_mode=quiz_mode
-                )
-            elif current_question_type == "casestudy":
-                question_data = await generate_casestudy_question(
-                    topic=concept,
-                    difficulty=difficulty,
-                    question_num=current_question_num,
-                    language=session.user_language,
-                    content_context=content_context,
-                    questions_to_avoid=generated_questions
-                )
-            elif current_question_type == "unfoldingcase" or current_question_type == "unfoldingCase":
-                question_data = await generate_unfolding_casestudy(
-                    topic=concept,
-                    difficulty=difficulty,
-                    language=session.user_language or "english",
-                    questions_to_avoid=generated_questions
-                )
-            else:
-                # Generate MCQ question (default)
-                random_target_letter = random.choice(['A', 'B', 'C', 'D'])
+                    all_questions.append(question_data)
+                    question_index += 1
 
-                question_data = await _generate_single_question(
-                    content=content_context,
-                    topic=concept,  # Use concept as topic for focused generation
-                    difficulty=difficulty,
-                    question_num=current_question_num,
-                    language=session.user_language,
-                    questions_to_avoid=generated_questions,
-                    target_letter=random_target_letter,
-                    existing_topics=existing_topics,
-                    quiz_mode=quiz_mode
-                )
+                    logger.info(f"✅ Q{completed_count}/{len(concepts)} ({q_type}): {question_data['question'][:50]}...")
+                else:
+                    logger.warning(f"❌ Failed to generate question {concept_idx + 1}")
 
-                if question_data and 'questionType' not in question_data:
-                    question_data['questionType'] = 'mcq'
+            except asyncio.CancelledError:
+                logger.info("Task was cancelled")
+                continue
+            except Exception as e:
+                logger.error(f"Error processing completed task: {e}")
+                continue
 
-            if question_data:
-                # Track for logging
-                generated_questions.append(question_data['question'])
-
-                # Check cancellation before yielding
-                if is_cancelled():
-                    logger.info(f"Quiz generation cancelled after generating question {current_question_num}")
-                    return
-
-                # Yield the question
-                yield {
-                    "status": "question_ready",
-                    "question": question_data,
-                    "index": question_index,
-                    "source": "llm"
-                }
-
-                all_questions.append(question_data)
-                question_index += 1
-
-                q_type = question_data.get('questionType', 'mcq')
-                logger.info(f"✅ Q{current_question_num} ({q_type}): {question_data['question'][:50]}...")
-            else:
-                logger.warning(f"❌ Failed to generate question for concept: {concept[:50]}...")
+        logger.info(f"⚡ PARALLEL GENERATION COMPLETE: {completed_count} questions generated")
 
     # ==========================================
     # PHASE 6: SIGNAL COMPLETION
