@@ -107,3 +107,14 @@ class StudyReviewPlanRequest(BaseModel):
     language: str = "en"
     performance: dict = {}                     # Full studyPerformance doc from Firestore
     original_topics: Optional[List[str]] = []  # Topics from phase 1 for context
+
+
+class DiagnosticQuizRequest(BaseModel):
+    """
+    Request to generate 5 breadth-first diagnostic questions.
+    Called before showing the study plan to establish baseline proficiency.
+    One question per major topic, varying difficulty easy→medium.
+    """
+    chat_id: str
+    upload_ids: Optional[List[str]] = []
+    language: str = "en"

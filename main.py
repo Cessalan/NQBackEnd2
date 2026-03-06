@@ -2606,7 +2606,7 @@ async def generate_section(request: SectionRequest):
 # Duolingo-style learning path generation (NOT USED FOR CHATINTERFACE, IT IS FOR STUDY PLAN VERY SEPARATE)
 # ============================================================================
 
-from models.requests import StudyPlanRequest, StudyItemRequest, StudyAudioRequest, StudyReviewPlanRequest
+from models.requests import StudyPlanRequest, StudyItemRequest, StudyAudioRequest, StudyReviewPlanRequest, DiagnosticQuizRequest
 import hashlib
 
 @app.post("/study/plan")
@@ -2807,6 +2807,115 @@ IMPORTANT:
 
     except Exception as e:
         print(f"❌ Study path generation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/study/diagnostic-quiz")
+async def generate_diagnostic_quiz(request: DiagnosticQuizRequest):
+    """
+    Generate 5 breadth-first diagnostic questions spanning all major topics.
+    Called BEFORE showing the study plan to establish a baseline proficiency score.
+
+    Uses a single LLM call to produce one question per major topic, varying
+    difficulty from easy to hard. The frontend stores results in studyPerformance
+    before createStudySession is called, seeding the adaptive engine early.
+    """
+    print(f"\n{'='*60}")
+    print(f"🔬 DIAGNOSTIC QUIZ GENERATION - chat_id: {request.chat_id}")
+    print(f"{'='*60}")
+
+    try:
+        # Use the same ACTIVE_SESSIONS pattern as /study/plan so file_insights are available
+        if request.chat_id not in ACTIVE_SESSIONS:
+            ACTIVE_SESSIONS[request.chat_id] = NursingTutor(request.chat_id)
+            await ACTIVE_SESSIONS[request.chat_id].load_file_insights_from_firebase()
+            print(f"🆕 Created new session for diagnostic quiz")
+
+        session = ACTIVE_SESSIONS[request.chat_id]
+        file_insights = getattr(session.session, "file_insights", {})
+
+        # Build topic + concept context from file_insights
+        all_topics = []
+        all_concepts = []
+        for filename, insights in file_insights.items():
+            if insights:
+                all_topics.extend(insights.get("topics", []))
+                all_concepts.extend(insights.get("concepts", []))
+        unique_topics = list(set(all_topics))[:10]
+        unique_concepts = list(set(all_concepts))[:20]
+
+        # Get document content from vectorstore (same as /study/plan, no hard fail)
+        document_content = ""
+        if session.session.vectorstore:
+            docs = session.session.vectorstore.similarity_search("main topics concepts definitions", k=20)
+            document_content = "\n\n".join([doc.page_content for doc in docs])[:10000]
+
+        # Build context from whichever source is available
+        context_str = document_content[:8000] if document_content else ""
+        if not context_str and (unique_topics or unique_concepts):
+            context_str = f"Topics: {', '.join(unique_topics)}\nConcepts: {', '.join(unique_concepts)}"
+
+        if not context_str:
+            raise HTTPException(status_code=400, detail="No document content found for this session.")
+
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
+
+        prompt = f"""You are a diagnostic test generator. Generate exactly 5 multiple-choice questions to assess a student's baseline knowledge before they start studying.
+
+RULES:
+- Each question must cover a DIFFERENT main topic or concept from the document
+- Vary difficulty: questions 1-2 easy, questions 3-4 medium, question 5 harder
+- Each question must have exactly 4 options
+- Questions reveal what the student already knows vs. what they need to learn
+- Use exact terminology from the document — do NOT invent topics
+- Keep questions concise (1-2 sentences max)
+
+DOCUMENT CONTENT:
+{context_str}
+
+Return ONLY a valid JSON array (no markdown, no explanation):
+[
+  {{
+    "question": "Question text?",
+    "options": ["Option A", "Option B", "Option C", "Option D"],
+    "correctIndex": 0,
+    "rationale": "Brief explanation of the correct answer",
+    "topic": "Topic name from the document"
+  }}
+]
+(exactly 5 objects, no more, no less)"""
+
+        response = await llm.ainvoke(prompt)
+        content = response.content.strip()
+
+        # Strip markdown code fences if present
+        if "```" in content:
+            parts = content.split("```")
+            for part in parts:
+                stripped = part.strip()
+                if stripped.startswith("json"):
+                    stripped = stripped[4:].strip()
+                if stripped.startswith("["):
+                    content = stripped
+                    break
+
+        questions = json.loads(content)
+        # Safety: clamp to 5 and validate structure
+        questions = [
+            q for q in questions[:5]
+            if isinstance(q.get("options"), list) and len(q["options"]) == 4
+        ]
+
+        print(f"✅ Generated {len(questions)} diagnostic questions")
+        return {"questions": questions}
+
+    except json.JSONDecodeError as e:
+        print(f"❌ JSON parse error in diagnostic quiz: {e}")
+        raise HTTPException(status_code=500, detail="Failed to parse diagnostic questions from AI response.")
+    except Exception as e:
+        print(f"❌ Diagnostic quiz generation failed: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
