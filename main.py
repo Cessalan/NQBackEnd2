@@ -2606,7 +2606,7 @@ async def generate_section(request: SectionRequest):
 # Duolingo-style learning path generation (NOT USED FOR CHATINTERFACE, IT IS FOR STUDY PLAN VERY SEPARATE)
 # ============================================================================
 
-from models.requests import StudyPlanRequest, StudyItemRequest, StudyAudioRequest
+from models.requests import StudyPlanRequest, StudyItemRequest, StudyAudioRequest, StudyReviewPlanRequest
 import hashlib
 
 @app.post("/study/plan")
@@ -2807,6 +2807,159 @@ IMPORTANT:
 
     except Exception as e:
         print(f"❌ Study path generation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/study/plan-review")
+async def generate_review_plan(request: StudyReviewPlanRequest):
+    """
+    Generate a Phase 2 review study path based on Phase 1 performance.
+    Uses the same session & vectorstore as the original study plan.
+
+    Performance-based node generation:
+    - WEAK topics (<60%): LESSON → FLASHCARD → QUIZ (full re-teach)
+    - DEVELOPING topics (60-84%): FLASHCARD → QUIZ (reinforce)
+    - STRONG topics (85%+): Single QUIZ (confidence check)
+    """
+    print(f"\n{'='*60}")
+    print(f"📚 REVIEW PATH GENERATION - chat_id: {request.chat_id}")
+    print(f"{'='*60}")
+
+    try:
+        # ------------------------------------------
+        # STEP 1: Get or create session (same as /study/plan)
+        # ------------------------------------------
+        if request.chat_id not in ACTIVE_SESSIONS:
+            ACTIVE_SESSIONS[request.chat_id] = NursingTutor(request.chat_id)
+            await ACTIVE_SESSIONS[request.chat_id].load_file_insights_from_firebase()
+            print(f"🆕 Created new session for review plan")
+
+        session = ACTIVE_SESSIONS[request.chat_id]
+
+        # ------------------------------------------
+        # STEP 2: Parse performance data into categories
+        # ------------------------------------------
+        topics_data = request.performance.get("topics", {})
+        if not topics_data:
+            print("⚠️ No performance data, returning empty review plan")
+            return {"nodes": [], "topics": [], "total_nodes": 0, "estimated_time_minutes": 0}
+
+        weak_topics = []
+        developing_topics = []
+        strong_topics = []
+
+        for topic_name, topic_info in topics_data.items():
+            missed = topic_info.get("missedConcepts", [])
+            quiz_total = max(topic_info.get("questionsTotal", 1), 1)
+            flash_total = max(topic_info.get("flashcardsTotal", 1), 1)
+            quiz_acc = (topic_info.get("questionsCorrect", 0) / quiz_total) * 100
+            flash_acc = (topic_info.get("flashcardsMastered", 0) / flash_total) * 100
+            strength = topic_info.get("strengthLevel", "developing")
+
+            entry = {
+                "name": topic_name,
+                "quiz_accuracy": round(quiz_acc),
+                "flashcard_accuracy": round(flash_acc),
+                "missed_concepts": missed[:5],
+                "strength": strength
+            }
+
+            if strength == "weak":
+                weak_topics.append(entry)
+            elif strength == "developing":
+                developing_topics.append(entry)
+            else:
+                strong_topics.append(entry)
+
+        print(f"📊 Performance breakdown: {len(weak_topics)} weak, {len(developing_topics)} developing, {len(strong_topics)} strong")
+
+        # ------------------------------------------
+        # STEP 3: Build performance summary for prompt
+        # ------------------------------------------
+        perf_lines = []
+        for t in weak_topics:
+            missed_str = ", ".join(t["missed_concepts"][:3]) if t["missed_concepts"] else "N/A"
+            perf_lines.append(f'- Topic "{t["name"]}": WEAK ({t["quiz_accuracy"]}% quiz, {t["flashcard_accuracy"]}% flashcard). Missed: {missed_str}')
+        for t in developing_topics:
+            missed_str = ", ".join(t["missed_concepts"][:3]) if t["missed_concepts"] else "N/A"
+            perf_lines.append(f'- Topic "{t["name"]}": DEVELOPING ({t["quiz_accuracy"]}% quiz, {t["flashcard_accuracy"]}% flashcard). Missed: {missed_str}')
+        for t in strong_topics:
+            perf_lines.append(f'- Topic "{t["name"]}": STRONG ({t["quiz_accuracy"]}% quiz, {t["flashcard_accuracy"]}% flashcard).')
+
+        performance_summary = "\n".join(perf_lines)
+
+        # ------------------------------------------
+        # STEP 4: Generate review path with LLM
+        # ------------------------------------------
+        prompt_language = _language_for_prompt(request.language)
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
+
+        review_prompt = f"""Create a REVIEW study path for a student who just completed their first study round.
+
+PERFORMANCE DATA:
+{performance_summary}
+
+STRUCTURE RULES:
+1. WEAK topics (< 60% accuracy): LESSON -> FLASHCARD -> QUIZ (full re-teach, focus on missed concepts)
+2. DEVELOPING topics (60-84%): FLASHCARD -> QUIZ only (reinforce weak spots)
+3. STRONG topics (85%+): Single QUIZ node (quick confidence check)
+4. Order: weakest topics first, strongest last
+5. Total: 4-12 nodes depending on how many topics need review
+6. All node labels should indicate this is a review (e.g., "Topic Name - Review")
+
+Return ONLY valid JSON array in {prompt_language}:
+[
+  {{"id": "review_1", "type": "lesson", "label": "Topic Name - Review", "tags": ["review", "weak"], "difficulty": 1}},
+  ...
+]"""
+
+        response = await llm.ainvoke([{"role": "user", "content": review_prompt}])
+
+        # ------------------------------------------
+        # STEP 5: Parse & validate (same as /study/plan)
+        # ------------------------------------------
+        path_json = response.content.strip()
+
+        # Clean markdown code blocks if present
+        if path_json.startswith("```"):
+            path_json = path_json.split("```")[1]
+            if path_json.startswith("json"):
+                path_json = path_json[4:]
+            path_json = path_json.strip()
+
+        nodes = json.loads(path_json)
+
+        for i, node in enumerate(nodes):
+            node["status"] = "available" if i == 0 else "locked"
+            if "id" not in node:
+                node["id"] = f"review_{i+1}"
+            if "difficulty" not in node:
+                node["difficulty"] = 1
+            if "tags" not in node:
+                node["tags"] = ["review"]
+            elif "review" not in node["tags"]:
+                node["tags"].append("review")
+
+        review_topics = [t["name"] for t in (weak_topics + developing_topics + strong_topics)]
+
+        print(f"✅ Generated review path with {len(nodes)} nodes")
+        for node in nodes:
+            print(f"   - {node['type']}: {node['label']}")
+
+        # ------------------------------------------
+        # STEP 6: Return (same shape as /study/plan)
+        # ------------------------------------------
+        return {
+            "nodes": nodes,
+            "topics": review_topics,
+            "total_nodes": len(nodes),
+            "estimated_time_minutes": len(nodes) * 3
+        }
+
+    except Exception as e:
+        print(f"❌ Review path generation failed: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))

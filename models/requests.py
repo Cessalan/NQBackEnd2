@@ -96,3 +96,14 @@ class StudyAudioRequest(BaseModel):
     intent: str = "teach"
     duration: int = 2  # Duration in minutes
     language: str = "en"
+
+
+class StudyReviewPlanRequest(BaseModel):
+    """
+    Request to generate a Phase 2 review study path based on performance data.
+    Frontend sends performance from Firestore since backend has no Firebase auth.
+    """
+    chat_id: str
+    language: str = "en"
+    performance: dict = {}                     # Full studyPerformance doc from Firestore
+    original_topics: Optional[List[str]] = []  # Topics from phase 1 for context
