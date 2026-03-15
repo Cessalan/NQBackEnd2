@@ -172,10 +172,11 @@ def get_loader_for_file(path):
         raise ValueError("Unsupported file type")
 
 # Initialize Firebase
-cred = credentials.Certificate("FireBaseAccess.json")
-firebase_admin.initialize_app(cred, {
-    "storageBucket": os.getenv("FIREBASE_BUCKET", "docai-efb03.firebasestorage.app")
-})
+if not firebase_admin._apps:
+    cred = credentials.Certificate("FireBaseAccess.json")
+    firebase_admin.initialize_app(cred, {
+        "storageBucket": os.getenv("FIREBASE_BUCKET", "docai-efb03.firebasestorage.app")
+    })
 
 # cred = credentials.Certificate("service-account-key.json")  # Path to key file
 #     firebase_admin.initialize_app(cred, {
