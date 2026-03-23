@@ -2607,7 +2607,7 @@ async def generate_section(request: SectionRequest):
 # Duolingo-style learning path generation (NOT USED FOR CHATINTERFACE, IT IS FOR STUDY PLAN VERY SEPARATE)
 # ============================================================================
 
-from models.requests import StudyPlanRequest, StudyItemRequest, StudyAudioRequest, StudyReviewPlanRequest, DiagnosticQuizRequest
+from models.requests import StudyPlanRequest, StudyItemRequest, StudyAudioRequest, StudyReviewPlanRequest, DiagnosticQuizRequest, StudyMindmapRequest
 import hashlib
 
 @app.post("/study/plan")
@@ -2676,6 +2676,7 @@ async def generate_study_plan(request: StudyPlanRequest):
 
         # Extract CORE topics from the actual document
         llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
+        prompt_language = _language_for_prompt(request.language)
 
         topic_extraction_prompt = f"""Analyze this document and extract the 3-5 MAIN TOPICS that the student needs to learn.
 
@@ -2690,13 +2691,13 @@ DOCUMENT CONTENT:
 
 RULES:
 1. Identify the 3-5 MAIN TOPICS/SECTIONS in this document
-2. Use the EXACT terminology from the document
+2. Name the topics based on the document content, but EXPRESS THEM IN {prompt_language}
 3. Topics should be what the document is teaching (not generic categories)
 4. Order from foundational to advanced
 
-Return ONLY valid JSON:
+Return ONLY valid JSON (all strings must be in {prompt_language}):
 {{
-    "main_topics": ["Topic 1 from document", "Topic 2 from document", "Topic 3 from document"],
+    "main_topics": ["Topic 1 in {prompt_language}", "Topic 2 in {prompt_language}", "Topic 3 in {prompt_language}"],
     "key_terms": ["term1", "term2", "term3", "term4", "term5"]
 }}"""
 
@@ -2725,7 +2726,44 @@ Return ONLY valid JSON:
         # ------------------------------------------
         # STEP 4: Generate learning path with LLM
         # ------------------------------------------
-        prompt_language = _language_for_prompt(request.language)
+        user_prefs = request.userPreferences or {}
+        review_format = user_prefs.get("reviewFormat", "Visual Concept Maps")
+        
+        # Customize the structure based on user preference
+        if review_format == "Flashcards":
+            structure_rule = "- AUDIO: Listen to an intro for that topic\n   - FLASHCARD: Key terms and definitions from that topic\n   - FLASHCARD: Advanced concepts\n   - QUIZ: Quick test"
+            node_types = '- "audio": Short audio intro for the topic\n- "flashcard": Key terms\n- "quiz": Questions testing that topic'
+            example_json_rows = f"""  {{"id": "node_1", "type": "audio", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Listen", "tags": ["topic1", "audio"], "difficulty": 1}},
+  {{"id": "node_2", "type": "flashcard", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Basics", "tags": ["topic1", "terms"], "difficulty": 1}},
+  {{"id": "node_3", "type": "flashcard", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Advanced", "tags": ["topic1", "advanced"], "difficulty": 2}},
+  {{"id": "node_4", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Quiz", "tags": ["topic1", "assessment"], "difficulty": 1}}"""
+        elif review_format == "Audio Summaries":
+            structure_rule = "- AUDIO: Listen to a summary\n   - LESSON: Read the details\n   - QUIZ: Test understanding"
+            node_types = '- "audio": Listen to summary\n- "lesson": Read details\n- "quiz": Questions testing that topic'
+            example_json_rows = f"""  {{"id": "node_1", "type": "audio", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Audio", "tags": ["topic1", "audio"], "difficulty": 1}},
+  {{"id": "node_2", "type": "lesson", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Lesson", "tags": ["topic1", "lesson"], "difficulty": 2}},
+  {{"id": "node_3", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Quiz", "tags": ["topic1", "assessment"], "difficulty": 1}}"""
+        elif review_format == "Practice Questions":
+            structure_rule = "- QUIZ: Initial assessment\n   - LESSON: Review concepts\n   - AUDIO: Listen to a recap\n   - QUIZ: Final test"
+            node_types = '- "quiz": Assessment questions\n- "lesson": Review content\n- "audio": Short audio recap'
+            example_json_rows = f"""  {{"id": "node_1", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Pre-Test", "tags": ["topic1", "assessment"], "difficulty": 1}},
+  {{"id": "node_2", "type": "lesson", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Review", "tags": ["topic1", "lesson"], "difficulty": 2}},
+  {{"id": "node_3", "type": "audio", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Recap", "tags": ["topic1", "audio"], "difficulty": 1}},
+  {{"id": "node_4", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Final Test", "tags": ["topic1", "assessment"], "difficulty": 2}}"""
+        elif review_format == "Visual Concept Maps":
+            structure_rule = "- LESSON: Introduce the topic (content comes from document)\n   - AUDIO: Listen to the lesson explained out loud\n   - MINDMAP: Visual concept map linking key ideas\n   - QUIZ: Test understanding of that specific topic"
+            node_types = '- "lesson": Introduction to ONE topic from the document\n- "audio": Audio explanation of that topic (listen instead of reading)\n- "mindmap": Visual concept map for that topic\n- "quiz": Questions testing that topic (will generate 12 questions)'
+            example_json_rows = f"""  {{"id": "node_1", "type": "lesson", "label": "{unique_topics[0] if unique_topics else 'Topic 1'}", "tags": ["topic1"], "difficulty": 1}},
+  {{"id": "node_2", "type": "audio", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Listen", "tags": ["topic1", "audio"], "difficulty": 1}},
+  {{"id": "node_3", "type": "mindmap", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Concept Map", "tags": ["topic1", "visual"], "difficulty": 1}},
+  {{"id": "node_4", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Quiz", "tags": ["topic1", "assessment"], "difficulty": 1}}"""
+        else: # Default (mixed)
+            structure_rule = "- LESSON: Introduce the topic (content comes from document)\n   - AUDIO: Listen to the lesson explained out loud\n   - FLASHCARD: Key terms and definitions from that topic\n   - QUIZ: Test understanding of that specific topic"
+            node_types = '- "lesson": Introduction to ONE topic from the document\n- "audio": Audio explanation of that topic (listen instead of reading)\n- "flashcard": Key terms from that topic (will generate 12 cards)\n- "quiz": Questions testing that topic (will generate 12 questions)'
+            example_json_rows = f"""  {{"id": "node_1", "type": "lesson", "label": "{unique_topics[0] if unique_topics else 'Topic 1'}", "tags": ["topic1"], "difficulty": 1}},
+  {{"id": "node_2", "type": "audio", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Listen", "tags": ["topic1", "audio"], "difficulty": 1}},
+  {{"id": "node_3", "type": "flashcard", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Vocabulaire", "tags": ["topic1", "terms"], "difficulty": 1}},
+  {{"id": "node_4", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Quiz", "tags": ["topic1", "assessment"], "difficulty": 1}}"""
 
         path_prompt = f"""Create a Duolingo-style study path for this document.
 
@@ -2737,31 +2775,25 @@ KEY TERMS to include: {key_terms}
 STRUCTURE RULES:
 1. Create ONE learning unit per main topic (3-5 units total)
 2. Each unit follows this pattern:
-   - LESSON: Introduce the topic (content comes from document)
-   - FLASHCARD: Key terms and definitions from that topic
-   - QUIZ: Test understanding of that specific topic
+   {structure_rule}
 
-3. Total: 9-15 nodes (3 nodes per topic)
+3. Total: 12-20 nodes (4 nodes per topic)
 4. Progress through topics in logical order
 
 NODE TYPES:
-- "lesson": Introduction to ONE topic from the document
-- "flashcard": Key terms from that topic (will generate 12 cards)
-- "quiz": Questions testing that topic (will generate 12 questions)
+{node_types}
 
 Return ONLY valid JSON array in {prompt_language}:
 [
-  {{"id": "node_1", "type": "lesson", "label": "{unique_topics[0] if unique_topics else 'Topic 1'}", "tags": ["topic1"], "difficulty": 1}},
-  {{"id": "node_2", "type": "flashcard", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Vocabulaire", "tags": ["topic1", "terms"], "difficulty": 1}},
-  {{"id": "node_3", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Quiz", "tags": ["topic1", "assessment"], "difficulty": 1}},
+{example_json_rows},
   ... (repeat for each main topic)
 ]
 
 IMPORTANT:
 - Node labels MUST reference the actual topics from the document
 - DO NOT create generic labels like "Introduction to Medicine"
-- Use the EXACT topic names from the document
-- Labels should be in {prompt_language}"""
+- ALL labels MUST be written in {prompt_language} — translate topic names if the document is in a different language
+- Keep labels concise and meaningful"""
 
         response = await llm.ainvoke([{"role": "user", "content": path_prompt}])
 
@@ -3285,6 +3317,21 @@ async def generate_study_item_stream(request: StudyItemRequest):
                 content_hash = hashlib.md5(json.dumps(content, sort_keys=True).encode()).hexdigest()[:12]
                 yield f"data: {json.dumps({'status': 'complete', 'type': 'audio', 'content': content, 'hash': content_hash})}\n\n"
 
+            elif request.node_type == "mindmap":
+                # Return a stub so the frontend can render StudyMindmapCard,
+                # which auto-triggers /study/generate-mindmap for the actual map.
+                yield f"data: {json.dumps({'status': 'generating', 'message': 'Preparing concept map...'})}\n\n"
+                content = {
+                    "topic": request.node_label,
+                    "depth": "medium",
+                    "mindmapData": None  # populated later by /study/generate-mindmap
+                }
+                content_hash = hashlib.md5(json.dumps(content, sort_keys=True).encode()).hexdigest()[:12]
+                yield f"data: {json.dumps({'status': 'complete', 'type': 'mindmap', 'content': content, 'hash': content_hash})}\n\n"
+
+            else:
+                yield f"data: {json.dumps({'status': 'error', 'message': f'Unknown node type: {request.node_type}'})}\n\n"
+
         except Exception as e:
             print(f"❌ Study item streaming failed: {e}")
             import traceback
@@ -3346,6 +3393,47 @@ async def generate_study_audio(request: StudyAudioRequest):
             import traceback
             traceback.print_exc()
             yield f"data: {json.dumps({'status': 'audio_error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        stream_generator(),
+        media_type="text/event-stream"
+    )
+
+
+@app.post("/study/generate-mindmap")
+async def generate_study_mindmap(request: StudyMindmapRequest):
+    """
+    Generate a concept map for a study mode node.
+
+    Streaming endpoint that reuses the existing mindmap_generator service.
+    Yields mindmap_generating → mindmap_complete (or error).
+    """
+    print(f"\n{'='*60}")
+    print(f"🧠 STUDY MINDMAP GENERATION - {request.topic}")
+    print(f"{'='*60}")
+
+    async def stream_generator():
+        try:
+            session = await _setup_study_session(request.chat_id, request.language)
+            session.user_language = request.language
+
+            from services.mindmap_generator import stream_mindmap_data
+
+            async for chunk in stream_mindmap_data(
+                topic=request.topic,
+                depth=request.depth,
+                session=session,
+                chat_id=request.chat_id
+            ):
+                yield f"data: {json.dumps(chunk)}\n\n"
+
+            print("✅ Mindmap stream complete")
+
+        except Exception as e:
+            print(f"❌ Study mindmap generation failed: {e}")
+            import traceback
+            traceback.print_exc()
+            yield f"data: {json.dumps({'status': 'error', 'message': str(e)})}\n\n"
 
     return StreamingResponse(
         stream_generator(),

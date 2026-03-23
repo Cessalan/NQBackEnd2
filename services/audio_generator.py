@@ -136,6 +136,28 @@ class AudioGenerator:
             "default_duration": config["default_duration"]
         }
 
+    # Map ISO 2-letter codes to full language names used internally
+    LANGUAGE_CODE_MAP = {
+        "fr": "french",
+        "en": "english",
+        "es": "spanish",
+        "de": "german",
+        "pt": "portuguese",
+        "it": "italian",
+        "ar": "arabic",
+        "zh": "chinese",
+        "ja": "japanese",
+        "ko": "korean",
+    }
+
+    @classmethod
+    def _normalize_language(cls, language: str) -> str:
+        """Normalize language to full name (e.g. 'fr' -> 'french', 'fr-FR' -> 'french')."""
+        if not language:
+            return "english"
+        code = language.lower().split("-")[0]
+        return cls.LANGUAGE_CODE_MAP.get(code, code)
+
     async def generate_audio_stream(
         self,
         topic: str,
@@ -147,6 +169,7 @@ class AudioGenerator:
         """
         Generate audio content with streaming progress updates
         """
+        language = self._normalize_language(language)
         config = self.INTENT_CONFIG.get(intent, self.INTENT_CONFIG["teach"])
         word_count = config["word_counts"].get(duration, 750)
 

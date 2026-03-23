@@ -72,6 +72,7 @@ class StudyPlanRequest(BaseModel):
     chat_id: str                          # Chat ID where documents were uploaded
     upload_ids: Optional[List[str]] = []  # Optional: specific upload IDs to focus on
     language: str = "en"                  # Language for content generation
+    userPreferences: Optional[dict] = {}  # Onboarding preferences (reviewFormat, userStage, etc)
 
 
 class StudyItemRequest(BaseModel):
@@ -107,6 +108,14 @@ class StudyReviewPlanRequest(BaseModel):
     language: str = "en"
     performance: dict = {}                     # Full studyPerformance doc from Firestore
     original_topics: Optional[List[str]] = []  # Topics from phase 1 for context
+
+
+class StudyMindmapRequest(BaseModel):
+    """Request to generate a concept map for a study node"""
+    chat_id: str
+    topic: str
+    depth: str = "medium"  # shallow | medium | deep
+    language: str = "en"
 
 
 class DiagnosticQuizRequest(BaseModel):
