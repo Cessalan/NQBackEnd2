@@ -249,9 +249,9 @@ SESSION_LAST_ACTIVITY: Dict[str, float] = {}  # Track last activity time for eac
 # ============================================================================
 # COST OPTIMIZATION: Session cleanup configuration
 # ============================================================================
-SESSION_IDLE_TIMEOUT = 300  # 5 minutes - keep session alive for rapid interactions
-CONNECTION_IDLE_TIMEOUT = 300  # 5 minutes - WebSocket idle timeout (not per-message)
-SESSION_MAX_AGE = 1800  # 30 minutes - max session lifetime regardless of activity
+SESSION_IDLE_TIMEOUT = 60   # 1 minute - enough for rapid interactions
+CONNECTION_IDLE_TIMEOUT = 60   # 1 minute - WebSocket idle timeout (not per-message)
+SESSION_MAX_AGE = 600  # 10 minutes - max session lifetime regardless of activity
 
 import time
 
