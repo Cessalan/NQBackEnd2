@@ -53,7 +53,7 @@ class NursingTutor:
 
         # Main content generation model (high quality)
         self.llm = ChatOpenAI(
-            model="gpt-4o",
+            model="gpt-4.1",
             temperature=0.5,
             streaming=True,
             openai_api_key=api_key
@@ -62,7 +62,7 @@ class NursingTutor:
         # Fast routing model for ambiguous cases (lower latency)
         # Used only when pattern matching fails
         self.routing_llm = ChatOpenAI(
-            model="gpt-4o-mini",  # ~2-3x faster than gpt-4o
+            model="gpt-4.1-mini",  # ~2-3x faster than gpt-4.1
             temperature=0,
             streaming=False,
             openai_api_key=api_key
@@ -248,12 +248,12 @@ class NursingTutor:
             # ═══════════════════════════════════════════════════════════════════
             # OPTIMIZED ROUTING: Fast pattern matching → Fast LLM → Full LLM
             # ═══════════════════════════════════════════════════════════════════
-            # Previously: Every message did a full gpt-4o call for routing (1-2s)
+            # Previously: Every message did a full gpt-4.1 call for routing (1-2s)
             # Now:
             #   1. Fast pattern matching (0ms) - catches 60%+ of tool requests
             #   2. "NO_TOOL" fast path - skips routing for conversational messages
-            #   3. gpt-4o-mini routing (~300-500ms) - for ambiguous cases
-            #   4. gpt-4o only for actual content generation
+            #   3. gpt-4.1-mini routing (~300-500ms) - for ambiguous cases
+            #   4. gpt-4.1 only for actual content generation
             # ═══════════════════════════════════════════════════════════════════
 
             fast_route_tool = self._fast_route_check(user_input)
@@ -279,12 +279,12 @@ class NursingTutor:
                 return  # Exit early, skip the tool routing path
 
             elif fast_route_tool:
-                # Fast path: Pattern matched, use gpt-4o-mini to get tool args
+                # Fast path: Pattern matched, use gpt-4.1-mini to get tool args
                 print(f"⚡ FAST ROUTING: Using {fast_route_tool} (pattern matched)")
                 response = await self.routing_llm_with_tools.ainvoke(messages)
             else:
-                # Ambiguous: Use gpt-4o-mini for routing decision (faster than gpt-4o)
-                print("🔀 SMART ROUTING: Using gpt-4o-mini for tool decision...")
+                # Ambiguous: Use gpt-4.1-mini for routing decision (faster than gpt-4.1)
+                print("🔀 SMART ROUTING: Using gpt-4.1-mini for tool decision...")
                 response = await self.routing_llm_with_tools.ainvoke(messages)
             
             # Check if tools were called
@@ -575,10 +575,12 @@ class NursingTutor:
                                     num_questions=metadata.get("num_questions"),
                                     source=metadata.get("source"),
                                     session=self.session,
-                                    empathetic_message=empathetic_message,  # Pass empathetic message
-                                    chat_id=self.session.chat_id,  # Pass chat_id for cancellation
-                                    question_types=metadata.get("question_types", ["mcq"]),  # Pass question types (MCQ, SATA, etc.)
-                                    quiz_mode=metadata.get("quiz_mode", "knowledge")  # Pass quiz mode (knowledge vs nclex)
+                                    empathetic_message=empathetic_message,
+                                    chat_id=self.session.chat_id,
+                                    question_types=metadata.get("question_types", ["mcq"]),
+                                    quiz_mode=metadata.get("quiz_mode", "knowledge"),
+                                    learning_objective=metadata.get("learning_objective", "general"),
+                                    user_prompt=metadata.get("user_prompt")
                                 ):
                                     # Handle empathetic message streaming
                                     if chunk.get("status") == "empathetic_message_start":
@@ -824,7 +826,7 @@ class NursingTutor:
             # DISABLED: Prompt suggestions generation
             # ═══════════════════════════════════════════════════════════════════
             # Commenting out to save tokens - analytics showed low usage.
-            # This was calling gpt-4o-mini after every response to generate
+            # This was calling gpt-4.1-mini after every response to generate
             # 4-5 suggested follow-up prompts, costing ~500-1000 tokens per message.
             # Can be re-enabled if needed by uncommenting the code below.
             # ═══════════════════════════════════════════════════════════════════
@@ -870,8 +872,9 @@ class NursingTutor:
 
 CORE TOOLS (use these, never write content manually):
 • generate_quiz_stream: For ANY quiz/question request (max 15 questions)
+  - ALWAYS pass user_prompt=<exact user message verbatim> — used for accurate mode detection
   - quiz_mode="knowledge" (DEFAULT) for factual questions
-  - quiz_mode="nclex" ONLY when user explicitly asks for NCLEX/clinical scenarios
+  - quiz_mode="nclex" ONLY when user explicitly asks for NCLEX/clinical scenarios/judgment
   - source_preference="documents" when student has uploaded files
 • generate_flashcards_stream: For flashcard requests (max 15 cards)
 • generate_study_sheet_stream: When user explicitly asks for study sheet/guide
@@ -889,7 +892,18 @@ CRITICAL RULES:
 
 QUIZ MODE DEFAULTS:
 • Default: quiz_mode="knowledge" (factual recall questions)
-• ONLY use quiz_mode="nclex" when user explicitly says: "NCLEX", "clinical scenarios", "patient scenarios"
+• Use quiz_mode="nclex" when user says: "NCLEX", "NCLEX-style", "clinical scenarios", "patient scenarios", "clinical judgment", "testing judgment"
+• ALWAYS include user_prompt=<verbatim user message> in every generate_quiz_stream call
+
+LEARNING OBJECTIVE DETECTION (pass learning_objective= in generate_quiz_stream):
+Infer the student's intent from their message and set learning_objective accordingly:
+• "exam_prep"   → user says: "exam", "test tomorrow", "NCLEX exam", "prepare for", "ready for my exam", "cramming"
+• "weak_areas"  → user says: "struggling with", "don't understand", "weak on", "keep getting wrong", "confused about", "help me with"
+• "first_review"→ user says: "just started", "first time", "new to", "learning for the first time", "beginner", "intro"
+• "deep_dive"   → user says: "deep dive", "in depth", "really understand", "mechanisms", "pathophysiology", "why does"
+• "quick_check" → user says: "quick", "just a few", "fast review", "check myself", "rapid", "briefly"
+• "general"     → (default) no clear intent signal detected
+RULE: If ambiguous, default to "general". Never ask the user to clarify their intent — infer it.
 
 SMART BEHAVIOR:
 • When user enters bare topic → search_documents first, don't auto-generate content
@@ -1555,7 +1569,7 @@ Original message: {user_input}"""
                 """
             
             # REAL STREAMING with vector store content
-            llm = ChatOpenAI(model="gpt-4o", temperature=0.3,streaming=True )
+            llm = ChatOpenAI(model="gpt-4.1", temperature=0.3,streaming=True )
             
             async for chunk in llm.astream([{"role": "user", "content": summary_prompt}]):
                 if hasattr(chunk, 'content') and chunk.content:
@@ -1705,7 +1719,7 @@ Original message: {user_input}"""
             # PHASE 4: Generate Suggestions
             # ========================================
             
-            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
+            llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.7)
             
             response = await llm.ainvoke([
                 {"role": "system", "content": system_prompt},
@@ -1969,7 +1983,7 @@ async def generate_post_upload_suggestions(session, file_insights: dict) -> list
             
             # Use same system prompt structure as _generate_dynamic_suggestions
             
-            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
+            llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.7)
             
             system_prompt = f"""You are a nursing education AI helping students achieve specific learning outcomes.
 

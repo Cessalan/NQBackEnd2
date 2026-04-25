@@ -561,7 +561,7 @@ async def _create_study_sheet_with_anthropic(
             openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
             
             response = openai_client.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-4.1",
                 max_tokens=6000,
                 temperature=0.3,
                 messages=[{"role": "user", "content": prompt}]
@@ -1048,7 +1048,9 @@ async def generate_quiz_stream(
     source_preference: str = "auto",
     question_types: List[str] = None,
     empathetic_message: str = None,
-    quiz_mode: str = "knowledge"
+    quiz_mode: str = "knowledge",
+    user_prompt: str = None,
+    learning_objective: str = None
 ) -> Dict[str, Any]:
     """
     Generate a nursing quiz for the student with support for multiple question formats.
@@ -1074,13 +1076,20 @@ async def generate_quiz_stream(
     - If user asks for "case study", "drag and drop", "ordering", "prioritization", "bowtie"
       → include "casestudy" in question_types
 
-    Examples of user intents and quiz_mode to use:
-    - "NCLEX practice on diabetes" → quiz_mode="nclex"
-    - "Clinical scenario questions" → quiz_mode="nclex"
-    - "Situational questions" → quiz_mode="nclex"
-    - "Knowledge test on cardiac care" → quiz_mode="knowledge"
-    - "Test my factual recall on medications" → quiz_mode="knowledge"
-    - "Give me a quiz" (no mode specified) → quiz_mode="knowledge" (default)
+    IMPORTANT - Detecting Learning Objective from User Messages:
+    Analyze the user's message and set learning_objective to one of these values:
+    - "exam_prep"   → user mentions exam, test, NCLEX exam date, "tomorrow", "this week", "preparing for"
+    - "weak_areas"  → user mentions struggling, failed, keep getting wrong, weak on, don't understand
+    - "first_review"→ user is clearly new to the topic, says "just started", "learning about", "introduction"
+    - "deep_dive"   → user wants to go deeper, "advanced", "in detail", "mechanisms", "pathophysiology"
+    - "quick_check" → user wants a fast self-test, "quick quiz", "just check", "few questions"
+    - "general"     → none of the above, standard practice request (DEFAULT)
+
+    Examples:
+    - "I have my NCLEX exam on Friday" → learning_objective="exam_prep"
+    - "I keep failing priority questions" → learning_objective="weak_areas"
+    - "Just started studying liver failure" → learning_objective="first_review"
+    - "Give me a quiz on cardiac meds" → learning_objective="general"
 
     Args:
         topic: Subject area (e.g., "pharmacology", "cardiac care", "NCLEX prep")
@@ -1095,6 +1104,10 @@ async def generate_quiz_stream(
         empathetic_message: Optional empathetic understanding text to show before quiz
         quiz_mode: "knowledge" for factual recall questions (default),
                    "nclex" for clinical judgment questions
+        user_prompt: The user's original message verbatim. ALWAYS pass this.
+        learning_objective: Why the user wants this quiz. One of: "exam_prep",
+                            "weak_areas", "first_review", "deep_dive",
+                            "quick_check", "general" (default).
 
     Returns:
         Dictionary signaling quiz streaming should begin with question type info
@@ -1138,6 +1151,70 @@ async def generate_quiz_stream(
         if not question_types:
             question_types = ["mcq"]
 
+        # ── Keyword override from user_prompt ──────────────────────────────
+        # The LLM extracts question_types from the user message, but can miss
+        # explicit mentions (e.g. "sata only", "do not use case study").
+        # Scan user_prompt directly and enforce what the user actually said.
+        if user_prompt:
+            prompt_lower = user_prompt.lower()
+
+            # Negative exclusions first (highest priority)
+            no_casestudy = any(kw in prompt_lower for kw in [
+                "no case study", "not case study", "without case study",
+                "do not use case study", "don't use case study", "no casestudy"
+            ])
+            no_sata = any(kw in prompt_lower for kw in [
+                "no sata", "not sata", "without sata",
+                "do not use sata", "don't use sata", "no select all"
+            ])
+
+            # Positive inclusions
+            wants_sata = any(kw in prompt_lower for kw in [
+                "sata", "select all that apply", "select all"
+            ])
+            wants_mcq = any(kw in prompt_lower for kw in [
+                "mcq", "multiple choice", "multiple-choice"
+            ])
+            wants_casestudy = any(kw in prompt_lower for kw in [
+                "case study", "casestudy", "drag and drop", "ordering", "bowtie", "ngn", "next generation"
+            ])
+            wants_mixed = any(kw in prompt_lower for kw in [
+                "mixed format", "mix of", "combination of"
+            ])
+
+            # Build override set
+            override_types = set(question_types)
+
+            if no_casestudy:
+                override_types.discard("casestudy")
+                print(f"🚫 user_prompt excludes case study — removed from question_types")
+            if no_sata:
+                override_types.discard("sata")
+                print(f"🚫 user_prompt excludes SATA — removed from question_types")
+
+            if wants_sata and not no_sata:
+                override_types.add("sata")
+                print(f"✅ user_prompt requests SATA — added to question_types")
+            if wants_mcq:
+                override_types.add("mcq")
+                print(f"✅ user_prompt requests MCQ — added to question_types")
+            if wants_casestudy and not no_casestudy:
+                override_types.add("casestudy")
+                print(f"✅ user_prompt requests case study — added to question_types")
+            if wants_mixed:
+                if not no_sata:
+                    override_types.add("sata")
+                if not no_casestudy:
+                    override_types.add("casestudy")
+                override_types.add("mcq")
+                print(f"✅ user_prompt requests mixed format — expanded question_types")
+
+            # Only update if the override produced something different
+            new_types = list(override_types) if override_types else ["mcq"]
+            if set(new_types) != set(question_types):
+                print(f"📋 question_types overridden by user_prompt: {question_types} → {new_types}")
+                question_types = new_types
+
         print(f"📋 Question types requested: {question_types}")
 
         # Normalize quiz_mode
@@ -1145,27 +1222,27 @@ async def generate_quiz_stream(
         if normalized_quiz_mode not in ["nclex", "knowledge"]:
             normalized_quiz_mode = "knowledge"
 
-        # IMPORTANT: Check the topic string for explicit knowledge/nclex keywords
-        # This overrides the LLM's choice if the user's original prompt was explicit
-        topic_lower = topic.lower() if topic else ""
+        # Check both the topic string AND the original user_prompt for mode keywords.
+        # The topic is just the extracted subject (e.g. "Liver Functions") and never
+        # contains the user's intent words like "NCLEX-style" or "clinical scenarios".
+        # user_prompt is the verbatim user message and is the authoritative source.
+        search_text = (topic or "").lower() + " " + (user_prompt or "").lower()
 
-        # If topic contains "knowledge test" or similar, force knowledge mode
         knowledge_keywords = ["knowledge test", "factual question", "direct question", "test my knowledge", "not clinical scenarios"]
-        nclex_keywords = ["nclex", "clinical scenario", "patient scenario", "judgment question", "situational"]
+        nclex_keywords = ["nclex", "clinical scenario", "patient scenario", "judgment question", "situational", "clinical judgment"]
 
-        # Check for explicit knowledge request in topic
-        if any(kw in topic_lower for kw in knowledge_keywords):
+        # Knowledge keywords take highest priority (explicit opt-out of clinical scenarios)
+        if any(kw in search_text for kw in knowledge_keywords):
             normalized_quiz_mode = "knowledge"
-            print(f"🎯 Detected knowledge keywords in topic - forcing quiz_mode='knowledge'")
-        # Only use nclex if explicitly requested
-        elif any(kw in topic_lower for kw in nclex_keywords):
+            print(f"🎯 Detected knowledge keywords - forcing quiz_mode='knowledge'")
+        # NCLEX keywords in either topic or user_prompt → use nclex
+        elif any(kw in search_text for kw in nclex_keywords):
             normalized_quiz_mode = "nclex"
-            print(f"🎯 Detected NCLEX keywords in topic - using quiz_mode='nclex'")
-        # Default to knowledge if nothing explicit
-        elif normalized_quiz_mode == "nclex":
-            # LLM chose nclex but user didn't explicitly ask for it - default to knowledge
-            print(f"⚠️ LLM passed quiz_mode='nclex' but no explicit NCLEX request detected - defaulting to 'knowledge'")
-            normalized_quiz_mode = "knowledge"
+            print(f"🎯 Detected NCLEX/clinical keywords - using quiz_mode='nclex'")
+        # If no keywords found in text but LLM passed nclex, trust the LLM — it read
+        # the full user message and the orchestrator only sets nclex when explicitly requested
+        else:
+            print(f"🎮 No override keywords found — using LLM-selected quiz_mode='{normalized_quiz_mode}'")
 
         print(f"🎮 Final quiz mode: {normalized_quiz_mode}")
 
@@ -1183,6 +1260,13 @@ async def generate_quiz_stream(
             "has_empathetic_message": bool(empathetic_message)
         })
 
+        # Normalize learning_objective
+        valid_objectives = {"exam_prep", "weak_areas", "first_review", "deep_dive", "quick_check", "general"}
+        normalized_objective = (learning_objective or "general").lower()
+        if normalized_objective not in valid_objectives:
+            normalized_objective = "general"
+        print(f"🎯 Learning objective: {normalized_objective}")
+
         # Return signal to orchestrator to handle streaming
         return {
             "status": "quiz_streaming_initiated",
@@ -1192,11 +1276,13 @@ async def generate_quiz_stream(
                 "num_questions": num_questions,
                 "source": source,
                 "language": session.user_language,
-                "question_types": question_types,  # Pass question types to orchestrator
-                "quiz_mode": normalized_quiz_mode,  # Pass quiz mode (nclex vs knowledge)
-                "empathetic_message": empathetic_message
+                "question_types": question_types,
+                "quiz_mode": normalized_quiz_mode,
+                "empathetic_message": empathetic_message,
+                "learning_objective": normalized_objective,
+                "user_prompt": user_prompt
             },
-            "message": f"Starting quiz generation: {num_questions} questions on {topic} (mode: {normalized_quiz_mode}, formats: {', '.join(question_types)})"
+            "message": f"Starting quiz generation: {num_questions} questions on {topic} (mode: {normalized_quiz_mode}, objective: {normalized_objective})"
         }
 
     except Exception as e:
@@ -1525,7 +1611,8 @@ async def _generate_single_question(
     questions_to_avoid: list = None,
     target_letter: str = None,
     existing_topics: list = None,
-    quiz_mode: str = "knowledge"
+    quiz_mode: str = "knowledge",
+    learning_objective: str = "general"
 ) -> dict:
     """
     Generate ONE complete quiz question using LLM.
@@ -1533,10 +1620,8 @@ async def _generate_single_question(
 
     Args:
         existing_topics: List of topic names the user already has in their progress.
-                        LLM will try to match to these topics when the question
-                        content fits, reducing topic fragmentation.
-        quiz_mode: "knowledge" for factual recall questions (default),
-                   "nclex" for clinical judgment questions
+        quiz_mode: "knowledge" for factual recall questions, "nclex" for clinical judgment.
+        learning_objective: Why the student is quizzing — shapes question style and distractors.
     """
 
     if questions_to_avoid is None:
@@ -1589,10 +1674,47 @@ async def _generate_single_question(
     else:
         existing_topics_instruction = ""
 
+    # ── Learning-objective instructions injected into both templates ──────
+    objective_style = {
+        "exam_prep": (
+            "EXAM PREP MODE — This student is preparing for a high-stakes exam (NCLEX or similar). "
+            "Make distractors highly plausible — experienced nurses could reasonably choose them. "
+            "Focus on priority-setting, safety, and commonly missed concepts. "
+            "The correct answer must be unambiguous when the student knows the material well."
+        ),
+        "weak_areas": (
+            "WEAK AREAS MODE — This student struggles with this topic. "
+            "Design distractors that target the most common misconceptions. "
+            "The wrong options should be things a confused student would genuinely pick. "
+            "The explanation must clearly address WHY each wrong answer is tempting but incorrect."
+        ),
+        "first_review": (
+            "FIRST REVIEW MODE — This student is learning this topic for the first time. "
+            "Keep the scenario straightforward. Avoid trick questions or ambiguous wording. "
+            "The correct answer should be clearly correct once the student understands the concept. "
+            "Distractors should be wrong for simple, clear reasons."
+        ),
+        "deep_dive": (
+            "DEEP DIVE MODE — This student wants advanced, detailed understanding. "
+            "Test mechanisms, pathophysiology, and nuanced clinical reasoning — not just surface facts. "
+            "Distractors should be sophisticated and require real understanding to reject. "
+            "Avoid basic recall questions."
+        ),
+        "quick_check": (
+            "QUICK CHECK MODE — Keep the question concise and direct. "
+            "Test one clear concept. Avoid long complex scenarios."
+        ),
+        "general": (
+            "Generate a clear, well-constructed question appropriate for a nursing student."
+        ),
+    }
+    learning_objective_instruction = objective_style.get(learning_objective, objective_style["general"])
+
     print(f"\n{'='*60}")
     print(f"Generating Question {question_num}")
     print(f"Target answer position: {target_letter}")
     print(f"Quiz mode: {quiz_mode}")
+    print(f"Learning objective: {learning_objective}")
     print(f"Existing topics available: {len(existing_topics) if existing_topics else 0}")
     print(f"{'='*60}\n")
 
@@ -1611,6 +1733,9 @@ async def _generate_single_question(
 
     Difficulty: {difficulty}
     Question number: {question_num}
+
+    🎯 STUDENT CONTEXT — adapt the question to match:
+    {learning_objective_instruction}
 
     {answer_instruction}
 
@@ -1682,8 +1807,52 @@ async def _generate_single_question(
     - CRITICAL: Write the topic in {language} (same language as the quiz)
     - IF EXISTING TOPICS WERE PROVIDED ABOVE, try to match to one of those first!
 
-    Return ONLY valid JSON (no markdown wrapper):
+    ─────────────────────────────────────────────────────────────
+    STEP-BY-STEP ANALYSIS (complete ALL steps before writing the question):
+    ─────────────────────────────────────────────────────────────
+
+    STEP 1 — IDENTIFY THE CONCEPT
+    What is the single most important testable concept from the content for question #{question_num}?
+    Pick something different from any previously avoided questions.
+
+    STEP 2 — ADAPT TO STUDENT CONTEXT
+    Given the learning objective above, how should this question be adjusted?
+    (e.g., simpler language for first review, trickier distractors for exam prep)
+
+    STEP 3 — PICK THE QUESTION STYLE
+    Choose the best format:
+    • Definition: "What is X?"
+    • Mechanism: "How does X work?"
+    • Value/Range: "What is the normal range for X?"
+    • Classification: "Which category does X belong to?"
+    • Comparison: "What distinguishes X from Y?"
+
+    STEP 4 — DESIGN THE DISTRACTORS
+    List 3 plausible wrong answers and WHY a student might choose each.
+    Each distractor must be a real misconception — not just random wrong facts.
+
+    STEP 5 — VALIDATE
+    ✓ Only ONE answer is factually correct (no "best choice" ambiguity)
+    ✓ Question is answerable from the document content above
+    ✓ No trick wording or double negatives
+    ✓ Difficulty matches: {difficulty}
+
+    ─────────────────────────────────────────────────────────────
+    Now return ONLY valid JSON (no markdown wrapper).
+    The "_reasoning" field MUST come first — fill it out before writing anything else.
+    ─────────────────────────────────────────────────────────────
     {{
+        "_reasoning": {{
+            "concept": "The single concept being tested",
+            "student_context_adjustment": "How the learning objective shaped this question",
+            "question_style": "Which style was chosen and why",
+            "distractors": [
+                "Wrong A: [option] — why a student picks this",
+                "Wrong B: [option] — why a student picks this",
+                "Wrong C: [option] — why a student picks this"
+            ],
+            "validation": "Why the correct answer is unambiguously right"
+        }},
         "question": "Direct factual question in {language}",
         "questionType": "mcq",
         "quizMode": "knowledge",
@@ -1724,6 +1893,9 @@ async def _generate_single_question(
     Difficulty: {difficulty}
     Question number: {question_num}
 
+    🎯 STUDENT CONTEXT — adapt the question style and focus to match:
+    {learning_objective_instruction}
+
     {answer_instruction}
 
     CRITICAL - DO NOT repeat these questions:
@@ -1738,6 +1910,16 @@ async def _generate_single_question(
     - Use realistic nursing scenarios with specific patient details (age, condition, symptoms)
     - Create 4 plausible options (A-D) where ALL options could seem reasonable to a novice
     - The correct answer should be the BEST choice based on evidence-based practice
+
+    VARY your question stems — rotate through these NCLEX-style formats:
+    - "Which action should the nurse take FIRST?"
+    - "Which finding requires IMMEDIATE intervention?"
+    - "The nurse should prioritize which patient?"
+    - "Which nursing intervention is MOST important?"
+    - "What is the PRIORITY assessment for this patient?"
+    - "The nurse is planning care. Which intervention should be included FIRST?"
+    - "Which client statement indicates the teaching was effective?"
+    - "Which task is SAFE to delegate to the unlicensed assistive personnel (UAP)?"
     {existing_topics_instruction}
     TOPIC ASSIGNMENT:
     - Assign a SPECIFIC topic/subject to this question based on what it tests
@@ -1765,8 +1947,60 @@ async def _generate_single_question(
       * "Chapter 5" / "Chapitre 5" (not descriptive)
       * "Various Topics" / "Sujets Divers" (meaningless)
 
-    Return ONLY valid JSON (no markdown wrapper):
+    ─────────────────────────────────────────────────────────────
+    STEP-BY-STEP ANALYSIS (complete ALL steps before writing the question):
+    ─────────────────────────────────────────────────────────────
+
+    STEP 1 — IDENTIFY THE CLINICAL CONCEPT
+    What is the specific clinical judgment being tested for question #{question_num}?
+    (e.g., priority assessment, complication recognition, delegation decision, teaching evaluation)
+    This must be different from previously avoided questions.
+
+    STEP 2 — BUILD THE PATIENT SCENARIO
+    Define the patient:
+    • Age, gender, diagnosis
+    • Presenting signs/symptoms or current clinical status
+    • Relevant vitals, labs, or context that make the scenario specific and realistic
+    A vague scenario = a bad question. Be specific.
+
+    STEP 3 — CHOOSE THE NCLEX STEM
+    Which question stem fits this scenario?
+    • Priority/First action: "Which action should the nurse take FIRST?"
+    • Safety/Urgency: "Which finding requires IMMEDIATE intervention?"
+    • Delegation: "Which task is SAFE to delegate to the UAP?"
+    • Teaching: "Which client statement indicates teaching was effective?"
+    • Priority patient: "The nurse should assess which patient FIRST?"
+    • Planning: "Which intervention should the nurse include in the care plan?"
+
+    STEP 4 — DESIGN CLINICALLY PLAUSIBLE DISTRACTORS
+    Each wrong answer must be something a novice nurse WOULD consider. Ask yourself:
+    "Would a student who partially understands the topic choose this?" If yes → good distractor.
+    Wrong answers must be nursing actions that are real and reasonable — just not the BEST choice.
+
+    STEP 5 — VALIDATE CLINICAL JUDGMENT
+    ✓ The scenario requires thinking, not just recall
+    ✓ The correct answer is defensible with evidence-based practice
+    ✓ All 4 options are plausible — a novice could choose any of them
+    ✓ The justification explains the CLINICAL REASONING behind each option
+    ✓ Difficulty matches: {difficulty}
+
+    ─────────────────────────────────────────────────────────────
+    Now return ONLY valid JSON (no markdown wrapper).
+    The "_reasoning" field MUST come first — fill it out before writing anything else.
+    ─────────────────────────────────────────────────────────────
     {{
+        "_reasoning": {{
+            "clinical_concept": "What clinical judgment skill is being tested",
+            "patient_scenario_plan": "Age, diagnosis, key symptoms/vitals chosen and why",
+            "stem_choice": "Which NCLEX stem was chosen and why it fits",
+            "distractor_logic": [
+                "Wrong A: [option] — why a novice nurse would pick this",
+                "Wrong B: [option] — why a novice nurse would pick this",
+                "Wrong C: [option] — why a novice nurse would pick this"
+            ],
+            "student_context_adjustment": "How the learning objective shaped difficulty and focus",
+            "correct_answer_rationale": "Evidence-based reason the correct answer is the BEST choice"
+        }},
         "question": "Detailed clinical scenario in {language}",
         "questionType": "mcq",
         "quizMode": "nclex",
@@ -1801,7 +2035,8 @@ async def _generate_single_question(
 
     prompt = PromptTemplate(
         input_variables=["content", "topic", "difficulty", "question_num", "language",
-                    "questions_to_avoid", "answer_instruction", "existing_topics_instruction"],
+                    "questions_to_avoid", "answer_instruction", "existing_topics_instruction",
+                    "learning_objective_instruction"],
         template=template_str
     )
 
@@ -1813,13 +2048,14 @@ async def _generate_single_question(
         language=language,
         questions_to_avoid=avoid_text,
         answer_instruction=answer_instruction,
-        existing_topics_instruction=existing_topics_instruction
+        existing_topics_instruction=existing_topics_instruction,
+        learning_objective_instruction=learning_objective_instruction
     )
 
     # Use OpenAI gpt-4.1-nano for quiz generation (cheapest model with reliable JSON output)
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
+    llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.7)
     chain = prompt | llm | StrOutputParser()
-    
+
     try:
         result = await chain.ainvoke({
             "content": content,
@@ -1829,11 +2065,19 @@ async def _generate_single_question(
             "language": language,
             "questions_to_avoid": avoid_text,
             "answer_instruction": answer_instruction,
-            "existing_topics_instruction": existing_topics_instruction
+            "existing_topics_instruction": existing_topics_instruction,
+            "learning_objective_instruction": learning_objective_instruction
         })
         
         cleaned = result.strip().strip("```json").strip("```").strip()
         parsed_question = json.loads(cleaned)
+
+        # Log reasoning for debugging, then strip it — frontend never needs it
+        reasoning = parsed_question.pop("_reasoning", None)
+        if reasoning:
+            print(f"💭 Question {question_num} reasoning:")
+            for k, v in reasoning.items():
+                print(f"   {k}: {v}")
 
         answer = parsed_question.get('answer', '')
         if answer:
@@ -2283,7 +2527,7 @@ Generate your unique, authentic message {language_instruction}:"""
 
     try:
         # Use OpenAI for fast, conversational responses with HIGH temperature for maximum variety
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.95)  # Very high temp for natural variation
+        llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.95)  # Very high temp for natural variation
 
         result = await llm.ainvoke(prompt)
         message = result.content.strip()

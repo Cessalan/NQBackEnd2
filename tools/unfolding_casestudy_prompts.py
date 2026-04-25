@@ -319,7 +319,7 @@ async def generate_unfolding_casestudy(
 
     # Use GPT-4o for complex multi-item generation
     # Temperature 0.7 balances creativity with consistency
-    llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
+    llm = ChatOpenAI(model="gpt-4.1", temperature=0.7)
     chain = prompt | llm | StrOutputParser()
 
     try:

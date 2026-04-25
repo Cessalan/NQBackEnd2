@@ -15,7 +15,7 @@ class StudySheetStreamer:
     
     def __init__(self, session):
         self.session = session
-        self.llm = ChatOpenAI(model="gpt-4o", temperature=0.3)
+        self.llm = ChatOpenAI(model="gpt-4.1", temperature=0.3)
     
     async def stream_study_sheet_generation(self, topic: str, websocket, chat_id: str):
         """Main entry point for study sheet streaming"""

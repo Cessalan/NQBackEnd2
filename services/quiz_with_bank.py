@@ -67,64 +67,85 @@ async def extract_concepts_from_content(
     topic: str,
     num_concepts: int,
     language: str = "english",
-    quiz_mode: str = "knowledge"
+    quiz_mode: str = "knowledge",
+    learning_objective: str = "general"
 ) -> List[str]:
     """
-    Extract distinct, testable concepts from document content.
-
-    This is Step 1 of the concept-first approach:
-    1. Extract N unique concepts from the document
-    2. Generate one question per concept (guarantees no duplicates)
-
-    Args:
-        content: Document content or topic description
-        topic: The main topic being studied
-        num_concepts: Number of concepts to extract
-        language: Language for the concepts
-        quiz_mode: "knowledge" for factual concepts, "nclex" for clinical scenarios
-
-    Returns:
-        List of distinct concept strings
+    Extract distinct, testable concepts from document content, guided by the
+    student's learning objective so the most relevant concepts are selected.
     """
-    llm = ChatOpenAI(
-        model="gpt-4o-mini",
-        temperature=0.7  # Some creativity for diverse concepts
-    )
+    llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.7)
 
-    # Different prompts for knowledge vs NCLEX mode
+    # ── Intent-aware selection instructions ───────────────────────────────
+    objective_instructions = {
+        "exam_prep": (
+            "PRIORITY: Select the highest-yield concepts most frequently tested on NCLEX. "
+            "Focus on: priority/safety topics, commonly confused medications and their side effects, "
+            "critical lab values, emergency nursing interventions, and conditions with high mortality risk. "
+            "Skip minor details — choose what a student MUST know to pass."
+        ),
+        "weak_areas": (
+            "PRIORITY: Select concepts that are notoriously tricky, commonly misunderstood, or "
+            "where students frequently make errors. Focus on: easily confused look-alike/sound-alike drugs, "
+            "conditions with overlapping symptoms, situations that require careful priority judgment, "
+            "and interventions that seem counterintuitive. Choose concepts designed to challenge and build mastery."
+        ),
+        "first_review": (
+            "PRIORITY: Select foundational concepts in a logical learning order — definitions first, "
+            "then mechanisms, then clinical presentation, then management. "
+            "Ensure each concept builds on the previous one. "
+            "Avoid edge cases or advanced complications — focus on core understanding."
+        ),
+        "deep_dive": (
+            "PRIORITY: Select specific, detailed concepts that go beyond surface-level understanding. "
+            "Focus on: pathophysiology mechanisms, pharmacological mechanisms of action, "
+            "nuanced clinical decision-making, complications and their management, "
+            "and evidence-based rationale behind nursing interventions."
+        ),
+        "quick_check": (
+            "PRIORITY: Select the most important, high-impact concepts — the ones a student should "
+            "know cold. Focus on the core essentials only, avoiding peripheral details."
+        ),
+        "general": (
+            "Select a balanced mix of concepts: definitions, mechanisms, clinical presentation, "
+            "nursing interventions, and patient education. Ensure good coverage of the topic."
+        ),
+    }
+    selection_guidance = objective_instructions.get(learning_objective, objective_instructions["general"])
+
     if quiz_mode == "nclex":
-        prompt = f"""You are a nursing education expert. From the following content about "{topic}",
-extract exactly {num_concepts} DISTINCT clinical scenarios or nursing situations that could be tested.
+        prompt = f"""You are a nursing education expert preparing a student for NCLEX.
+From the following content about "{topic}", extract exactly {num_concepts} DISTINCT clinical concepts to test.
+
+{selection_guidance}
 
 Each concept should be:
-- A specific clinical situation (e.g., "Patient with acute MI showing signs of cardiogenic shock")
-- Focused on nursing assessment, intervention, or prioritization
-- Different enough from other concepts to create unique questions
-- Testable with a single question
+- A specific clinical situation (e.g., "Patient with acute liver failure developing hepatic encephalopathy — nursing priority actions")
+- Focused on nursing assessment, prioritization, or intervention
+- Distinct enough from other concepts to produce unique questions
+- Written as a testable scenario seed (not a question itself)
 
 Content:
 {content[:8000]}
 
 Return ONLY a JSON array of {num_concepts} concept strings. No explanations.
-Example format: ["Concept 1 description", "Concept 2 description", ...]
-
 Language: {language}
 """
     else:
-        prompt = f"""You are an education expert. From the following content about "{topic}",
-extract exactly {num_concepts} DISTINCT factual concepts that could be tested.
+        prompt = f"""You are a nursing education expert.
+From the following content about "{topic}", extract exactly {num_concepts} DISTINCT factual concepts to test.
+
+{selection_guidance}
 
 Each concept should be:
-- A specific, testable fact or principle (e.g., "The normal range for adult heart rate")
-- Different enough from other concepts to create unique questions
+- A specific, testable fact or principle (e.g., "The normal range for serum ammonia in liver failure")
+- Distinct enough from other concepts to produce unique questions
 - Clear and focused on one idea
 
 Content:
 {content[:8000]}
 
 Return ONLY a JSON array of {num_concepts} concept strings. No explanations.
-Example format: ["Concept 1 description", "Concept 2 description", ...]
-
 Language: {language}
 """
 
@@ -170,7 +191,9 @@ async def stream_quiz_with_bank(
     chat_id: str = None,
     question_types: List[str] = None,
     existing_topics: List[str] = None,
-    quiz_mode: str = "knowledge"
+    quiz_mode: str = "knowledge",
+    learning_objective: str = "general",
+    user_prompt: str = None
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Generate quiz questions using Question Bank first, then LLM for the rest.
@@ -309,37 +332,14 @@ async def stream_quiz_with_bank(
     # For single-type quizzes, we query for that specific type
     primary_question_type = question_types[0] if question_types else "mcq"
 
-    # IMPORTANT: Skip question bank for "knowledge" mode
-    # The bank contains mostly NCLEX-style questions (clinical scenarios),
-    # so we need to generate fresh questions for knowledge mode (factual questions)
-    if quiz_mode == "knowledge":
-        logger.info(
-            f"Skipping Question Bank for quiz_mode='knowledge' - generating fresh factual questions"
-        )
-        print(f"🎯 [QUIZ_WITH_BANK] Skipping bank for knowledge mode - will generate all {num_questions} questions")
-        bank_questions = []
-        from_bank_count = 0
-    else:
-        
-        print(f"Looking in the Bank for Questions!")
-        logger.info(
-            f"Checking Question Bank: topic='{topic}', lang='{language}', "
-            f"diff='{difficulty}', count={num_questions}, qtype='{primary_question_type}'"
-        )
-
-        try:
-            bank_questions, from_bank_count = await question_bank.get_questions(
-                topic=topic,
-                language=language,
-                difficulty=difficulty,
-                count=num_questions,
-                exclude_ids=exclude_ids,
-                question_type=primary_question_type  # Pass question type for filtering
-            )
-        except Exception as e:
-            logger.error(f"Error getting questions from bank: {e}")
-            bank_questions = []
-            from_bank_count = 0
+    # Always generate fresh questions — the question bank is bypassed entirely.
+    # Bank questions can be topically wrong (category fallback returns off-topic
+    # results) and can't honour the user's specific prompt constraints (quiz_mode,
+    # question style, etc.). All questions are generated by the LLM.
+    logger.info(f"Skipping Question Bank — generating all {num_questions} questions fresh via LLM")
+    print(f"🎯 [QUIZ_WITH_BANK] Bank bypassed — generating all {num_questions} questions from scratch")
+    bank_questions = []
+    from_bank_count = 0
 
     # Calculate how many we still need to generate
     questions_to_generate = num_questions - from_bank_count
@@ -419,7 +419,8 @@ async def stream_quiz_with_bank(
             topic=topic,
             num_concepts=questions_to_generate,
             language=session.user_language or "english",
-            quiz_mode=quiz_mode
+            quiz_mode=quiz_mode,
+            learning_objective=learning_objective
         )
 
         if not concepts:
@@ -498,7 +499,8 @@ async def stream_quiz_with_bank(
                         questions_to_avoid=[],
                         target_letter=random_target_letter,
                         existing_topics=existing_topics,
-                        quiz_mode=quiz_mode
+                        quiz_mode=quiz_mode,
+                        learning_objective=learning_objective
                     )
 
                     if question_data and 'questionType' not in question_data:

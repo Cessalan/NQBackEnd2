@@ -166,7 +166,7 @@ Key concepts:
 
     def _generate_with_openai(self, prompt: str) -> str:
         """Fallback generator using OpenAI ChatGPT."""
-        model = os.getenv("OPENAI_STUDY_SHEET_MODEL", "gpt-4o-mini")
+        model = os.getenv("OPENAI_STUDY_SHEET_MODEL", "gpt-4.1-mini")
         response = self.openai_client.chat.completions.create(
             model=model,
             max_completion_tokens=8000,
@@ -177,7 +177,7 @@ Key concepts:
 
     async def _stream_with_openai(self, prompt: str):
         """Stream study sheet content from OpenAI."""
-        model = os.getenv("OPENAI_STUDY_SHEET_MODEL", "gpt-4o-mini")
+        model = os.getenv("OPENAI_STUDY_SHEET_MODEL", "gpt-4.1-mini")
         response = self.openai_client.chat.completions.create(
             model=model,
             temperature=0.3,

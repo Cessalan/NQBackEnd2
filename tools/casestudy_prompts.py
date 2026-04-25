@@ -242,7 +242,7 @@ async def generate_casestudy_question(
     )
 
     # Use GPT-4o for high-quality clinical scenarios
-    llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
+    llm = ChatOpenAI(model="gpt-4.1", temperature=0.7)
     chain = prompt | llm | StrOutputParser()
 
     try:

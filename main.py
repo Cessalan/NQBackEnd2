@@ -249,9 +249,9 @@ SESSION_LAST_ACTIVITY: Dict[str, float] = {}  # Track last activity time for eac
 # ============================================================================
 # COST OPTIMIZATION: Session cleanup configuration
 # ============================================================================
-SESSION_IDLE_TIMEOUT = 60   # 1 minute - enough for rapid interactions
-CONNECTION_IDLE_TIMEOUT = 60   # 1 minute - WebSocket idle timeout (not per-message)
-SESSION_MAX_AGE = 600  # 10 minutes - max session lifetime regardless of activity
+SESSION_IDLE_TIMEOUT = 120  # 2 minutes - enough for rapid interactions
+CONNECTION_IDLE_TIMEOUT = 120  # 2 minutes - WebSocket idle timeout (not per-message)
+SESSION_MAX_AGE = 900  # 15 minutes - max session lifetime regardless of activity
 
 import time
 
@@ -1599,7 +1599,7 @@ async def upload_multiple_files(
                         unique_doc_types = list(set(all_doc_types))
                         
                         # Generate summary with LLM
-                        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.5)
+                        llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.5)
                         
                         
                         summary_prompt = f"""Generate a brief 1-2 sentence summary about what these uploaded documents contain.
@@ -1967,7 +1967,7 @@ async def extract_file_insights_from_text(
         prompt_language = _language_for_prompt(language)
 
         # Use GPT-4o-mini for fast, cheap analysis                
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
+        llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.3)
         
         # Determine response language
         prompt = f"""Analyze this document and identify its CORE PURPOSE in {prompt_language}.
@@ -2471,7 +2471,7 @@ async def create_plan(request: PlanRequest):
         """
         # This creates an LLM instance
         llm = ChatOpenAI(
-            model="gpt-4o",           # Larger context for richer plans
+            model="gpt-4.1",           # Larger context for richer plans
             temperature=0.3
         )
         
@@ -2536,7 +2536,7 @@ async def generate_section(request: SectionRequest):
     print("GENERATING SECTION BASED ON",request)
     
     try:
-        llm = ChatOpenAI(model="gpt-4o", temperature=0.3)    
+        llm = ChatOpenAI(model="gpt-4.1", temperature=0.3)    
         prompt = f"""
         You are creating educational content for a study guide.
 
@@ -2675,7 +2675,7 @@ async def generate_study_plan(request: StudyPlanRequest):
             print(f"📄 Retrieved {len(docs)} document chunks for topic extraction")
 
         # Extract CORE topics from the actual document
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
+        llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.3)
         prompt_language = _language_for_prompt(request.language)
 
         topic_extraction_prompt = f"""Analyze this document and extract the 3-5 MAIN TOPICS that the student needs to learn.
@@ -2893,7 +2893,7 @@ async def generate_diagnostic_quiz(request: DiagnosticQuizRequest):
         if not context_str:
             raise HTTPException(status_code=400, detail="No document content found for this session.")
 
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
+        llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.3)
 
         prompt = f"""You are a diagnostic test generator. Generate exactly 5 multiple-choice questions to assess a student's baseline knowledge before they start studying.
 
@@ -3036,7 +3036,7 @@ async def generate_review_plan(request: StudyReviewPlanRequest):
         # STEP 4: Generate review path with LLM
         # ------------------------------------------
         prompt_language = _language_for_prompt(request.language)
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
+        llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.3)
 
         review_prompt = f"""Create a REVIEW study path for a student who just completed their first study round.
 
@@ -3165,7 +3165,7 @@ async def generate_study_item(request: StudyItemRequest):
 
         elif request.node_type == "audio":
             # Audio config generation (actual audio generated separately)
-            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.6)
+            llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.6)
             prompt_language = _language_for_prompt(request.language)
 
             # Get context for audio config
@@ -3304,7 +3304,7 @@ async def generate_study_item_stream(request: StudyItemRequest):
             elif request.node_type == "audio":
                 yield f"data: {json.dumps({'status': 'generating', 'message': 'Preparing audio config...'})}\n\n"
 
-                llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.6)
+                llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.6)
                 prompt_language = _language_for_prompt(request.language)
                 context = ""
                 if session.vectorstore:
@@ -3842,7 +3842,7 @@ async def _generate_lesson_with_context(
         context = "NO DOCUMENT CONTENT AVAILABLE"
 
     # Generate lesson with proper context
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.5)  # Lower temp for accuracy
+    llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.5)  # Lower temp for accuracy
     prompt_language = _language_for_prompt(language)
 
     prompt = f"""Create a MULTI-PAGE lesson about: {topic}

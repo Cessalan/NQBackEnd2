@@ -20,6 +20,9 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Ensure WebSocket support is installed regardless of requirements.txt encoding issues
+RUN pip install --no-cache-dir "uvicorn[standard]==0.34.0" websockets
+
 # Copy application code
 COPY . .
 

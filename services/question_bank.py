@@ -182,23 +182,12 @@ class QuestionBankService:
         # Build the composite query key for topic-based lookup
         query_key = build_query_key(language, difficulty, topic)
 
-        # Strategy 1: Try exact topic match
+        # Exact topic match only.
+        # We intentionally do NOT fall back to NCLEX category — a category-level
+        # fallback returns topically wrong questions (e.g. BPH questions for a
+        # liver-failure quiz), which is worse than generating fresh ones via LLM.
+        # If the bank has no exact match, return 0 and let the LLM generate all.
         questions = await self._query_by_key("ldt", query_key, count * 2, exclude_set, question_type)
-
-        # Strategy 2: If not enough, try NCLEX category fallback
-        if len(questions) < count:
-            # Get IDs we already have to avoid duplicates
-            existing_ids = {q["id"] for q in questions}
-            exclude_set.update(existing_ids)
-
-            # Build category-based query key
-            category_key = build_category_key(language, difficulty, topic)
-
-            # Get more questions from same NCLEX category
-            additional = await self._query_by_key(
-                "ldc", category_key, count * 2, exclude_set, question_type
-            )
-            questions.extend(additional)
 
         # Shuffle to avoid predictable ordering
         random.shuffle(questions)
@@ -210,6 +199,7 @@ class QuestionBankService:
         logger.info(
             f"Question bank: Retrieved {from_bank_count}/{count} for topic='{topic}', "
             f"lang='{language}', diff='{difficulty}', qtype='{question_type}'"
+            + (" (exact match)" if from_bank_count > 0 else " (no match — LLM will generate all)")
         )
 
         return final_questions, from_bank_count
@@ -291,6 +281,13 @@ class QuestionBankService:
         # Calculate correct answer index for frontend (MCQ only)
         options = data.get("opts", [])
         answer = data.get("ans", "")
+
+        # Self-heal: if the stored qtype says "mcq" but the answer is actually
+        # an array, the question was mis-tagged in the bank — treat it as sata
+        # so the frontend renders it with the correct component.
+        if question_type == "mcq" and isinstance(answer, list):
+            question_type = "sata"
+            logger.warning(f"Bank doc {doc.id}: qtype='mcq' but answer is list — correcting to 'sata'")
 
         # For MCQ, calculate correct index
         correct_index = 0

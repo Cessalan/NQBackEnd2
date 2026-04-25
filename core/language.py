@@ -3,7 +3,7 @@ import os
 
 class LanguageDetector:
     """
-    Reliable language detection using gpt-4o-mini.
+    Reliable language detection using gpt-4.1-mini.
     Cost: ~$0.000015 per detection (still nearly free).
     """
     
@@ -74,7 +74,7 @@ class LanguageDetector:
                 prompt = f"What language is this text in? Text: {text}"
 
             response = await client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-4.1-mini",
                 messages=[
                     {
                         "role": "system",
