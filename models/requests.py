@@ -110,6 +110,34 @@ class StudyReviewPlanRequest(BaseModel):
     original_topics: Optional[List[str]] = []  # Topics from phase 1 for context
 
 
+class StudyExamRequest(BaseModel):
+    """
+    Generate a mixed-format exam for a study session.
+    Supports MCQ, SATA, and Case Study question types.
+    """
+    chat_id: str
+    topic: str                                     # Topic this exam covers
+    question_types: List[str] = ["mcq", "sata", "casestudy"]
+    question_count: int = 10
+    custom_instructions: Optional[str] = None      # Student's custom instructions
+    language: str = "en"
+
+
+class StudyInterpretRequest(BaseModel):
+    """
+    Interpret a student's free-text request during a study session.
+    Returns an echo message (what the system understood) and a node definition.
+    The student confirms before the node is created.
+    """
+    chat_id: str
+    user_text: str                                # What the student typed
+    current_topic: str = ""                       # Topic of the node she just completed
+    current_node_type: str = ""                   # Type of the node she just completed
+    language: str = "en"
+    missed_items: Optional[List[str]] = []        # Specific questions/cards she got wrong
+    score_percent: Optional[int] = None           # Her score on the node she just completed
+
+
 class StudyMindmapRequest(BaseModel):
     """Request to generate a concept map for a study node"""
     chat_id: str

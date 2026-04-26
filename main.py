@@ -2607,7 +2607,7 @@ async def generate_section(request: SectionRequest):
 # Duolingo-style learning path generation (NOT USED FOR CHATINTERFACE, IT IS FOR STUDY PLAN VERY SEPARATE)
 # ============================================================================
 
-from models.requests import StudyPlanRequest, StudyItemRequest, StudyAudioRequest, StudyReviewPlanRequest, DiagnosticQuizRequest, StudyMindmapRequest
+from models.requests import StudyPlanRequest, StudyItemRequest, StudyAudioRequest, StudyReviewPlanRequest, DiagnosticQuizRequest, StudyMindmapRequest, StudyInterpretRequest, StudyExamRequest
 import hashlib
 
 @app.post("/study/plan")
@@ -2827,6 +2827,62 @@ IMPORTANT:
         print(f"✅ Generated study path with {len(nodes)} nodes")
         for node in nodes:
             print(f"   - {node['type']}: {node['label']}")
+
+        # ------------------------------------------
+        # STEP 5b: Insert exam nodes at the end of each topic section
+        # Detect topic boundaries by checking node tags/labels,
+        # then insert an "exam" node after each group.
+        # ------------------------------------------
+        nodes_with_exams = []
+        current_topic = None
+        exam_counter = 0
+
+        for i, node in enumerate(nodes):
+            # Determine this node's topic from the label (strip suffixes like " - Quiz", " - Listen")
+            node_topic = node.get("label", "")
+            for t in unique_topics:
+                if t.lower() in node_topic.lower():
+                    node_topic = t
+                    break
+
+            # Check if the NEXT node belongs to a different topic (or this is the last node)
+            next_topic = None
+            if i + 1 < len(nodes):
+                next_label = nodes[i + 1].get("label", "")
+                for t in unique_topics:
+                    if t.lower() in next_label.lower():
+                        next_topic = t
+                        break
+
+            nodes_with_exams.append(node)
+
+            # If topic changes or this is the last node → insert exam
+            is_last = (i == len(nodes) - 1)
+            topic_changes = (next_topic and node_topic and next_topic != node_topic)
+
+            if is_last or topic_changes:
+                exam_counter += 1
+                exam_label = node_topic if node_topic in unique_topics else (current_topic or "Review")
+                exam_node = {
+                    "id": f"exam_{exam_counter}",
+                    "type": "exam",
+                    "label": exam_label,
+                    "tags": ["exam", "mixed_types"],
+                    "difficulty": 2,
+                    "status": "locked"
+                }
+                nodes_with_exams.append(exam_node)
+                print(f"   📝 Inserted exam node after topic: {exam_label}")
+
+            current_topic = node_topic
+
+        nodes = nodes_with_exams
+
+        # Re-apply status after insertion (first node active, rest locked)
+        for i, node in enumerate(nodes):
+            node["status"] = "available" if i == 0 else "locked"
+
+        print(f"✅ Final study path with {len(nodes)} nodes (including exams)")
 
         # ------------------------------------------
         # STEP 6: Return the study path
@@ -3102,6 +3158,209 @@ Return ONLY valid JSON array in {prompt_language}:
 
     except Exception as e:
         print(f"❌ Review path generation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/study/interpret-request")
+async def interpret_study_request(request: StudyInterpretRequest):
+    """
+    Interpret a student's free-text request and return:
+    1. An echo message confirming what the system understood
+    2. A node definition that can be inserted into the path
+
+    Bounded scope: difficulty, format, focus, or skip.
+    Rejects clinical advice or out-of-scope requests with a warm redirect.
+    """
+    print(f"\n{'='*60}")
+    print(f"💬 INTERPRET STUDENT REQUEST - chat_id: {request.chat_id}")
+    print(f"   Text: {request.user_text}")
+    print(f"   Context: {request.current_node_type} on {request.current_topic}")
+    print(f"{'='*60}")
+
+    try:
+        llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.3)
+        prompt_language = _language_for_prompt(request.language)
+
+        # Build performance context if available
+        perf_context = ""
+        if request.score_percent is not None:
+            perf_context += f"\nHer score: {request.score_percent}%"
+        if request.missed_items:
+            missed_list = "\n".join(f"  - {item}" for item in request.missed_items[:5])
+            perf_context += f"\nSpecific questions/concepts she got wrong:\n{missed_list}"
+
+        interpret_prompt = f"""You are an AI study coach for a nursing student. She just completed a {request.current_node_type} on "{request.current_topic}" and typed this request:
+
+"{request.user_text}"
+{perf_context}
+
+Your job: interpret her request and return THE BEST study node to help her.
+
+IMPORTANT INTERPRETATION RULES:
+- "explain what I missed" / "review my mistakes" / "what did I get wrong" → Create a LESSON that explains the specific concepts she missed (listed above). NOT a quiz.
+- "make it harder" → Create a harder quiz or flashcard on the same topic
+- "flashcards" / "just flashcards" → Create flashcards on the topic
+- "quiz me" → Create a quiz
+- "go deeper" / "explain more" → Create a detailed lesson
+- "skip ahead" → She wants to move to the next topic entirely
+- If she asks about something specific ("focus on side effects"), create content on that subtopic
+
+MATCH FORMAT TO INTENT:
+- Explaining, reviewing, teaching → "lesson"
+- Drilling, practicing, testing → "quiz" or "flashcard"
+- Listening → "audio"
+- Visualizing connections → "mindmap"
+
+OUT OF SCOPE (warm redirect):
+- Clinical advice, treatment questions, patient scenarios
+- Anything not about studying for her exam
+
+NODE TYPES you can return:
+- "lesson": A reading lesson explaining concepts (USE THIS when she wants explanations of what she missed)
+- "flashcard": Flashcard set (12 cards)
+- "quiz": Quiz questions (12 questions)
+- "audio": Audio lesson
+- "mindmap": Visual concept map
+
+Return ONLY valid JSON in {prompt_language}:
+{{
+    "understood": true,
+    "echo": "A short, warm confirmation written TO the student in {prompt_language}. Reference what she specifically missed if relevant. e.g. 'I'll break down the tetanus immunization and LMNOP concepts you missed — let's clear those up.'",
+    "node": {{
+        "type": "lesson",
+        "label": "Specific topic label in {prompt_language}",
+        "tags": ["relevant", "tags"],
+        "difficulty": 1
+    }}
+}}
+
+If the request is out of scope, return:
+{{
+    "understood": false,
+    "echo": "A warm redirect in {prompt_language}. e.g. 'I can help with study materials! Try asking for a quiz, flashcards, or a lesson on a specific topic.'",
+    "node": null
+}}"""
+
+        response = await llm.ainvoke([{"role": "user", "content": interpret_prompt}])
+
+        result_json = response.content.strip()
+        if result_json.startswith("```"):
+            result_json = result_json.split("```")[1]
+            if result_json.startswith("json"):
+                result_json = result_json[4:]
+            result_json = result_json.strip()
+
+        result = json.loads(result_json)
+
+        print(f"✅ Interpreted request: understood={result.get('understood')}")
+        print(f"   Echo: {result.get('echo')}")
+        if result.get('node'):
+            print(f"   Node: {result['node'].get('type')} - {result['node'].get('label')}")
+
+        return result
+
+    except Exception as e:
+        print(f"❌ Interpret request failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/study/generate-exam")
+async def generate_study_exam(request: StudyExamRequest):
+    """
+    Generate a mixed-format NCLEX-style exam for a study session.
+    Reuses the existing quiz generation infrastructure with question_types support.
+
+    Returns questions with questionType field so the frontend routes to the
+    correct renderer (MCQ, SATA, CaseStudy).
+    """
+    print(f"\n{'='*60}")
+    print(f"📝 EXAM GENERATION - chat_id: {request.chat_id}")
+    print(f"   Topic: {request.topic}")
+    print(f"   Types: {request.question_types}")
+    print(f"   Count: {request.question_count}")
+    print(f"   Custom: {request.custom_instructions or 'none'}")
+    print(f"{'='*60}")
+
+    try:
+        session = await _setup_study_session(request.chat_id, request.language)
+        source = "documents" if session.documents and session.vectorstore else "scratch"
+
+        # Build the topic string — include custom instructions if provided
+        exam_topic = request.topic
+        if request.custom_instructions:
+            exam_topic = f"{request.topic}. Student instructions: {request.custom_instructions}"
+
+        questions = []
+        async for chunk in stream_quiz_with_bank(
+            topic=exam_topic,
+            difficulty="medium",
+            num_questions=request.question_count,
+            source=source,
+            session=session,
+            chat_id=session.chat_id,
+            question_types=request.question_types,
+            quiz_mode="knowledge"
+        ):
+            if chunk.get("status") == "question_ready":
+                question = chunk.get("question")
+                if question:
+                    q_type = question.get('questionType', 'mcq')
+
+                    if q_type == 'mcq':
+                        answer = question.get('answer', 'A)')
+                        answer_letter = answer[0] if answer else 'A'
+                        correct_index = ord(answer_letter) - ord('A')
+                        questions.append({
+                            "questionType": "mcq",
+                            "question": question.get('question', ''),
+                            "options": question.get('options', []),
+                            "correctIndex": correct_index,
+                            "rationale": question.get('justification', ''),
+                            "topic": question.get('topic', request.topic)
+                        })
+                    elif q_type == 'sata':
+                        questions.append({
+                            **question,
+                            "questionType": "sata",
+                            "topic": question.get('topic', request.topic)
+                        })
+                    elif q_type == 'casestudy':
+                        questions.append({
+                            **question,
+                            "questionType": "casestudy",
+                            "topic": question.get('topic', request.topic)
+                        })
+                    else:
+                        questions.append({
+                            **question,
+                            "topic": question.get('topic', request.topic)
+                        })
+
+        content_hash = hashlib.md5(json.dumps(questions, sort_keys=True, default=str).encode()).hexdigest()[:12]
+
+        print(f"✅ Generated exam with {len(questions)} questions")
+        type_counts = {}
+        for q in questions:
+            qt = q.get('questionType', 'mcq')
+            type_counts[qt] = type_counts.get(qt, 0) + 1
+        print(f"   Distribution: {type_counts}")
+
+        return {
+            "questions": questions,
+            "hash": content_hash,
+            "examConfig": {
+                "questionTypes": request.question_types,
+                "questionCount": request.question_count,
+                "customInstructions": request.custom_instructions
+            }
+        }
+
+    except Exception as e:
+        print(f"❌ Exam generation failed: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
