@@ -53,26 +53,24 @@ Context:
 📋 CASE STUDY QUESTION REQUIREMENTS:
 
 1. **Clinical Scenario (caseStudy object):**
-   Create a realistic patient scenario with THREE tabs of clinical data:
+   Create a realistic scenario. Include ONLY the tabs that are relevant to the topic:
 
-   - **nursesNotes**: Narrative assessment from the nurse. Include:
-     * Patient demographics (age, gender)
-     * Chief complaint / reason for visit
-     * Relevant medical history
-     * Current symptoms and observations
-     * Recent events leading to admission
-     Use HTML formatting (<p>, <strong>, timestamps like "1400:")
+   - **nursesNotes** (ALWAYS REQUIRED): Narrative from the nurse's perspective.
+     For CLINICAL topics (patient care, medications, procedures): include patient demographics, chief complaint, medical history, current symptoms, observations, recent events.
+     For NON-CLINICAL topics (conflict management, delegation, communication, ethics, leadership, professionalism, interdisciplinary collaboration, patient education): describe the workplace situation, the people involved, relevant context, and the challenge at hand — written as a scenario narrative.
+     Use HTML formatting (<p>, <strong>, timestamps or section headers)
 
-   - **vitalSigns**: Present as an HTML table with current and previous readings:
-     * Temperature, Heart Rate, Blood Pressure, Respiratory Rate, SpO2
-     * Include at least 2 time points for comparison
-     Use <table><tr><th>/<td> tags
+   - **vitalSigns** (OPTIONAL — ONLY if clinically relevant): Include ONLY when the scenario involves a patient with a medical condition where vital signs directly inform nursing decisions.
+     Present as HTML table with current and previous readings (Temperature, HR, BP, RR, SpO2). Include at least 2 time points.
+     Use <table><tr><th>/<td> tags.
+     ⚠️ OMIT this tab entirely for topics like conflict resolution, delegation, communication, ethics, leadership, professionalism, or other non-clinical scenarios. Do NOT fabricate vital signs.
 
-   - **labResults**: Present as an HTML table with:
-     * Relevant lab values for the condition
-     * Normal reference ranges
-     * Flag abnormal values with context
-     Use <table><tr><th>/<td> tags
+   - **labResults** (OPTIONAL — ONLY if clinically relevant): Include ONLY when lab values are meaningful to the clinical decision-making in the scenario.
+     Present as HTML table with results and reference ranges. Flag abnormal values.
+     Use <table><tr><th>/<td> tags.
+     ⚠️ OMIT this tab entirely for non-clinical scenarios. Do NOT fabricate lab results.
+
+   IMPORTANT: The caseStudy object must ONLY contain keys for tabs you actually include. Do NOT include keys with empty or placeholder values. If only nursesNotes is relevant, the caseStudy object should have only that one key.
 
 2. **Question (ordering task):**
    - Ask students to prioritize or sequence nursing actions
@@ -137,6 +135,38 @@ Context:
     }}
 }}
 
+NOTE: The example above shows a CLINICAL scenario with all three tabs. For NON-CLINICAL topics (ethics, delegation, communication, leadership, conflict management), the caseStudy object should contain ONLY "nursesNotes":
+{{
+    "question": "Placez les actions infirmières suivantes dans l'ordre de priorité lors d'une rencontre interdisciplinaire avec un nouvel usager.",
+    "questionType": "casestudy",
+    "caseStudy": {{
+        "nursesNotes": "<p><strong>Situation :</strong> Une infirmière de l'unité de médecine reçoit un nouvel usager transféré d'un autre établissement. L'équipe interdisciplinaire (médecin, travailleur social, physiothérapeute) se réunit pour planifier le plan d'intervention. L'infirmière doit coordonner la rencontre et s'assurer que toutes les préoccupations sont adressées.</p><p><strong>Contexte :</strong> L'usager est accompagné de sa famille qui exprime des inquiétudes. Le médecin est pressé et souhaite procéder rapidement.</p>"
+    }},
+    "options": [
+        {{"id": "item2", "text": "Demander à chaque intervenant de se présenter et de préciser son champ d'expertise"}},
+        {{"id": "item4", "text": "Valider si l'usager ou sa famille a des questions ou des préoccupations"}},
+        {{"id": "item1", "text": "Présenter brièvement son rôle et expliquer le but de la rencontre à l'usager et sa famille"}},
+        {{"id": "item3", "text": "Partager les informations pertinentes concernant la situation clinique de l'usager selon sa profession"}}
+    ],
+    "correctOrder": [
+        {{"id": "item1", "text": "Présenter brièvement son rôle et expliquer le but de la rencontre à l'usager et sa famille"}},
+        {{"id": "item2", "text": "Demander à chaque intervenant de se présenter et de préciser son champ d'expertise"}},
+        {{"id": "item3", "text": "Partager les informations pertinentes concernant la situation clinique de l'usager selon sa profession"}},
+        {{"id": "item4", "text": "Valider si l'usager ou sa famille a des questions ou des préoccupations"}}
+    ],
+    "justification": "<strong>Ordre de priorité :</strong><br><br><strong>1. Se présenter et expliquer le but</strong> — Établir un climat de confiance dès le départ.<br><strong>2. Présentation des intervenants</strong> — L'usager doit savoir qui participe.<br><strong>3. Partage d'informations</strong> — Chaque professionnel apporte son expertise.<br><strong>4. Valider les questions</strong> — S'assurer que l'usager et la famille se sentent entendus.",
+    "topic": "Rencontre interdisciplinaire",
+    "scoringType": "partial",
+    "metadata": {{
+        "sourceLanguage": "{language}",
+        "questionType": "casestudy",
+        "category": "nursing",
+        "difficulty": "{difficulty}",
+        "numItems": {num_items},
+        "sourceDocument": "conversational_generation"
+    }}
+}}
+
 📌 Critical Rules:
 1. The "questionType" field MUST be "casestudy"
 2. The "options" array must have items in SCRAMBLED order
@@ -146,6 +176,7 @@ Context:
 6. Write everything in {language}
 7. Use realistic clinical values and scenarios
 8. Follow evidence-based nursing prioritization (ABCs, Maslow's, safety first)
+9. Only include vitalSigns and labResults when they contain clinically meaningful data relevant to the scenario. nursesNotes is ALWAYS required. Do NOT fabricate clinical data for non-clinical topics.
 """
 
 
@@ -264,6 +295,13 @@ async def generate_casestudy_question(
         if 'caseStudy' not in parsed_question:
             raise ValueError("Missing caseStudy field")
 
+        # Clean up empty optional tabs from caseStudy
+        case_study_obj = parsed_question.get('caseStudy', {})
+        for optional_key in ['vitalSigns', 'labResults']:
+            val = case_study_obj.get(optional_key)
+            if val is not None and (not val or (isinstance(val, str) and not val.strip())):
+                del case_study_obj[optional_key]
+
         if not isinstance(parsed_question.get('options'), list):
             raise ValueError("options must be a list")
 
@@ -339,12 +377,15 @@ def validate_casestudy_question(question: dict) -> tuple:
     if question.get('questionType') != 'casestudy':
         errors.append(f"questionType must be 'casestudy', got: {question.get('questionType')}")
 
-    # Check caseStudy has required tabs
+    # Check caseStudy tabs — nursesNotes is always required, others are optional
     case_study = question.get('caseStudy', {})
-    required_tabs = ['nursesNotes', 'vitalSigns', 'labResults']
-    for tab in required_tabs:
-        if tab not in case_study or not case_study[tab]:
-            errors.append(f"caseStudy missing or empty tab: {tab}")
+    if 'nursesNotes' not in case_study or not case_study['nursesNotes']:
+        errors.append("caseStudy missing or empty required tab: nursesNotes")
+
+    # Optional tabs: if present, they must not be empty
+    for optional_tab in ['vitalSigns', 'labResults']:
+        if optional_tab in case_study and not case_study[optional_tab]:
+            errors.append(f"caseStudy tab '{optional_tab}' is present but empty — either populate it or remove the key")
 
     # Check options is a list with 4-6 items
     options = question.get('options', [])
