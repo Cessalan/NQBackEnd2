@@ -14,3 +14,6 @@ class ChatResponse(BaseModel):
 
 class GenerateTitleResponse(BaseModel):
     title: str
+
+class RewriteResponse(BaseModel):
+    rewritten: str

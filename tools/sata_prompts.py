@@ -70,7 +70,9 @@ Context:
 
 4. **Justification Format:**
    - Explain why EACH option is correct or incorrect
-   - Use <strong>bold</strong> for option labels
+   - Use <b>...</b> for option-label headers like "A, C, and D are correct" (visual emphasis only, NOT clickable)
+   - Use <strong>...</strong> ONLY for medical terminology — drugs, conditions, signs, labs, anatomy, procedures (e.g. <strong>hypoglycemia</strong>, <strong>diaphoresis</strong>, <strong>tachycardia</strong>). Each <strong> term in the rendered UI becomes a tappable popover, so wrap the noun phrase only — never an option label, generic word, or full sentence.
+   - Aim for 2–5 <strong> medical terms across the full justification.
    - Be concise but clinically accurate
 
 🎯 TOPIC ASSIGNMENT:
@@ -91,7 +93,7 @@ Context:
         "F) Pallor"
     ],
     "answer": ["A) Tremors and shakiness", "C) Diaphoresis", "D) Confusion and irritability", "F) Pallor"],
-    "justification": "<strong>A, C, D, and F are correct.</strong> Hypoglycemia triggers the sympathetic nervous system, causing tremors, diaphoresis (sweating), and pallor due to peripheral vasoconstriction. Neuroglycopenic symptoms include confusion and irritability as the brain is deprived of glucose.<br><br><strong>B (Bradycardia) is incorrect</strong> because hypoglycemia causes tachycardia, not bradycardia, due to catecholamine release.<br><br><strong>E (Hypertension) is incorrect</strong> because while some blood pressure elevation may occur, it is not a classic or reliable sign of hypoglycemia.",
+    "justification": "<b>A, C, D, and F are correct.</b> <strong>Hypoglycemia</strong> triggers the <strong>sympathetic nervous system</strong>, causing tremors, <strong>diaphoresis</strong>, and <strong>pallor</strong> due to peripheral vasoconstriction. <strong>Neuroglycopenic symptoms</strong> include confusion and irritability as the brain is deprived of glucose.<br><br><b>B (Bradycardia) is incorrect</b> because <strong>hypoglycemia</strong> causes <strong>tachycardia</strong>, not <strong>bradycardia</strong>, due to <strong>catecholamine</strong> release.<br><br><b>E (Hypertension) is incorrect</b> because while some blood pressure elevation may occur, it is not a classic or reliable sign of <strong>hypoglycemia</strong>.",
     "topic": "Signs of Hypoglycemia",
     "scoringType": "partial",
     "metadata": {{
@@ -167,7 +169,9 @@ SATA KNOWLEDGE QUESTION REQUIREMENTS:
 
 4. **Justification Format:**
    - Explain why EACH option is correct or incorrect with factual reasoning
-   - Use <strong>bold</strong> for option labels
+   - Use <b>...</b> for option-label headers like "A, C, and D are correct" (visual emphasis only, NOT clickable)
+   - Use <strong>...</strong> ONLY for medical terminology — drugs, conditions, signs, labs, anatomy, procedures (e.g. <strong>hypoglycemia</strong>, <strong>diaphoresis</strong>). Each <strong> term in the rendered UI becomes a tappable popover, so wrap the noun phrase only — never an option label, generic word, or full sentence.
+   - Aim for 2–5 <strong> medical terms across the full justification.
    - Be concise and factual
 
 TOPIC ASSIGNMENT:
@@ -189,7 +193,7 @@ Return ONLY valid JSON (no markdown wrapper):
         "F) Pallor"
     ],
     "answer": ["A) Tremors", "C) Diaphoresis", "D) Confusion", "F) Pallor"],
-    "justification": "<strong>A, C, D, and F are correct.</strong> Tremors, diaphoresis (sweating), confusion, and pallor are classic symptoms of hypoglycemia due to sympathetic nervous system activation and neuroglycopenia.<br><br><strong>B (Bradycardia) is incorrect</strong> because hypoglycemia causes tachycardia, not bradycardia.<br><br><strong>E (Hypertension) is incorrect</strong> because hypertension is not a typical symptom of hypoglycemia.",
+    "justification": "<b>A, C, D, and F are correct.</b> Tremors, <strong>diaphoresis</strong>, confusion, and <strong>pallor</strong> are classic symptoms of <strong>hypoglycemia</strong> due to <strong>sympathetic nervous system</strong> activation and <strong>neuroglycopenia</strong>.<br><br><b>B (Bradycardia) is incorrect</b> because <strong>hypoglycemia</strong> causes <strong>tachycardia</strong>, not <strong>bradycardia</strong>.<br><br><b>E (Hypertension) is incorrect</b> because <strong>hypertension</strong> is not a typical symptom of <strong>hypoglycemia</strong>.",
     "topic": "Hypoglycemia Symptoms",
     "scoringType": "partial",
     "metadata": {{

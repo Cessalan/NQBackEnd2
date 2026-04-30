@@ -91,7 +91,9 @@ Context:
 5. **Justification:**
    - Explain WHY this specific order is correct
    - Reference nursing priority frameworks (ABCs, Maslow's hierarchy)
-   - Use <strong>bold</strong> for emphasis
+   - Use <b>...</b> for visual-emphasis structure: step numbers/labels, "Priority Order Rationale" headers, etc. (NOT clickable)
+   - Use <strong>...</strong> ONLY for medical terminology — drugs, conditions, signs, labs, anatomy, procedures, vital-sign findings (e.g. <strong>hypoxemia</strong>, <strong>troponin</strong>, <strong>aspirin</strong>, <strong>12-lead ECG</strong>). Each <strong> term in the rendered UI becomes a tappable popover, so wrap the noun phrase only — never a header, step number, generic word, or full sentence.
+   - Aim for 2–6 <strong> medical terms across the full justification.
    - Be concise but clinically accurate
 
 🎯 TOPIC ASSIGNMENT:
@@ -122,7 +124,7 @@ Context:
         {{"id": "item4", "text": "Obtain 12-lead ECG"}},
         {{"id": "item5", "text": "Administer aspirin 325mg as ordered"}}
     ],
-    "justification": "<strong>Priority Order Rationale:</strong><br><br><strong>1. Oxygen first</strong> - Airway and breathing take priority (ABCs). SpO2 of 94% on room air indicates hypoxemia requiring immediate intervention.<br><br><strong>2. IV Access</strong> - Essential for medication administration and emergency access. Must be established before calling provider to be ready for orders.<br><br><strong>3. Notify Provider</strong> - With elevated troponin and symptoms, this is a time-sensitive cardiac event requiring immediate medical attention.<br><br><strong>4. 12-lead ECG</strong> - Critical diagnostic tool for suspected MI, done urgently after notifying provider.<br><br><strong>5. Aspirin</strong> - Standard cardiac protocol, but given after other priorities are addressed.",
+    "justification": "<b>Priority Order Rationale:</b><br><br><b>1. Oxygen first</b> - Airway and breathing take priority (ABCs). SpO2 of 94% on room air indicates <strong>hypoxemia</strong> requiring immediate intervention.<br><br><b>2. IV Access</b> - Essential for medication administration and emergency access. Must be established before calling provider to be ready for orders.<br><br><b>3. Notify Provider</b> - With elevated <strong>troponin</strong> and symptoms, this is a time-sensitive cardiac event requiring immediate medical attention.<br><br><b>4. 12-lead ECG</b> - Critical diagnostic tool for suspected <strong>myocardial infarction</strong>, done urgently after notifying provider.<br><br><b>5. Aspirin</b> - Standard <strong>antiplatelet</strong> cardiac protocol, but given after other priorities are addressed.",
     "topic": "Cardiac Emergency Priorities",
     "scoringType": "partial",
     "metadata": {{
@@ -154,7 +156,7 @@ NOTE: The example above shows a CLINICAL scenario with all three tabs. For NON-C
         {{"id": "item3", "text": "Partager les informations pertinentes concernant la situation clinique de l'usager selon sa profession"}},
         {{"id": "item4", "text": "Valider si l'usager ou sa famille a des questions ou des préoccupations"}}
     ],
-    "justification": "<strong>Ordre de priorité :</strong><br><br><strong>1. Se présenter et expliquer le but</strong> — Établir un climat de confiance dès le départ.<br><strong>2. Présentation des intervenants</strong> — L'usager doit savoir qui participe.<br><strong>3. Partage d'informations</strong> — Chaque professionnel apporte son expertise.<br><strong>4. Valider les questions</strong> — S'assurer que l'usager et la famille se sentent entendus.",
+    "justification": "<b>Ordre de priorité :</b><br><br><b>1. Se présenter et expliquer le but</b> — Établir un climat de confiance dès le départ.<br><b>2. Présentation des intervenants</b> — L'usager doit savoir qui participe.<br><b>3. Partage d'informations</b> — Chaque professionnel apporte son expertise.<br><b>4. Valider les questions</b> — S'assurer que l'usager et la famille se sentent entendus.",
     "topic": "Rencontre interdisciplinaire",
     "scoringType": "partial",
     "metadata": {{

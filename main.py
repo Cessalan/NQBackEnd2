@@ -36,8 +36,8 @@ import platform
 import requests
 
 # models
-from models.reponses import GenerateTitleResponse
-from models.requests import GenerateTitleRequest
+from models.reponses import GenerateTitleResponse, RewriteResponse
+from models.requests import GenerateTitleRequest, RewriteRequest
 
 # document loader
 from langchain_community.document_loaders import (
@@ -4200,6 +4200,102 @@ async def generate_chat_title(request: GenerateTitleRequest):
         cleaned_title = generated_title.replace('"', '').replace("'", "").strip()
 
         return GenerateTitleResponse(title=cleaned_title)
+
+# ============================================================================
+# REWRITE ENDPOINT — natural-style paraphrase of an AI-generated message
+# ============================================================================
+@app.post("/chat/rewrite", response_model=RewriteResponse)
+async def rewrite_message(request: RewriteRequest):
+    text = (request.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+
+    # 12k-char input cap. The frontend should never send anything close to
+    # this; the cap is here so a runaway client can't burn tokens.
+    if len(text) > 12000:
+        raise HTTPException(status_code=413, detail="text exceeds 12000 chars")
+
+    language = (request.language or "en").split("-")[0].lower()
+
+    system_prompt = """You rewrite text so it reads as if a real student wrote it.
+
+CADENCE
+- Mix short and long sentences. Some under 8 words, some over 20.
+- Vary sentence openers. Don't start consecutive sentences with the same word.
+- Occasional sentence fragments are fine where natural.
+
+VOICE
+- Use contractions (it's, you're, doesn't, won't).
+- Prefer natural connectors: so, but, though, also, and. Avoid: therefore, however, furthermore, moreover, thus, hence, in addition.
+- Write in active voice when possible.
+
+BANNED WORDS AND PHRASES (do not use any of these)
+delve, tapestry, navigate, multifaceted, crucial, paramount, robust, leverage, harness, realm, landscape, underscores, emphasizes the importance, plays a vital role, plays a key role, in the realm of, in conclusion, it's important to note, it is worth noting, essentially, ultimately, embark, journey, foster, cultivate, intricate, nuanced, meticulously.
+
+FACTUAL ACCURACY (this is the highest priority)
+- Preserve every drug name, dose, route, frequency, lab value, vital sign, and unit verbatim. mg vs mcg vs g matters. Do not round, convert, or paraphrase numbers.
+- Preserve every disease name, anatomical term, and clinical procedure verbatim.
+- Do not add facts that weren't in the input. Do not remove clinical detail.
+- If the input has a list of steps, signs, or symptoms, the rewrite must contain the same items.
+
+LENGTH
+- Output length must be within ~15% of input length. Don't pad or strip.
+
+OUTPUT DISCIPLINE
+- Output the rewritten text only. No preamble. No commentary. No explanation. No quotation marks wrapping the result.
+- Match the language of the input. If the user requests a specific language, output in that language.
+- Preserve markdown structure (headings, lists, bold) if the input uses it."""
+
+    user_prompt = (
+        f"Rewrite the text below. Output language: {language}.\n\n"
+        f"---\n{text}\n---"
+    )
+
+    try:
+        # gpt-4.1-mini matches the rest of the codebase for instruction-following
+        # tasks. temp=0.7 gives enough cadence variety without risking factual
+        # drift on clinical content (doses, units, drug names).
+        llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.7)
+        chain = llm | StrOutputParser()
+        result = await chain.ainvoke([
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ])
+        rewritten = (result or "").strip()
+        # Strip wrapping quotes if the model added them despite instructions.
+        if len(rewritten) >= 2 and rewritten[0] in ('"', "'") and rewritten[-1] == rewritten[0]:
+            rewritten = rewritten[1:-1].strip()
+        if not rewritten:
+            raise HTTPException(status_code=502, detail="empty rewrite from model")
+        return RewriteResponse(rewritten=rewritten)
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Rewrite failed: {e}")
+        raise HTTPException(status_code=500, detail="rewrite failed")
+
+# ============================================================================
+# GLOSSARY ENDPOINT — clickable medical-term popovers in quiz rationales
+# ============================================================================
+from pydantic import BaseModel as _GlossaryBaseModel
+from services.glossary import get_term_definition
+
+class GlossaryRequest(_GlossaryBaseModel):
+    term: str
+
+@app.post("/glossary")
+async def glossary(request: GlossaryRequest):
+    term = (request.term or "").strip()
+    if not term:
+        raise HTTPException(status_code=400, detail="term is required")
+    if len(term) > 120:
+        raise HTTPException(status_code=400, detail="term too long")
+    try:
+        result = await get_term_definition(term)
+        return result
+    except Exception as e:
+        print(f"⚠️ Glossary lookup failed for {term!r}: {e}")
+        raise HTTPException(status_code=500, detail="glossary lookup failed")
 
 # ============================================================================
 # QUESTION BANK IMPORT ENDPOINT

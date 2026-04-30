@@ -1863,7 +1863,7 @@ async def _generate_single_question(
             "D) Fourth option"
         ],
         "answer": "X) The correct option",
-        "justification": "<strong>Option X is correct</strong> because [factual explanation].<br><br><strong>Option A is incorrect</strong> because [why it's factually wrong].<br><strong>Option B is incorrect</strong> because [why it's factually wrong].<br><strong>Option C is incorrect</strong> because [why it's factually wrong].",
+        "justification": "<b>Option X is correct</b> because [factual explanation, wrapping any medical term like <strong>hyperkalemia</strong> in strong tags].<br><br><b>Option A is incorrect</b> because [why it's factually wrong].<br><b>Option B is incorrect</b> because [why it's factually wrong].<br><b>Option C is incorrect</b> because [why it's factually wrong].",
         "topic": "Specific Topic Name",
         "metadata": {{
             "sourceLanguage": "{language}",
@@ -1877,8 +1877,11 @@ async def _generate_single_question(
         }}
     }}
 
-    Formatting Rules (CRITICAL):
-    - Use <strong>bold</strong> for every "Option X is..." statement
+    Formatting Rules (CRITICAL — read carefully, two DIFFERENT tags):
+    - Use <b>...</b> ONLY for the "Option X is correct/incorrect" headers (visual emphasis only, NOT clickable)
+    - Use <strong>...</strong> ONLY for medical terminology — drugs, conditions, signs, labs, anatomy, procedures, electrolytes, vital-sign findings. Each <strong> term in the rendered UI becomes a tappable popover, so wrap the noun phrase only (e.g. <strong>metoclopramide</strong>, <strong>Chvostek's sign</strong>, <strong>hyperkalemia</strong>, <strong>QT prolongation</strong>) — NOT whole sentences and NEVER an "Option X" header.
+    - Do NOT wrap generic English words ("first", "patient", "the nurse"), numbers, or option letters in <strong>.
+    - Aim for 2–5 <strong> medical terms across the full justification when relevant; zero is fine if the rationale is non-clinical.
     - Keep explanations concise and factual
     - MUST include the "topic" field at the root level of the JSON
     - MUST include "quizMode": "knowledge" in the response
@@ -2011,7 +2014,7 @@ async def _generate_single_question(
             "D) Fourth option"
         ],
         "answer": "X) The correct option",
-        "justification": "<strong>Option X is correct</strong> because [1-2 sentences explaining why this is the BEST evidence-based choice].<br><br><strong>Option A is incorrect</strong> because [1 sentence explaining the clinical flaw].<br><strong>Option B is incorrect</strong> because [1 sentence explaining the clinical flaw].<br><strong>Option C is incorrect</strong> because [1 sentence explaining the clinical flaw].",
+        "justification": "<b>Option X is correct</b> because [1-2 sentences explaining why this is the BEST evidence-based choice — wrap each medical term in <strong> tags, e.g. <strong>metoclopramide</strong> can prolong the <strong>QT interval</strong>].<br><br><b>Option A is incorrect</b> because [1 sentence explaining the clinical flaw, with <strong>medical terms</strong> wrapped].<br><b>Option B is incorrect</b> because [1 sentence explaining the clinical flaw].<br><b>Option C is incorrect</b> because [1 sentence explaining the clinical flaw].",
         "topic": "Specific Topic Name",
         "metadata": {{
             "sourceLanguage": "{language}",
@@ -2025,8 +2028,11 @@ async def _generate_single_question(
         }}
     }}
 
-    Formatting Rules (CRITICAL):
-    - Use <strong>bold</strong> for every "Option X is..." statement
+    Formatting Rules (CRITICAL — read carefully, two DIFFERENT tags):
+    - Use <b>...</b> ONLY for the "Option X is correct/incorrect" headers (visual emphasis only, NOT clickable).
+    - Use <strong>...</strong> ONLY for medical terminology — drugs, conditions, signs, labs, anatomy, procedures, electrolytes, vital-sign findings. Each <strong> term in the rendered UI becomes a tappable popover, so wrap the noun phrase only (e.g. <strong>metoclopramide</strong>, <strong>Chvostek's sign</strong>, <strong>hyperkalemia</strong>, <strong>tardive dyskinesia</strong>, <strong>QT prolongation</strong>) — NOT whole sentences and NEVER an "Option X" header.
+    - Do NOT wrap generic English words ("first", "patient", "the nurse"), numbers, or option letters in <strong>.
+    - Aim for 2–5 <strong> medical terms across the full justification.
     - Maintain parallel structure (all start the same way)
     - Keep each explanation to 1-2 sentences
     - Test application and analysis, not just recall

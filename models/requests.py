@@ -45,6 +45,11 @@ class GenerateTitleRequest(BaseModel):
     message:str
 
 
+class RewriteRequest(BaseModel):
+    text: str
+    language: Optional[str] = "en"
+
+
 class PlanRequest(BaseModel):
     topic: str
     chat_id: str
