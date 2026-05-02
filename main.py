@@ -2901,6 +2901,340 @@ IMPORTANT:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ============================================================================
+# /study/start — fast-path that combines plan + first-node generation
+# ============================================================================
+# WHY: The legacy two-step flow (POST /study/plan, then POST /study/generate-item-stream)
+# does three sequential round trips before the user sees any node content:
+#   1. /study/plan (~5–15s with redundant topic extraction LLM call)
+#   2. createStudySession Firestore write
+#   3. /study/generate-item-stream for the first node (~3–10s)
+#
+# /study/start collapses this into one SSE stream that:
+#   - skips the redundant topic-extraction LLM call (uses file_insights topics directly)
+#   - emits `plan_ready` as soon as the path JSON is parsed (frontend can navigate)
+#   - immediately proceeds to generate the first node's content in the same request
+#   - emits `first_node_ready` when content is done (frontend uses prefetched cache)
+#
+# Net effect: the LLM time for plan + first-node OVERLAPS the Firestore write and
+# the route transition, instead of running sequentially. Time-to-first-node drops
+# significantly without changing any node-content rendering.
+# ============================================================================
+
+def _build_study_path_prompt(unique_topics: List[str], key_terms: List[str], review_format: str, prompt_language: str) -> str:
+    """Build the study-path planning prompt for the configured review format."""
+    if review_format == "Flashcards":
+        structure_rule = "- AUDIO: Listen to an intro for that topic\n   - FLASHCARD: Key terms and definitions from that topic\n   - FLASHCARD: Advanced concepts\n   - QUIZ: Quick test"
+        node_types = '- "audio": Short audio intro for the topic\n- "flashcard": Key terms\n- "quiz": Questions testing that topic'
+        example_json_rows = f"""  {{"id": "node_1", "type": "audio", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Listen", "tags": ["topic1", "audio"], "difficulty": 1}},
+  {{"id": "node_2", "type": "flashcard", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Basics", "tags": ["topic1", "terms"], "difficulty": 1}},
+  {{"id": "node_3", "type": "flashcard", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Advanced", "tags": ["topic1", "advanced"], "difficulty": 2}},
+  {{"id": "node_4", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Quiz", "tags": ["topic1", "assessment"], "difficulty": 1}}"""
+    elif review_format == "Audio Summaries":
+        structure_rule = "- AUDIO: Listen to a summary\n   - LESSON: Read the details\n   - QUIZ: Test understanding"
+        node_types = '- "audio": Listen to summary\n- "lesson": Read details\n- "quiz": Questions testing that topic'
+        example_json_rows = f"""  {{"id": "node_1", "type": "audio", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Audio", "tags": ["topic1", "audio"], "difficulty": 1}},
+  {{"id": "node_2", "type": "lesson", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Lesson", "tags": ["topic1", "lesson"], "difficulty": 2}},
+  {{"id": "node_3", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Quiz", "tags": ["topic1", "assessment"], "difficulty": 1}}"""
+    elif review_format == "Practice Questions":
+        structure_rule = "- QUIZ: Initial assessment\n   - LESSON: Review concepts\n   - AUDIO: Listen to a recap\n   - QUIZ: Final test"
+        node_types = '- "quiz": Assessment questions\n- "lesson": Review content\n- "audio": Short audio recap'
+        example_json_rows = f"""  {{"id": "node_1", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Pre-Test", "tags": ["topic1", "assessment"], "difficulty": 1}},
+  {{"id": "node_2", "type": "lesson", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Review", "tags": ["topic1", "lesson"], "difficulty": 2}},
+  {{"id": "node_3", "type": "audio", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Recap", "tags": ["topic1", "audio"], "difficulty": 1}},
+  {{"id": "node_4", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Final Test", "tags": ["topic1", "assessment"], "difficulty": 2}}"""
+    elif review_format == "Visual Concept Maps":
+        structure_rule = "- LESSON: Introduce the topic (content comes from document)\n   - AUDIO: Listen to the lesson explained out loud\n   - MINDMAP: Visual concept map linking key ideas\n   - QUIZ: Test understanding of that specific topic"
+        node_types = '- "lesson": Introduction to ONE topic from the document\n- "audio": Audio explanation of that topic (listen instead of reading)\n- "mindmap": Visual concept map for that topic\n- "quiz": Questions testing that topic (will generate 12 questions)'
+        example_json_rows = f"""  {{"id": "node_1", "type": "lesson", "label": "{unique_topics[0] if unique_topics else 'Topic 1'}", "tags": ["topic1"], "difficulty": 1}},
+  {{"id": "node_2", "type": "audio", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Listen", "tags": ["topic1", "audio"], "difficulty": 1}},
+  {{"id": "node_3", "type": "mindmap", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Concept Map", "tags": ["topic1", "visual"], "difficulty": 1}},
+  {{"id": "node_4", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Quiz", "tags": ["topic1", "assessment"], "difficulty": 1}}"""
+    else:
+        structure_rule = "- LESSON: Introduce the topic (content comes from document)\n   - AUDIO: Listen to the lesson explained out loud\n   - FLASHCARD: Key terms and definitions from that topic\n   - QUIZ: Test understanding of that specific topic"
+        node_types = '- "lesson": Introduction to ONE topic from the document\n- "audio": Audio explanation of that topic (listen instead of reading)\n- "flashcard": Key terms from that topic (will generate 12 cards)\n- "quiz": Questions testing that topic (will generate 12 questions)'
+        example_json_rows = f"""  {{"id": "node_1", "type": "lesson", "label": "{unique_topics[0] if unique_topics else 'Topic 1'}", "tags": ["topic1"], "difficulty": 1}},
+  {{"id": "node_2", "type": "audio", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Listen", "tags": ["topic1", "audio"], "difficulty": 1}},
+  {{"id": "node_3", "type": "flashcard", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Vocabulaire", "tags": ["topic1", "terms"], "difficulty": 1}},
+  {{"id": "node_4", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Quiz", "tags": ["topic1", "assessment"], "difficulty": 1}}"""
+
+    return f"""Create a Duolingo-style study path for this document.
+
+🚨 CRITICAL: The study path MUST be structured around these CORE TOPICS from the student's document:
+{unique_topics}
+
+KEY TERMS to include: {key_terms}
+
+STRUCTURE RULES:
+1. Create ONE learning unit per main topic (3-5 units total)
+2. Each unit follows this pattern:
+   {structure_rule}
+
+3. Total: 12-20 nodes (4 nodes per topic)
+4. Progress through topics in logical order
+
+NODE TYPES:
+{node_types}
+
+Return ONLY valid JSON array in {prompt_language}:
+[
+{example_json_rows},
+  ... (repeat for each main topic)
+]
+
+IMPORTANT:
+- Node labels MUST reference the actual topics from the document
+- DO NOT create generic labels like "Introduction to Medicine"
+- ALL labels MUST be written in {prompt_language} — translate topic names if the document is in a different language
+- Keep labels concise and meaningful"""
+
+
+def _attach_status_and_exam_nodes(nodes: list, unique_topics: list) -> list:
+    """Mirror /study/plan steps 5 + 5b: assign status, then insert exam nodes
+    at topic boundaries. Returns the augmented list."""
+    for i, node in enumerate(nodes):
+        node["status"] = "available" if i == 0 else "locked"
+        if "id" not in node:
+            node["id"] = f"node_{i+1}"
+        if "difficulty" not in node:
+            node["difficulty"] = 1 + (i // 4)
+        if "tags" not in node:
+            node["tags"] = []
+
+    nodes_with_exams = []
+    current_topic = None
+    exam_counter = 0
+    for i, node in enumerate(nodes):
+        node_topic = node.get("label", "")
+        for t in unique_topics:
+            if t.lower() in node_topic.lower():
+                node_topic = t
+                break
+
+        next_topic = None
+        if i + 1 < len(nodes):
+            next_label = nodes[i + 1].get("label", "")
+            for t in unique_topics:
+                if t.lower() in next_label.lower():
+                    next_topic = t
+                    break
+
+        nodes_with_exams.append(node)
+
+        is_last = (i == len(nodes) - 1)
+        topic_changes = (next_topic and node_topic and next_topic != node_topic)
+
+        if is_last or topic_changes:
+            exam_counter += 1
+            exam_label = node_topic if node_topic in unique_topics else (current_topic or "Review")
+            nodes_with_exams.append({
+                "id": f"exam_{exam_counter}",
+                "type": "exam",
+                "label": exam_label,
+                "tags": ["exam", "mixed_types"],
+                "difficulty": 2,
+                "status": "locked"
+            })
+
+        current_topic = node_topic
+
+    for i, node in enumerate(nodes_with_exams):
+        node["status"] = "available" if i == 0 else "locked"
+
+    return nodes_with_exams
+
+
+@app.post("/study/start")
+async def start_study_journey(request: StudyPlanRequest):
+    """
+    Combined plan + first-node SSE endpoint. See module-level WHY comment above.
+
+    SSE event types emitted:
+      - {"status": "session_ready"}                     — handshake
+      - {"status": "plan_generating"}                   — LLM building the path
+      - {"status": "plan_ready", "plan": {...}}         — full path nodes ready
+      - {"status": "first_node_generating", ...}        — about to generate first node
+      - {"status": "question_ready", "question": {...}} — quiz only, per-question
+      - {"status": "flashcard_ready", "flashcard": {...}} — flashcard only, per-card
+      - {"status": "first_node_ready", "node_id": "...", "type": "...", "content": {...}, "hash": "..."}
+      - {"status": "first_node_skipped", "node_id": "...", "reason": "..."}  — for mindmap/exam
+      - {"status": "complete"}                          — stream end
+      - {"status": "error", "message": "..."}
+    """
+    print(f"\n{'='*60}")
+    print(f"🚀 STUDY START (combined) - chat_id: {request.chat_id}")
+    print(f"{'='*60}")
+
+    async def stream_generator():
+        try:
+            # ---------- STEP 1: session + topics ----------
+            if request.chat_id not in ACTIVE_SESSIONS:
+                ACTIVE_SESSIONS[request.chat_id] = NursingTutor(request.chat_id)
+                await ACTIVE_SESSIONS[request.chat_id].load_file_insights_from_firebase()
+                print(f"🆕 Created new session for /study/start")
+
+            session_wrapper = ACTIVE_SESSIONS[request.chat_id]
+            file_insights = getattr(session_wrapper.session, "file_insights", {})
+
+            all_topics = []
+            all_concepts = []
+            for filename, insights in file_insights.items():
+                if insights:
+                    all_topics.extend(insights.get("topics", []))
+                    all_concepts.extend(insights.get("concepts", []))
+
+            unique_topics = list(set(all_topics))[:5] or ["Document Overview"]
+            key_terms = list(set(all_concepts))[:10]
+
+            print(f"📊 /study/start using insights topics: {unique_topics}")
+            yield f"data: {json.dumps({'status': 'session_ready'})}\n\n"
+
+            # ---------- STEP 2: plan generation (one LLM call, no redundant topic extraction) ----------
+            yield f"data: {json.dumps({'status': 'plan_generating'})}\n\n"
+
+            llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.3)
+            prompt_language = _language_for_prompt(request.language)
+            user_prefs = request.userPreferences or {}
+            review_format = user_prefs.get("reviewFormat", "Visual Concept Maps")
+
+            path_prompt = _build_study_path_prompt(unique_topics, key_terms, review_format, prompt_language)
+            response = await llm.ainvoke([{"role": "user", "content": path_prompt}])
+
+            path_json = response.content.strip()
+            if path_json.startswith("```"):
+                path_json = path_json.split("```")[1]
+                if path_json.startswith("json"):
+                    path_json = path_json[4:]
+                path_json = path_json.strip()
+
+            try:
+                nodes = json.loads(path_json)
+            except json.JSONDecodeError as e:
+                print(f"❌ Plan JSON parse failed: {e}")
+                yield f"data: {json.dumps({'status': 'error', 'message': f'Plan JSON parse failed: {e}'})}\n\n"
+                return
+
+            nodes = _attach_status_and_exam_nodes(nodes, unique_topics)
+            print(f"✅ /study/start built path with {len(nodes)} nodes")
+
+            plan_payload = {
+                "nodes": nodes,
+                "topics": unique_topics,
+                "total_nodes": len(nodes),
+                "estimated_time_minutes": len(nodes) * 3
+            }
+            yield f"data: {json.dumps({'status': 'plan_ready', 'plan': plan_payload})}\n\n"
+
+            # ---------- STEP 3: first-node content (overlaps with frontend's Firestore write) ----------
+            if not nodes:
+                yield f"data: {json.dumps({'status': 'complete'})}\n\n"
+                return
+
+            first_node = nodes[0]
+            node_id = first_node.get("id")
+            node_type = first_node.get("type")
+            node_label = first_node.get("label", "")
+
+            yield f"data: {json.dumps({'status': 'first_node_generating', 'node_id': node_id, 'node_type': node_type, 'node_label': node_label})}\n\n"
+
+            study_session = await _setup_study_session(request.chat_id, request.language)
+            source = "documents" if study_session.documents and study_session.vectorstore else "scratch"
+
+            try:
+                if node_type == "lesson":
+                    content = await _generate_lesson_with_context(study_session, node_label, request.language)
+                    content_hash = hashlib.md5(json.dumps(content, sort_keys=True).encode()).hexdigest()[:12]
+                    yield f"data: {json.dumps({'status': 'first_node_ready', 'node_id': node_id, 'type': 'lesson', 'content': content, 'hash': content_hash})}\n\n"
+
+                elif node_type == "audio":
+                    audio_llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.6)
+                    context = ""
+                    if study_session.vectorstore:
+                        docs = study_session.vectorstore.similarity_search(query=node_label, k=100)
+                        context = "\n\n".join([d.page_content for d in docs])[:1000]
+                    content = await _generate_audio_config(audio_llm, node_label, context, prompt_language)
+                    content_hash = hashlib.md5(json.dumps(content, sort_keys=True).encode()).hexdigest()[:12]
+                    yield f"data: {json.dumps({'status': 'first_node_ready', 'node_id': node_id, 'type': 'audio', 'content': content, 'hash': content_hash})}\n\n"
+
+                elif node_type == "quiz":
+                    questions = []
+                    async for chunk in stream_quiz_with_bank(
+                        topic=node_label,
+                        difficulty="medium",
+                        num_questions=12,
+                        source=source,
+                        session=study_session,
+                        chat_id=study_session.chat_id,
+                        question_types=["mcq"],
+                        quiz_mode="knowledge"
+                    ):
+                        if chunk.get("status") == "question_ready":
+                            q = chunk.get("question") or {}
+                            answer = q.get("answer", "A)")
+                            answer_letter = answer[0] if answer else "A"
+                            correct_index = ord(answer_letter) - ord("A")
+                            formatted = {
+                                "question": q.get("question", ""),
+                                "options": q.get("options", []),
+                                "correctIndex": correct_index,
+                                "rationale": q.get("justification", ""),
+                                "topic": q.get("topic", node_label)
+                            }
+                            questions.append(formatted)
+                            yield f"data: {json.dumps({'status': 'question_ready', 'question': formatted, 'node_id': node_id})}\n\n"
+                    content = {"questions": questions}
+                    content_hash = hashlib.md5(json.dumps(content, sort_keys=True).encode()).hexdigest()[:12]
+                    yield f"data: {json.dumps({'status': 'first_node_ready', 'node_id': node_id, 'type': 'quiz', 'content': content, 'hash': content_hash})}\n\n"
+
+                elif node_type == "flashcard":
+                    cards = []
+                    async for chunk in stream_flashcards(
+                        topic=node_label,
+                        num_cards=12,
+                        source=source,
+                        session=study_session,
+                        chat_id=study_session.chat_id
+                    ):
+                        if chunk.get("status") == "flashcard_ready":
+                            fc = chunk.get("flashcard") or {}
+                            formatted = {
+                                "front": fc.get("front", ""),
+                                "back": fc.get("back", ""),
+                                "topic": fc.get("topic", node_label)
+                            }
+                            cards.append(formatted)
+                            yield f"data: {json.dumps({'status': 'flashcard_ready', 'flashcard': formatted, 'node_id': node_id})}\n\n"
+                    content = {"cards": cards}
+                    content_hash = hashlib.md5(json.dumps(content, sort_keys=True).encode()).hexdigest()[:12]
+                    yield f"data: {json.dumps({'status': 'first_node_ready', 'node_id': node_id, 'type': 'flashcard', 'content': content, 'hash': content_hash})}\n\n"
+
+                elif node_type == "mindmap":
+                    # Mindmap nodes are stubbed — actual generation happens in /study/generate-mindmap
+                    content = {"topic": node_label, "depth": "medium", "mindmapData": None}
+                    content_hash = hashlib.md5(json.dumps(content, sort_keys=True).encode()).hexdigest()[:12]
+                    yield f"data: {json.dumps({'status': 'first_node_ready', 'node_id': node_id, 'type': 'mindmap', 'content': content, 'hash': content_hash})}\n\n"
+
+                else:
+                    # Exam or unknown — let the frontend handle via its own modal/flow.
+                    yield f"data: {json.dumps({'status': 'first_node_skipped', 'node_id': node_id, 'reason': f'node type {node_type!r} not pre-generated'})}\n\n"
+            except Exception as node_err:
+                print(f"⚠️ First-node generation failed (plan still delivered): {node_err}")
+                import traceback
+                traceback.print_exc()
+                # Don't fail the whole stream — the user got the plan; the frontend will retry the node.
+                yield f"data: {json.dumps({'status': 'first_node_skipped', 'node_id': node_id, 'reason': str(node_err)})}\n\n"
+
+            yield f"data: {json.dumps({'status': 'complete'})}\n\n"
+
+        except Exception as e:
+            print(f"❌ /study/start failed: {e}")
+            import traceback
+            traceback.print_exc()
+            yield f"data: {json.dumps({'status': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(stream_generator(), media_type="text/event-stream")
+
+
 @app.post("/study/diagnostic-quiz")
 async def generate_diagnostic_quiz(request: DiagnosticQuizRequest):
     """
@@ -3964,7 +4298,22 @@ async def _setup_study_session(chat_id: str, language: str = "en") -> Persistent
     Create a properly configured session for study mode that mirrors
     the orchestrator's session setup. This ensures document context
     is available to the streaming generators.
+
+    Warm path: if the chat already has a NursingTutor in ACTIVE_SESSIONS with
+    its vectorstore loaded (e.g. populated during upload or a prior /study/*
+    call), reuse that session instead of re-downloading the FAISS index from
+    Firebase Storage. The cold path is unchanged.
     """
+    # Warm path — reuse the session that the upload flow / prior calls left behind.
+    if chat_id in ACTIVE_SESSIONS:
+        existing = ACTIVE_SESSIONS[chat_id].session
+        if existing.vectorstore is not None:
+            existing.user_language = language
+            set_session_context(existing)
+            print(f"♻️ Study session reused for {chat_id} (vectorstore already loaded)")
+            return existing
+
+    # Cold path — build a fresh session.
     session = PersistentSessionContext(chat_id)
     session.user_language = language
 
