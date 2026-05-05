@@ -4628,6 +4628,7 @@ OUTPUT DISCIPLINE
 # ============================================================================
 from pydantic import BaseModel as _GlossaryBaseModel
 from services.glossary import get_term_definition
+from services.explain import explain_selection
 
 class GlossaryRequest(_GlossaryBaseModel):
     term: str
@@ -4645,6 +4646,35 @@ async def glossary(request: GlossaryRequest):
     except Exception as e:
         print(f"⚠️ Glossary lookup failed for {term!r}: {e}")
         raise HTTPException(status_code=500, detail="glossary lookup failed")
+
+
+# ============================================================================
+# EXPLAIN ENDPOINT — free-form explanation for user-selected text in the app
+# ============================================================================
+from typing import Optional as _ExplainOptional
+
+class ExplainRequest(_GlossaryBaseModel):
+    text: str
+    context: _ExplainOptional[str] = "chat"  # chat | rationale | quiz | flashcard
+    language: _ExplainOptional[str] = "en"   # ISO 639-1 (en, fr, …)
+
+@app.post("/explain")
+async def explain(request: ExplainRequest):
+    text = (request.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+    if len(text) > 800:
+        raise HTTPException(status_code=400, detail="text too long")
+    try:
+        result = await explain_selection(
+            text,
+            request.context or "chat",
+            request.language or "en",
+        )
+        return result
+    except Exception as e:
+        print(f"⚠️ Explain failed for {text[:60]!r}: {e}")
+        raise HTTPException(status_code=500, detail="explain failed")
 
 # ============================================================================
 # QUESTION BANK IMPORT ENDPOINT
