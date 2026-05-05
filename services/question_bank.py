@@ -306,7 +306,12 @@ class QuestionBankService:
             "question": data.get("q", ""),
             "options": options,
             "answer": answer,
+            # Legacy full-rationale HTML — kept for older question-bank rows.
+            # New rows (post deferred-rationale rollout) store an empty string
+            # here and a one-sentence summary in `correct_blurb` instead; the
+            # full per-option rationale is generated on demand via /quiz_rationale.
             "justification": data.get("just", ""),
+            "correct_blurb": data.get("blurb", ""),
 
             # Question type for frontend routing
             "questionType": question_type,
@@ -435,7 +440,13 @@ class QuestionBankService:
                 "q": question_text,
                 "opts": question_data.get("options", []),
                 "ans": question_data.get("answer", ""),
+                # Legacy full-rationale HTML — only populated for old questions
+                # generated before the deferred-rationale rollout.
                 "just": question_data.get("justification", ""),
+                # New one-sentence rationale shipped with every question. The
+                # full per-option rationale is generated on demand via
+                # /quiz_rationale when the user clicks Learn more.
+                "blurb": question_data.get("correct_blurb", ""),
                 "qtype": question_type,  # Question type for filtering
 
                 # Classification (flat fields for efficient queries)

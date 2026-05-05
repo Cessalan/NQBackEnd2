@@ -1863,7 +1863,7 @@ async def _generate_single_question(
             "D) Fourth option"
         ],
         "answer": "X) The correct option",
-        "justification": "<b>Option X is correct</b> because [factual explanation, wrapping any medical term like <strong>hyperkalemia</strong> in strong tags].<br><br><b>Option A is incorrect</b> because [why it's factually wrong].<br><b>Option B is incorrect</b> because [why it's factually wrong].<br><b>Option C is incorrect</b> because [why it's factually wrong].",
+        "correct_blurb": "ONE plain-text sentence (≤ 25 words) stating why the correct answer is correct. No HTML, no per-option breakdown — that full rationale is generated on demand by /quiz_rationale when the user clicks Learn more.",
         "topic": "Specific Topic Name",
         "metadata": {{
             "sourceLanguage": "{language}",
@@ -1877,14 +1877,16 @@ async def _generate_single_question(
         }}
     }}
 
-    Formatting Rules (CRITICAL — read carefully, two DIFFERENT tags):
-    - Use <b>...</b> ONLY for the "Option X is correct/incorrect" headers (visual emphasis only, NOT clickable)
-    - Use <strong>...</strong> ONLY for medical terminology — drugs, conditions, signs, labs, anatomy, procedures, electrolytes, vital-sign findings. Each <strong> term in the rendered UI becomes a tappable popover, so wrap the noun phrase only (e.g. <strong>metoclopramide</strong>, <strong>Chvostek's sign</strong>, <strong>hyperkalemia</strong>, <strong>QT prolongation</strong>) — NOT whole sentences and NEVER an "Option X" header.
-    - Do NOT wrap generic English words ("first", "patient", "the nurse"), numbers, or option letters in <strong>.
-    - Aim for 2–5 <strong> medical terms across the full justification when relevant; zero is fine if the rationale is non-clinical.
-    - Keep explanations concise and factual
-    - MUST include the "topic" field at the root level of the JSON
-    - MUST include "quizMode": "knowledge" in the response
+    Formatting Rules (CRITICAL):
+    - "correct_blurb" is the ONLY rationale you ship inline with the question.
+      Keep it to ONE sentence, ≤ 25 words, plain text. No HTML, no <b>, no <strong>, no markdown.
+      Just a short factual reason why the correct answer is correct.
+    - Do NOT include any per-option ("Option A is incorrect because…") breakdown — that
+      full rationale is generated on demand by a separate service when the student
+      clicks Learn more, so generating it here would be wasted tokens.
+    - Keep the question stem and options concise and factual.
+    - MUST include the "topic" field at the root level of the JSON.
+    - MUST include "quizMode": "knowledge" in the response.
     """
     else:
         # NCLEX MODE (default): Clinical judgment questions with scenarios
@@ -1984,7 +1986,8 @@ async def _generate_single_question(
     ✓ The scenario requires thinking, not just recall
     ✓ The correct answer is defensible with evidence-based practice
     ✓ All 4 options are plausible — a novice could choose any of them
-    ✓ The justification explains the CLINICAL REASONING behind each option
+    ✓ The "correct_blurb" gives ONE sentence on why the correct answer wins
+      (the full per-option breakdown is generated separately on demand)
     ✓ Difficulty matches: {difficulty}
 
     ─────────────────────────────────────────────────────────────
@@ -2014,7 +2017,7 @@ async def _generate_single_question(
             "D) Fourth option"
         ],
         "answer": "X) The correct option",
-        "justification": "<b>Option X is correct</b> because [1-2 sentences explaining why this is the BEST evidence-based choice — wrap each medical term in <strong> tags, e.g. <strong>metoclopramide</strong> can prolong the <strong>QT interval</strong>].<br><br><b>Option A is incorrect</b> because [1 sentence explaining the clinical flaw, with <strong>medical terms</strong> wrapped].<br><b>Option B is incorrect</b> because [1 sentence explaining the clinical flaw].<br><b>Option C is incorrect</b> because [1 sentence explaining the clinical flaw].",
+        "correct_blurb": "ONE plain-text sentence (≤ 25 words) stating the clinical reason the correct answer is the BEST choice. No HTML, no per-option breakdown — the full per-option rationale is generated on demand by /quiz_rationale when the student clicks Learn more.",
         "topic": "Specific Topic Name",
         "metadata": {{
             "sourceLanguage": "{language}",
@@ -2028,15 +2031,15 @@ async def _generate_single_question(
         }}
     }}
 
-    Formatting Rules (CRITICAL — read carefully, two DIFFERENT tags):
-    - Use <b>...</b> ONLY for the "Option X is correct/incorrect" headers (visual emphasis only, NOT clickable).
-    - Use <strong>...</strong> ONLY for medical terminology — drugs, conditions, signs, labs, anatomy, procedures, electrolytes, vital-sign findings. Each <strong> term in the rendered UI becomes a tappable popover, so wrap the noun phrase only (e.g. <strong>metoclopramide</strong>, <strong>Chvostek's sign</strong>, <strong>hyperkalemia</strong>, <strong>tardive dyskinesia</strong>, <strong>QT prolongation</strong>) — NOT whole sentences and NEVER an "Option X" header.
-    - Do NOT wrap generic English words ("first", "patient", "the nurse"), numbers, or option letters in <strong>.
-    - Aim for 2–5 <strong> medical terms across the full justification.
-    - Maintain parallel structure (all start the same way)
-    - Keep each explanation to 1-2 sentences
-    - Test application and analysis, not just recall
-    - MUST include the "topic" field at the root level of the JSON
+    Formatting Rules (CRITICAL):
+    - "correct_blurb" is the ONLY rationale you ship inline with the question.
+      Keep it to ONE sentence, ≤ 25 words, plain text. No HTML, no <b>, no <strong>, no markdown.
+      Just the clinical reason the correct answer is the BEST evidence-based choice.
+    - Do NOT include any per-option ("Option A is incorrect because…") breakdown — that
+      full rationale is generated on demand by a separate service when the student
+      clicks Learn more, so generating it here would be wasted tokens.
+    - Test application and analysis in the stem, not just recall.
+    - MUST include the "topic" field at the root level of the JSON.
     """
 
     prompt = PromptTemplate(

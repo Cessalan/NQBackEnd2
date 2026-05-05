@@ -924,7 +924,12 @@ async def process_game_quiz(chat_id: str, message: dict, websocket: WebSocket):
                             "question": question.get("question"),
                             "options": question.get("options"),
                             "answer": question.get("answer"),           # For client validation
-                            "justification": question.get("justification"),  # Show after answer
+                            # Legacy full rationale (only present on old generations);
+                            # new generations leave this empty and ship correctBlurb
+                            # instead — the frontend fetches the full per-option
+                            # rationale on demand from /quiz_rationale.
+                            "justification": question.get("justification", ""),
+                            "correctBlurb": question.get("correct_blurb", ""),
                             "topic": question.get("topic", "General"),
                             "serumValue": 20  # Each correct answer = 20mL
                         },
@@ -3177,7 +3182,11 @@ async def start_study_journey(request: StudyPlanRequest):
                                 "question": q.get("question", ""),
                                 "options": q.get("options", []),
                                 "correctIndex": correct_index,
+                                # Legacy full rationale (empty on new generations).
                                 "rationale": q.get("justification", ""),
+                                # New one-sentence summary; full rationale is fetched
+                                # on demand via /quiz_rationale.
+                                "correctBlurb": q.get("correct_blurb", ""),
                                 "topic": q.get("topic", node_label)
                             }
                             questions.append(formatted)
@@ -3653,7 +3662,10 @@ async def generate_study_exam(request: StudyExamRequest):
                             "question": question.get('question', ''),
                             "options": question.get('options', []),
                             "correctIndex": correct_index,
+                            # Legacy field kept for back-compat with old saved quizzes.
                             "rationale": question.get('justification', ''),
+                            # New one-sentence summary; full rationale on demand.
+                            "correctBlurb": question.get('correct_blurb', ''),
                             "topic": question.get('topic', request.topic)
                         })
                     elif q_type == 'sata':
@@ -3850,7 +3862,10 @@ async def generate_study_item_stream(request: StudyItemRequest):
                                 "question": question.get('question', ''),
                                 "options": question.get('options', []),
                                 "correctIndex": correct_index,
+                                # Legacy field kept for back-compat with old saved quizzes.
                                 "rationale": question.get('justification', ''),
+                                # New one-sentence summary; full rationale on demand.
+                                "correctBlurb": question.get('correct_blurb', ''),
                                 "topic": question.get('topic', request.node_label)
                             })
 
@@ -4230,7 +4245,10 @@ async def _generate_quiz_item(llm, label: str, context: str, language: str, aske
                 "question": question_data['question'],
                 "options": question_data['options'],
                 "correctIndex": correct_index,
+                # Legacy field kept for back-compat with old saved quizzes.
                 "rationale": question_data.get('justification', ''),
+                # New one-sentence summary; full rationale on demand.
+                "correctBlurb": question_data.get('correct_blurb', ''),
                 "topic": question_data.get('topic', label)
             }
 
@@ -4374,7 +4392,10 @@ async def _generate_quiz_via_stream(
                     "question": question.get('question', ''),
                     "options": question.get('options', []),
                     "correctIndex": correct_index,
+                    # Legacy field kept for back-compat with old saved quizzes.
                     "rationale": question.get('justification', ''),
+                    # New one-sentence summary; full rationale on demand.
+                    "correctBlurb": question.get('correct_blurb', ''),
                     "topic": question.get('topic', topic)
                 }
                 questions.append(formatted_question)
@@ -4629,6 +4650,7 @@ OUTPUT DISCIPLINE
 from pydantic import BaseModel as _GlossaryBaseModel
 from services.glossary import get_term_definition
 from services.explain import explain_selection
+from services.quiz_rationale import generate_rationale as generate_quiz_rationale
 
 class GlossaryRequest(_GlossaryBaseModel):
     term: str
@@ -4676,6 +4698,43 @@ async def explain(request: ExplainRequest):
         print(f"⚠️ Explain failed for {text[:60]!r}: {e}")
         raise HTTPException(status_code=500, detail="explain failed")
 
+
+# ============================================================================
+# QUIZ RATIONALE ENDPOINT — generate per-option rationale on demand when the
+# user clicks "Learn more" on a quiz question. Lets the original quiz
+# generation skip the (expensive) inline justification.
+# ============================================================================
+from typing import List as _RationaleList
+
+class QuizRationaleRequest(_GlossaryBaseModel):
+    question: str
+    options: _RationaleList[str]
+    correct_index: int
+    language: _ExplainOptional[str] = "en"
+
+@app.post("/quiz_rationale")
+async def quiz_rationale(request: QuizRationaleRequest):
+    question = (request.question or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="question is required")
+    if not request.options or len(request.options) < 2:
+        raise HTTPException(status_code=400, detail="at least 2 options required")
+    if request.correct_index < 0 or request.correct_index >= len(request.options):
+        raise HTTPException(status_code=400, detail="correct_index out of range")
+    if len(question) > 1200:
+        raise HTTPException(status_code=400, detail="question too long")
+    try:
+        result = await generate_quiz_rationale(
+            question,
+            request.options,
+            request.correct_index,
+            request.language or "en",
+        )
+        return result
+    except Exception as e:
+        print(f"⚠️ Quiz rationale failed for {question[:60]!r}: {e}")
+        raise HTTPException(status_code=500, detail="quiz rationale failed")
+
 # ============================================================================
 # QUESTION BANK IMPORT ENDPOINT
 # ============================================================================
@@ -4696,11 +4755,18 @@ class QuestionImport(BaseModel):
     """
     Single question for import.
     Matches the EXACT format your LLM generates.
+
+    Backwards-compat: `justification` and `correct_blurb` are both optional.
+    Legacy generations shipped a full per-option `justification` HTML blob;
+    the new pipeline ships a one-sentence `correct_blurb` and defers the
+    full per-option rationale to /quiz_rationale on demand. Admin imports
+    can use either field.
     """
     question: str
     options: List[str]  # ["A) ...", "B) ...", "C) ...", "D) ..."]
     answer: str         # The correct option text (e.g., "B) ...")
-    justification: str  # HTML explanation
+    justification: Optional[str] = ""   # Legacy full-rationale HTML
+    correct_blurb: Optional[str] = ""   # New one-sentence rationale
     topic: str          # e.g., "cardiac medications"
     metadata: Optional[QuestionMetadata] = None  # Optional - matches LLM output
 
@@ -4771,12 +4837,16 @@ async def import_questions(request: BulkImportRequest):
             else:
                 language = "en"
 
-            # The question_data format expected by save_question
+            # The question_data format expected by save_question.
+            # Both legacy (justification) and new (correct_blurb) fields are
+            # forwarded so existing question-bank rows keep their full HTML
+            # while new ones store the short blurb.
             question_data = {
                 "question": q.question,
                 "options": q.options,
                 "answer": q.answer,
-                "justification": q.justification,
+                "justification": q.justification or "",
+                "correct_blurb": q.correct_blurb or "",
                 "topic": q.topic
             }
 

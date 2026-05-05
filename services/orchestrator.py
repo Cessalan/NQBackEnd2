@@ -541,11 +541,19 @@ class NursingTutor:
 
                                 transformed['correctIndex'] = correct_index
 
-                                # 2. Copy justification to rationale
+                                # 2. Copy rationale fields. After the deferred-
+                                # rationale rollout, new generations no longer
+                                # include `justification` — they ship a one-sentence
+                                # `correct_blurb` instead, and the frontend fetches
+                                # the full per-option rationale on demand from
+                                # /quiz_rationale. Old saved quizzes still have
+                                # `justification`, so we forward whichever exists.
                                 if 'justification' in q:
                                     transformed['rationale'] = q['justification']
+                                if 'correct_blurb' in q:
+                                    transformed['correctBlurb'] = q['correct_blurb']
 
-                                print(f"🔄 Transformed question: correctIndex={correct_index}, has rationale={bool(transformed.get('rationale'))}")
+                                print(f"🔄 Transformed question: correctIndex={correct_index}, has rationale={bool(transformed.get('rationale'))}, has blurb={bool(transformed.get('correctBlurb'))}")
                                 return transformed
 
                             # creates parameters we will need for the quizz, and start streaming
