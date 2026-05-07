@@ -2474,9 +2474,9 @@ async def create_plan(request: PlanRequest):
         {{"id": "concepts", "title": "Key Concepts", "color": "green"}}
         ]
         """
-        # This creates an LLM instance
+        # Section-title JSON is a trivial structured task — mini handles it for ~5x less.
         llm = ChatOpenAI(
-            model="gpt-4.1",           # Larger context for richer plans
+            model="gpt-4.1-mini",
             temperature=0.3
         )
         

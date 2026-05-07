@@ -39,38 +39,29 @@ def is_duplicate_question(
     existing_embeddings: List[np.ndarray],
     embeddings_model: OpenAIEmbeddings,
     threshold: float = 0.85
-) -> bool:
+) -> tuple:
     """
     Check if new_text is too similar to any existing text using cosine similarity.
 
-    Args:
-        new_text: The new question to check
-        existing_texts: List of existing questions
-        existing_embeddings: Pre-computed embeddings for existing texts
-        embeddings_model: OpenAI embeddings model
-        threshold: Similarity threshold (0.85 = 85% similar considered duplicate)
-
-    Returns:
-        True if the new text is a duplicate, False otherwise
+    Returns (is_duplicate, new_embedding). The embedding is returned so the caller
+    can reuse it for storage without paying for a second embed_query call.
     """
     if not existing_texts or not existing_embeddings:
-        return False
+        return (False, None)
 
     try:
-        # Get embedding for new text
         new_embedding = np.array(embeddings_model.embed_query(new_text))
 
-        # Check similarity against all existing embeddings
         for i, existing_emb in enumerate(existing_embeddings):
             similarity = cosine_similarity(new_embedding, existing_emb)
             if similarity >= threshold:
                 print(f"🔄 Duplicate question detected! Similarity: {similarity:.2f} with: '{existing_texts[i][:50]}...'")
-                return True
+                return (True, new_embedding)
 
-        return False
+        return (False, new_embedding)
     except Exception as e:
         print(f"⚠️ Error checking question similarity: {e}")
-        return False  # On error, allow the question (fail open)
+        return (False, None)  # On error, allow the question (fail open)
 
 # firebase that stores data needed for context (conversation)
 from firebase_admin import firestore
@@ -561,7 +552,7 @@ async def _create_study_sheet_with_anthropic(
             openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
             
             response = openai_client.chat.completions.create(
-                model="gpt-4.1",
+                model="gpt-4.1-mini",
                 max_tokens=6000,
                 temperature=0.3,
                 messages=[{"role": "user", "content": prompt}]
@@ -1453,7 +1444,7 @@ async def stream_quiz_questions(
     # ≡ƒåò PHASE 2: Generate quiz questions
     # Get content based on source
     if source == "documents" and session.vectorstore:
-        docs = session.vectorstore.similarity_search(query=topic, k=1000)
+        docs = session.vectorstore.similarity_search(query=topic, k=30)
         full_text = "\n\n".join([doc.page_content for doc in docs])[:12000]
         content_context = f"Document content:\n{full_text}"
     else:
@@ -1549,24 +1540,28 @@ async def stream_quiz_questions(
 
         if question_data:
             question_text = question_data['question']
+            new_embedding = None
 
             # Check for duplicate using cosine similarity
-            if generated_questions and is_duplicate_question(
-                new_text=question_text,
-                existing_texts=generated_questions,
-                existing_embeddings=generated_embeddings,
-                embeddings_model=embeddings_model,
-                threshold=0.85
-            ):
-                print(f"⚠️ Duplicate question detected, regenerating... (attempt {attempts})")
-                continue  # Skip this question and try again
+            if generated_questions:
+                is_dup, new_embedding = is_duplicate_question(
+                    new_text=question_text,
+                    existing_texts=generated_questions,
+                    existing_embeddings=generated_embeddings,
+                    embeddings_model=embeddings_model,
+                    threshold=0.85
+                )
+                if is_dup:
+                    print(f"⚠️ Duplicate question detected, regenerating... (attempt {attempts})")
+                    continue  # Skip this question and try again
 
             # Not a duplicate - add to tracking lists
             generated_questions.append(question_text)
 
-            # Store embedding for future comparisons
+            # Store embedding for future comparisons (reuse from dedupe check if available)
             try:
-                new_embedding = np.array(embeddings_model.embed_query(question_text))
+                if new_embedding is None:
+                    new_embedding = np.array(embeddings_model.embed_query(question_text))
                 generated_embeddings.append(new_embedding)
             except Exception as e:
                 print(f"⚠️ Failed to store question embedding: {e}")

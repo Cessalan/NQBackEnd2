@@ -99,10 +99,10 @@ async def stream_mindmap_data(
     }
 
     # Step 3: Generate mindmap structure with LLM
-    # Using gpt-4.1 for better reasoning about document structure and hierarchical relationships
+    # gpt-4.1-mini handles hierarchical extraction well at ~5x lower cost.
     api_key = os.getenv("OPENAI_API_KEY")
     llm = ChatOpenAI(
-        model="gpt-4.1",
+        model="gpt-4.1-mini",
         temperature=0.3,
         openai_api_key=api_key
     )

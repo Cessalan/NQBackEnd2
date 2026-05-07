@@ -422,8 +422,8 @@ class StudySheetStreamer:
             
             # Get chunks most relevant to THIS section only
             section_docs = session.vectorstore.similarity_search(
-                query=focused_query, 
-                k=150  # Get 150 chunks specific to this section
+                query=focused_query,
+                k=30  # 30 chunks comfortably exceeds the 8K-char truncation window
             )
             
             # Join and limit
@@ -1434,13 +1434,12 @@ class StudySheetStreamer:
                 session.vectorstore_loaded = True
             
             if session.vectorstore:
-                # MATCH QUIZ GENERATION APPROACH (line 768 in quiztools.py)
-                # Get up to 1000 chunks for comprehensive coverage
-                docs = session.vectorstore.similarity_search(query=topic, k=1000)
-                
+                # 50 chunks comfortably exceeds the 20K-char truncation window
+                docs = session.vectorstore.similarity_search(query=topic, k=50)
+
                 # Join all chunks
                 full_text = "\n\n".join([doc.page_content for doc in docs])
-                
+
                 # Limit to reasonable size (20K chars = ~5K tokens)
                 context = full_text[:20000]
                 

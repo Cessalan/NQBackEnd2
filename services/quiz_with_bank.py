@@ -382,7 +382,7 @@ async def stream_quiz_questions(
 
         # Build content context based on source
         if source == "documents" and session.vectorstore:
-            docs = session.vectorstore.similarity_search(query=topic, k=1000)
+            docs = session.vectorstore.similarity_search(query=topic, k=30)
             full_text = "\n\n".join([doc.page_content for doc in docs])[:12000]
             content_context = f"Document content:\n{full_text}"
         else:

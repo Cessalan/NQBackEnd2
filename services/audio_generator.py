@@ -264,7 +264,7 @@ class AudioGenerator:
         prompt = self._get_script_prompt(topic, intent, context, word_count, language)
 
         response = await self.client.chat.completions.create(
-            model="gpt-4.1",
+            model="gpt-4.1-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
             max_tokens=word_count * 2  # Allow some buffer

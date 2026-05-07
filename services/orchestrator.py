@@ -1576,8 +1576,8 @@ Original message: {user_input}"""
                 Create an accurate summary of the ACTUAL content above (do not create hypothetical nursing content):
                 """
             
-            # REAL STREAMING with vector store content
-            llm = ChatOpenAI(model="gpt-4.1", temperature=0.3,streaming=True )
+            # Summarization is mini's strong suit; comprehensive summaries can be ~30k input tokens.
+            llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.3, streaming=True)
             
             async for chunk in llm.astream([{"role": "user", "content": summary_prompt}]):
                 if hasattr(chunk, 'content') and chunk.content:
