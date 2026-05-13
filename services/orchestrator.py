@@ -45,8 +45,9 @@ class NursingTutor:
         self.session = PersistentSessionContext(chat_id)
         self.tools_instance = NursingTools(self.session)
 
-        # Get properly decorated tools
-        tools = self.tools_instance.get_tools()
+        # Get properly decorated tools — keep a reference so we can rebind
+        # with `tool_choice` later when fast routing has a confident pick.
+        self.tools = self.tools_instance.get_tools()
 
         import os
         api_key = os.getenv("OPENAI_API_KEY")
@@ -68,8 +69,8 @@ class NursingTutor:
             openai_api_key=api_key
         )
 
-        self.llm_with_tools = self.llm.bind_tools(tools)
-        self.routing_llm_with_tools = self.routing_llm.bind_tools(tools)
+        self.llm_with_tools = self.llm.bind_tools(self.tools)
+        self.routing_llm_with_tools = self.routing_llm.bind_tools(self.tools)
 
     # Patterns that indicate NO tool is needed (direct conversation)
     CONVERSATIONAL_PATTERNS = re.compile(
@@ -94,25 +95,33 @@ class NursingTutor:
         """
         input_lower = user_input.lower().strip()
 
-        # Check for quiz patterns (most common)
-        if self.QUIZ_PATTERNS.search(user_input):
-            print(f"⚡ FAST ROUTE: Detected quiz pattern in '{user_input[:50]}...'")
-            return "generate_quiz_stream"
+        # Order matters: more specific patterns first. The QUIZ regex matches
+        # broad single words ("test", "exam", "nclex") that commonly appear
+        # inside flashcard/study-sheet requests ("make flashcards to TEST me",
+        # "give me a study sheet for the EXAM"). Checking QUIZ first would
+        # mis-route those, so we check the specific patterns first and let
+        # QUIZ catch only the residual cases.
 
-        # Check for flashcard patterns
+        # Flashcards (specific keyword, no overlap with quiz vocab)
         if self.FLASHCARD_PATTERNS.search(user_input):
             print(f"⚡ FAST ROUTE: Detected flashcard pattern")
             return "generate_flashcards_stream"
 
-        # Check for study sheet patterns
+        # Study sheet (multi-word, very specific)
         if self.STUDYSHEET_PATTERNS.search(user_input):
             print(f"⚡ FAST ROUTE: Detected study sheet pattern")
             return "generate_study_sheet_stream"
 
-        # Check for summarize patterns
+        # Summarize (specific verbs, but "résumé" also lives in STUDYSHEET —
+        # checked after so French study-sheet phrasing wins where intended)
         if self.SUMMARIZE_PATTERNS.search(user_input):
             print(f"⚡ FAST ROUTE: Detected summarize pattern")
             return "summarize_document"
+
+        # Quiz / test / exam — broadest content pattern, checked last
+        if self.QUIZ_PATTERNS.search(user_input):
+            print(f"⚡ FAST ROUTE: Detected quiz pattern in '{user_input[:50]}...'")
+            return "generate_quiz_stream"
 
         # Check for conversational patterns (no tool needed)
         # Short messages are usually conversational
@@ -279,9 +288,18 @@ class NursingTutor:
                 return  # Exit early, skip the tool routing path
 
             elif fast_route_tool:
-                # Fast path: Pattern matched, use gpt-4.1-mini to get tool args
-                print(f"⚡ FAST ROUTING: Using {fast_route_tool} (pattern matched)")
-                response = await self.routing_llm_with_tools.ainvoke(messages)
+                # Fast path: Pattern matched. FORCE the LLM to call this tool —
+                # without tool_choice, the small routing model sometimes
+                # second-guesses the pattern and picks a different tool
+                # (the "asked for flashcards, got a quiz" bug). The LLM still
+                # extracts arguments from the user message; we only constrain
+                # WHICH tool gets called.
+                print(f"⚡ FAST ROUTING: Forcing {fast_route_tool} (pattern matched)")
+                forced_llm = self.routing_llm.bind_tools(
+                    self.tools,
+                    tool_choice=fast_route_tool,
+                )
+                response = await forced_llm.ainvoke(messages)
             else:
                 # Ambiguous: Use gpt-4.1-mini for routing decision (faster than gpt-4.1)
                 print("🔀 SMART ROUTING: Using gpt-4.1-mini for tool decision...")
@@ -438,6 +456,19 @@ class NursingTutor:
                                             "flashcard_data": all_flashcards,
                                             "total_generated": chunk.get("total_generated")
                                         }) + "\n"
+
+                                # Persist generated flashcards in session so
+                                # follow-up turns know flashcards (not quizzes)
+                                # were the most recent activity. Without this,
+                                # _get_last_activity_summary keeps reporting
+                                # an old quiz as "what just happened" and the
+                                # LLM keeps producing quizzes.
+                                try:
+                                    self.session.last_flashcards = all_flashcards
+                                    self.session.last_flashcard_topic = metadata.get("topic")
+                                    self.session.last_flashcard_timestamp = datetime.now().isoformat()
+                                except Exception as e:
+                                    print(f"Failed to cache flashcards in session: {e}")
                             else:
                                 # Tool error
                                 yield json.dumps({
@@ -1215,64 +1246,73 @@ Note: For detailed quiz analysis, the full quiz data is available via _format_la
         """
         try:
             # ─────────────────────────────────────────────────────────────────
-            # STEP 1: Check if there was a recent quiz
+            # STEP 1: Find the MOST RECENT activity by timestamp.
+            # Previously we always checked quizzes first regardless of recency,
+            # which made the LLM keep proposing quizzes even after the user
+            # had moved on to flashcards. We now compare timestamps and
+            # surface whichever activity actually happened last.
             # ─────────────────────────────────────────────────────────────────
+            quiz_ts = None
+            last_quiz = None
             if self.session.quizzes and len(self.session.quizzes) > 0:
+                candidate = self.session.quizzes[-1]
+                if isinstance(candidate, dict):
+                    last_quiz = candidate
+                    quiz_ts = candidate.get('timestamp')
 
-                # Get the most recent quiz
-                last_quiz = self.session.quizzes[-1]
+            flash_ts = getattr(self.session, 'last_flashcard_timestamp', None)
+            has_flashcards = bool(getattr(self.session, 'last_flashcards', None))
 
-                # Handle different quiz entry formats
-                if not isinstance(last_quiz, dict):
-                    return "No recent quiz or flashcard activity"
+            # Pick the latest of the two. ISO-8601 strings sort
+            # lexicographically, so direct string compare is correct.
+            quiz_is_latest = False
+            flash_is_latest = False
+            if last_quiz and has_flashcards:
+                if (quiz_ts or "") >= (flash_ts or ""):
+                    quiz_is_latest = True
+                else:
+                    flash_is_latest = True
+            elif last_quiz:
+                quiz_is_latest = True
+            elif has_flashcards:
+                flash_is_latest = True
+
+            # ─────────────────────────────────────────────────────────────────
+            # STEP 2: Build summary for the latest activity
+            # ─────────────────────────────────────────────────────────────────
+            if quiz_is_latest and last_quiz is not None:
 
                 # Extract quiz data (handle different formats)
                 quiz_data = last_quiz.get('quiz_data', {})
 
                 # Get questions list - handle both formats
                 if isinstance(quiz_data, list):
-                    # Format: quizData is the array directly
                     questions = quiz_data
                 elif isinstance(quiz_data, dict):
-                    # Format: quizData has 'questions' key
                     questions = quiz_data.get('questions', [])
                 else:
                     questions = []
 
-                # If we have questions, analyze them
                 if questions and len(questions) > 0:
-
-                    # ─────────────────────────────────────────────────────────
-                    # STEP 2: Calculate score from quiz
-                    # ─────────────────────────────────────────────────────────
                     total_questions = len(questions)
                     correct_answers = 0
                     topics_covered = set()
 
                     for question in questions:
-                        # Skip non-dict items
                         if not isinstance(question, dict):
                             continue
-
-                        # Check if user answered correctly
                         user_selection = question.get('userSelection', {})
                         if isinstance(user_selection, dict) and user_selection.get('isCorrect', False):
                             correct_answers += 1
-
-                        # Collect topics
                         topic = question.get('topic', '')
                         if topic:
                             topics_covered.add(topic)
 
-                    # Calculate percentage
                     if total_questions > 0:
                         percentage = round((correct_answers / total_questions) * 100)
                     else:
                         percentage = 0
 
-                    # ─────────────────────────────────────────────────────────
-                    # STEP 3: Build the summary string
-                    # ─────────────────────────────────────────────────────────
                     topics_str = ', '.join(topics_covered) if topics_covered else 'General'
 
                     summary = f"""
@@ -1287,23 +1327,20 @@ IMPORTANT: If user now says "more", "again", "another", "continue", "next":
 """
                     return summary.strip()
 
-            # ─────────────────────────────────────────────────────────────────
-            # STEP 4: Check for other activities (flashcards, study sheets)
-            # ─────────────────────────────────────────────────────────────────
-
-            # Check for flashcards (if you track them in session)
-            if hasattr(self.session, 'last_flashcards') and self.session.last_flashcards:
-                return """
+            if flash_is_latest:
+                topic = getattr(self.session, 'last_flashcard_topic', None) or 'General'
+                return f"""
 Type: FLASHCARDS_CREATED
+Topic: {topic}
 Status: User just reviewed flashcards
 
 IMPORTANT: If user now says "more", "again", "another":
-→ They want MORE FLASHCARDS on the same topic
+→ They want MORE FLASHCARDS on the same topic ({topic})
 → Use generate_flashcards_stream tool immediately!
 """.strip()
 
             # ─────────────────────────────────────────────────────────────────
-            # STEP 5: No recent activity found
+            # STEP 3: No recent activity found
             # ─────────────────────────────────────────────────────────────────
             return "No recent quiz or flashcard activity"
 
@@ -1408,25 +1445,41 @@ IMPORTANT: If user now says "more", "again", "another":
             return {'is_continuation': False, 'action_type': None, 'topic': None}
 
         # ─────────────────────────────────────────────────────────────────────
-        # STEP 4: Determine what action to continue (quiz, flashcard, etc.)
+        # STEP 4: Determine what action to continue.
+        # Pick the MOST RECENT activity by timestamp — a chat may contain both
+        # quizzes and flashcards, and "more" / "again" should always continue
+        # whichever the user just interacted with, not whichever happens to
+        # be checked first.
         # ─────────────────────────────────────────────────────────────────────
         action_type = None
         topic = None
 
-        # Check if there was a recent quiz
+        quiz_ts = None
+        last_quiz = None
         if self.session.quizzes and len(self.session.quizzes) > 0:
-            action_type = 'quiz'
+            candidate = self.session.quizzes[-1]
+            if isinstance(candidate, dict):
+                last_quiz = candidate
+                quiz_ts = candidate.get('timestamp')
 
-            # Get the topic from the last quiz
-            last_quiz = self.session.quizzes[-1]
+        flash_ts = getattr(self.session, 'last_flashcard_timestamp', None)
+        has_flashcards = bool(getattr(self.session, 'last_flashcards', None))
 
-            # Handle different entry formats
-            if isinstance(last_quiz, dict):
-                quiz_data = last_quiz.get('quiz_data', {})
+        prefer_quiz = False
+        prefer_flashcards = False
+        if last_quiz and has_flashcards:
+            if (quiz_ts or "") >= (flash_ts or ""):
+                prefer_quiz = True
             else:
-                quiz_data = {}
+                prefer_flashcards = True
+        elif last_quiz:
+            prefer_quiz = True
+        elif has_flashcards:
+            prefer_flashcards = True
 
-            # Extract questions - handle both formats
+        if prefer_quiz and last_quiz is not None:
+            action_type = 'quiz'
+            quiz_data = last_quiz.get('quiz_data', {})
             if isinstance(quiz_data, list):
                 questions = quiz_data
             elif isinstance(quiz_data, dict):
@@ -1434,7 +1487,6 @@ IMPORTANT: If user now says "more", "again", "another":
             else:
                 questions = []
 
-            # Get topics from questions
             if questions:
                 topics = set()
                 for q in questions:
@@ -1445,8 +1497,7 @@ IMPORTANT: If user now says "more", "again", "another":
                 if topics:
                     topic = ', '.join(topics)
 
-        # Check for flashcards (if tracked)
-        elif hasattr(self.session, 'last_flashcards') and self.session.last_flashcards:
+        elif prefer_flashcards:
             action_type = 'flashcard'
             topic = getattr(self.session, 'last_flashcard_topic', None)
 
