@@ -250,7 +250,13 @@ SESSION_LAST_ACTIVITY: Dict[str, float] = {}  # Track last activity time for eac
 # COST OPTIMIZATION: Session cleanup configuration
 # ============================================================================
 SESSION_IDLE_TIMEOUT = 120  # 2 minutes - enough for rapid interactions
-CONNECTION_IDLE_TIMEOUT = 120  # 2 minutes - WebSocket idle timeout (not per-message)
+# WebSocket idle timeout. Bumped from 120s -> 300s because the
+# research-grounded quiz pipeline (intent analyzer -> web research ->
+# concept extraction -> 10 parallel SATA generations) can legitimately
+# run 60-150s end to end. The watchdog now ALSO treats server-sent
+# stream chunks as activity (see send_text loop in process_chat_message),
+# so this timeout only triggers when the connection is truly silent.
+CONNECTION_IDLE_TIMEOUT = 300  # 5 minutes
 SESSION_MAX_AGE = 900  # 15 minutes - max session lifetime regardless of activity
 
 import time
@@ -671,6 +677,15 @@ async def process_chat_message(chat_id: str, message: dict, websocket: WebSocket
             language,
             pre_fetched_context=full_context_from_db  # Pass context to avoid duplicate fetch!
         ):
+            # ─────────────────────────────────────────────────────────
+            # Treat every server-sent chunk as connection activity, so
+            # the idle-watchdog doesn't kill a connection while we're
+            # actively streaming. Without this, long pipelines (e.g.
+            # web-research-grounded quiz) silently get terminated mid-
+            # stream even though the server is doing real work.
+            # ─────────────────────────────────────────────────────────
+            manager.update_activity(chat_id)
+
             # Check for cancellation before processing each chunk
             if manager.is_cancelled(chat_id):
                 print(f"🛑 Stream cancelled for chat {chat_id}, stopping...")
@@ -701,6 +716,15 @@ async def process_chat_message(chat_id: str, message: dict, websocket: WebSocket
                     "type": "stream_chunk",
                     "data": {"answer_chunk": chunk.strip()}
                 }))
+
+            # Every server-sent chunk counts as activity. Without this,
+            # the idle watchdog (cleanup_idle_connections) only saw
+            # client->server messages and would close the connection
+            # mid-stream during long phases like exam research or
+            # parallel quiz generation. Updating per-chunk keeps the
+            # connection considered "alive" as long as we're actively
+            # streaming events to the client.
+            manager.update_activity(chat_id)
         
         # Send completion signal
         manager.reset_cancellation(chat_id)  # Reset cancellation flag

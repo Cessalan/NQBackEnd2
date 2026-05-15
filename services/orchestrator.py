@@ -4,6 +4,7 @@ from models.session import PersistentSessionContext
 from typing import AsyncGenerator, Optional, Tuple
 from datetime import datetime
 from tools.quiztools import search_documents,summarize_document,get_chat_context_from_db
+from services.intent_analyzer import analyze_intent, should_skip_analysis
 import json
 import re
 
@@ -255,17 +256,261 @@ class NursingTutor:
                 print("Error when building message",e)
 
             # ═══════════════════════════════════════════════════════════════════
-            # OPTIMIZED ROUTING: Fast pattern matching → Fast LLM → Full LLM
+            # STEP: INTENT ANALYSIS (Claude "think before generating")
+            # ═══════════════════════════════════════════════════════════════════
+            # Runs Claude Sonnet 4.6 with adaptive thinking + web_search before
+            # the existing fast-route logic. Produces a structured classification
+            # of intent, quality bar, document use, and (when applicable) a
+            # one-sentence honesty preamble we stream before generation.
+            #
+            # Skipped for continuations and very short conversational messages
+            # to keep the hot path fast.
+            # ═══════════════════════════════════════════════════════════════════
+            classification = None
+            tool_args_overrides = {}
+            honesty_preamble = None
+            analyzer_recommended_tool = None
+
+            if not should_skip_analysis(user_input, continuation_info.get('is_continuation', False)):
+                try:
+                    uploaded_docs = [
+                        d.get("filename", "") for d in (self.session.documents or [])
+                        if isinstance(d, dict)
+                    ]
+                    file_insights = getattr(self.session, 'file_insights', {}) or {}
+                    classification = await analyze_intent(
+                        user_message=user_input,
+                        recent_history=self.session.message_history[-5:],
+                        uploaded_docs=uploaded_docs,
+                        file_insights=file_insights,
+                    )
+                    print(
+                        f"🧠 ANALYZER: intent={classification.get('intent')} "
+                        f"tool={classification.get('recommended_tool')} "
+                        f"quality={classification.get('quality_standard')} "
+                        f"board={classification.get('exam_board')} "
+                        f"honesty={classification.get('honesty_required')} "
+                        f"fallback={classification.get('_fallback', False)}"
+                    )
+                    print(f"   reasoning: {classification.get('reasoning', '')}")
+
+                    # Honor the analyzer's recommendation only when it didn't
+                    # fall back to the safe default. On fallback we let the
+                    # existing fast-route / LLM-routing path decide.
+                    if not classification.get('_fallback'):
+                        analyzer_recommended_tool = classification.get('recommended_tool')
+                        tool_args_overrides = classification.get('tool_args_overrides') or {}
+                        if classification.get('honesty_required'):
+                            honesty_preamble = classification.get('honesty_message')
+                except Exception as e:
+                    print(f"ERROR running intent analyzer (continuing without): {e}")
+
+            # ═══════════════════════════════════════════════════════════════════
+            # STEP: EXAM RESEARCH (web search for school-specific exams)
+            # ═══════════════════════════════════════════════════════════════════
+            # Fires only when the analyzer set needs_research=true (the user
+            # named a specific school OR a country-specific exam board).
+            # Runs Claude Sonnet 4.6 with web_search, returns a structured
+            # brief + citations, caches in Firestore for 24h.
+            #
+            # The citations are streamed to the frontend as a
+            # `web_sources_found` event BEFORE the quiz starts, so the user
+            # sees the sources panel build up first, then the quiz.
+            #
+            # The brief itself is passed to the quiz generator as additional
+            # context so questions are grounded in real-world material, not
+            # just generic LLM knowledge.
+            # ═══════════════════════════════════════════════════════════════════
+            research_brief = None
+            if (
+                classification
+                and not classification.get('_fallback')
+                and classification.get('needs_research')
+                and classification.get('recommended_tool') in {
+                    "generate_quiz_stream",
+                    "generate_flashcards_stream",
+                }
+            ):
+                try:
+                    # Topic: prefer the analyzer's tool_args_overrides topic
+                    # if it set one, else fall back to whatever the user said.
+                    research_topic = (
+                        tool_args_overrides.get('topic')
+                        or user_input[:200]
+                    )
+
+                    print(
+                        f"🔬 RESEARCH PHASE starting: "
+                        f"school={classification.get('school_name')} "
+                        f"board={classification.get('exam_board')} "
+                        f"query={classification.get('research_query')}"
+                    )
+
+                    # Tell the frontend research is underway so it can show a
+                    # premium "Searching the web..." skeleton in the chat.
+                    yield json.dumps({
+                        "status": "web_research_started",
+                        "school": classification.get('school_name'),
+                        "exam_board": classification.get('exam_board'),
+                        "query": classification.get('research_query'),
+                    }) + "\n"
+
+                    from services.exam_research import (
+                        gather_exam_research,
+                        format_brief_as_context,
+                    )
+                    research_brief = await gather_exam_research(
+                        topic=research_topic,
+                        exam_board=classification.get('exam_board'),
+                        school=classification.get('school_name'),
+                        research_query=classification.get('research_query'),
+                        language=language,
+                    )
+
+                    if research_brief:
+                        print(
+                            f"🔬 RESEARCH DONE: "
+                            f"{len(research_brief.get('citations', []))} citations, "
+                            f"cached={research_brief.get('cached', False)}, "
+                            f"real_papers={research_brief.get('found_real_papers', False)}"
+                        )
+                        # Stream the sources panel event for the frontend.
+                        yield json.dumps({
+                            "status": "web_sources_found",
+                            "school": classification.get('school_name'),
+                            "exam_board": classification.get('exam_board'),
+                            "exam_summary": research_brief.get('exam_summary', ''),
+                            "found_real_papers": research_brief.get('found_real_papers', False),
+                            "honesty_note": research_brief.get('honesty_note'),
+                            "cached": research_brief.get('cached', False),
+                            "citations": research_brief.get('citations', []),
+                        }) + "\n"
+
+                        # The brief itself is passed directly to
+                        # stream_quiz_with_bank as additional_context at
+                        # the dispatch site below — we do NOT merge it
+                        # into tool_args_overrides because the @tool
+                        # signature for generate_quiz_stream doesn't
+                        # accept that field (LangChain would drop it).
+                    else:
+                        # Search produced nothing usable. Tell the frontend so
+                        # it can show the honesty fallback message and we
+                        # generate at the typical standard for the board.
+                        print("🔬 RESEARCH PHASE returned no brief - falling back to generic generation")
+                        yield json.dumps({
+                            "status": "web_research_failed",
+                            "school": classification.get('school_name'),
+                            "exam_board": classification.get('exam_board'),
+                            "message": (
+                                "I couldn't find specific online material "
+                                "for that exam. I'll generate practice "
+                                "questions at the typical standard for "
+                                "this kind of exam instead."
+                            ),
+                        }) + "\n"
+                except Exception as e:
+                    print(f"ERROR running exam research (continuing without): {type(e).__name__}: {e}")
+                    import traceback
+                    traceback.print_exc()
+
+            # ═══════════════════════════════════════════════════════════════════
+            # OPTIMIZED ROUTING: Analyzer → Fast pattern → Fast LLM → Full LLM
             # ═══════════════════════════════════════════════════════════════════
             # Previously: Every message did a full gpt-4.1 call for routing (1-2s)
             # Now:
-            #   1. Fast pattern matching (0ms) - catches 60%+ of tool requests
+            #   0. Intent analyzer (Claude Sonnet 4.6, ~400-2000ms) — primary route
+            #   1. Fast pattern matching (0ms) — fallback when analyzer skipped
             #   2. "NO_TOOL" fast path - skips routing for conversational messages
             #   3. gpt-4.1-mini routing (~300-500ms) - for ambiguous cases
             #   4. gpt-4.1 only for actual content generation
             # ═══════════════════════════════════════════════════════════════════
 
             fast_route_tool = self._fast_route_check(user_input)
+
+            # ─────────────────────────────────────────────────────────────────
+            # If the analyzer picked an explicit content-generating tool, use
+            # its pick instead of the regex-based fast-route. The analyzer
+            # has seen the full message + recent history + uploaded-doc
+            # context, so its decision is strictly better-informed.
+            # ─────────────────────────────────────────────────────────────────
+            ANALYZER_DISPATCHABLE = {
+                "generate_quiz_stream",
+                "generate_flashcards_stream",
+                "generate_study_sheet_stream",
+                "extract_questions_from_doc",
+                "search_documents",
+                "summarize_document",
+            }
+            if analyzer_recommended_tool in ANALYZER_DISPATCHABLE:
+                fast_route_tool = analyzer_recommended_tool
+                print(f"🧠 ANALYZER OVERRIDE: routing to {fast_route_tool}")
+            elif analyzer_recommended_tool == "respond_directly":
+                # Analyzer says no tool needed. Honor it unless fast-route
+                # found a content pattern (which means the user really did
+                # ask for something specific).
+                if not fast_route_tool or fast_route_tool == "NO_TOOL":
+                    fast_route_tool = "NO_TOOL"
+
+            # ─────────────────────────────────────────────────────────────────
+            # Doc-extraction has its own streaming path — not a langchain tool.
+            # Handle it inline before the existing LLM dispatch branch.
+            # ─────────────────────────────────────────────────────────────────
+            if fast_route_tool == "extract_questions_from_doc":
+                if honesty_preamble:
+                    yield json.dumps({"answer_chunk": honesty_preamble + "\n\n"}) + "\n"
+
+                from services.doc_extraction import stream_extracted_questions
+                all_questions = []
+                async for chunk in stream_extracted_questions(
+                    session=self.session,
+                    chat_id=self.session.chat_id,
+                    user_prompt=user_input,
+                    language=language,
+                ):
+                    status = chunk.get("status")
+                    if status == "quiz_generating":
+                        yield json.dumps({
+                            "status": "quiz_generating",
+                            "type": "quiz",
+                            "current": chunk.get("current", 0),
+                            "total": chunk.get("total", "?"),
+                            "message": chunk.get("message", ""),
+                        }) + "\n"
+                    elif status == "question_ready":
+                        question = chunk.get("question") or {}
+                        all_questions.append(question)
+                        yield json.dumps({
+                            "status": "quiz_question",
+                            "type": "quiz",
+                            "question": question,
+                            "index": chunk.get("index", len(all_questions) - 1),
+                            "total_so_far": len(all_questions),
+                        }) + "\n"
+                    elif status == "quiz_complete":
+                        yield json.dumps({
+                            "status": "quiz_complete",
+                            "type": "quiz",
+                            "quiz_data": all_questions,
+                            "total_generated": chunk.get("total_generated", len(all_questions)),
+                        }) + "\n"
+                    elif status == "error":
+                        yield json.dumps({
+                            "status": "error",
+                            "message": chunk.get("message", "Extraction failed"),
+                        }) + "\n"
+
+                # Cache extracted quiz in session so follow-ups know what just happened.
+                try:
+                    self.session.quizzes.append({
+                        "quiz_data": all_questions,
+                        "timestamp": datetime.now().isoformat(),
+                        "source": "document_extraction",
+                    })
+                except Exception as e:
+                    print(f"Failed to cache extracted quiz: {e}")
+
+                yield json.dumps({"status": "complete"}) + "\n"
+                return
 
             if fast_route_tool == "NO_TOOL":
                 # Ultra-fast path: Skip routing entirely, stream directly
@@ -308,7 +553,39 @@ class NursingTutor:
             # Check if tools were called
             if hasattr(response, 'tool_calls') and response.tool_calls:
                 tool_calls_made = response.tool_calls
-                
+
+                # ─────────────────────────────────────────────────────────
+                # ANALYZER OVERRIDES: merge tool_args_overrides into each
+                # content-generating tool call. The analyzer's call on
+                # quiz_mode/difficulty/learning_objective is better-informed
+                # than the LLM's because the analyzer thinks specifically
+                # about the quality bar (council-standard, NCLEX, etc.).
+                # ─────────────────────────────────────────────────────────
+                CONTENT_GEN_TOOLS = {"generate_quiz_stream", "generate_flashcards_stream"}
+                if tool_args_overrides:
+                    for tc in tool_calls_made:
+                        if tc.get("name") in CONTENT_GEN_TOOLS:
+                            merged = dict(tc.get("args") or {})
+                            for k, v in tool_args_overrides.items():
+                                if v is None:
+                                    continue
+                                merged[k] = v
+                            tc["args"] = merged
+                            print(f"📐 ANALYZER OVERRIDES applied to {tc.get('name')}: {tool_args_overrides}")
+
+                # ─────────────────────────────────────────────────────────
+                # HONESTY PREAMBLE: stream once before content generation
+                # starts, so the user sees the disclosure ("These are AI-
+                # generated practice questions at council standard") BEFORE
+                # the quiz/flashcard stream begins.
+                # ─────────────────────────────────────────────────────────
+                will_generate_content = any(
+                    tc.get("name") in CONTENT_GEN_TOOLS for tc in tool_calls_made
+                )
+                if honesty_preamble and will_generate_content:
+                    print(f"💬 Streaming honesty preamble: {honesty_preamble}")
+                    yield json.dumps({"answer_chunk": honesty_preamble + "\n\n"}) + "\n"
+
                 # Notify about tool execution
                 for tool_call in tool_calls_made:
                     yield json.dumps({
@@ -607,6 +884,15 @@ class NursingTutor:
                                 # Track questions for final save
                                 all_questions = []
 
+                                # Format the research brief (if we have one) into
+                                # additional context for the quiz generator. This
+                                # is what makes the questions specific to the
+                                # researched exam instead of generic.
+                                research_context_text = None
+                                if research_brief:
+                                    from services.exam_research import format_brief_as_context
+                                    research_context_text = format_brief_as_context(research_brief)
+
                                 # Stream questions one by one (with optional empathetic message)
                                 async for chunk in stream_quiz_questions(
                                     topic=metadata.get("topic"),
@@ -619,7 +905,8 @@ class NursingTutor:
                                     question_types=metadata.get("question_types", ["mcq"]),
                                     quiz_mode=metadata.get("quiz_mode", "knowledge"),
                                     learning_objective=metadata.get("learning_objective", "general"),
-                                    user_prompt=metadata.get("user_prompt")
+                                    user_prompt=metadata.get("user_prompt"),
+                                    additional_context=research_context_text,
                                 ):
                                     # Handle empathetic message streaming
                                     if chunk.get("status") == "empathetic_message_start":

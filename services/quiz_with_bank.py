@@ -182,7 +182,8 @@ async def stream_quiz_questions(
     existing_topics: List[str] = None,
     quiz_mode: str = "knowledge",
     learning_objective: str = "general",
-    user_prompt: str = None
+    user_prompt: str = None,
+    additional_context: str = None,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Generate quiz questions fresh from document content via LLM.
@@ -390,6 +391,20 @@ async def stream_quiz_questions(
 
                 If this is a broad topic (like 'research design', 'pharmacology', 'cardiac care'),
                 ensure you test diverse subtopics and concepts within that domain."""
+
+        # Prepend exam research brief (when present) — this is the
+        # web-search-gathered material about the specific exam the user
+        # named. We put it BEFORE the document/topic content so the LLM
+        # treats it as primary grounding, with documents as secondary.
+        if additional_context:
+            content_context = (
+                "EXAM RESEARCH BRIEF (this exam's actual style and topics — "
+                "ground questions in this material):\n"
+                f"{additional_context}\n\n"
+                "─────────────────────────────────\n\n"
+                f"{content_context}"
+            )
+            logger.info(f"📚 Prepended exam research brief ({len(additional_context)} chars) to content context")
 
         # ==========================================
         # STEP 1: Extract unique concepts FIRST
