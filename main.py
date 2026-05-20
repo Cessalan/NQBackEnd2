@@ -1,7 +1,7 @@
 # main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from fastapi import HTTPException
 from fastapi import WebSocket, WebSocketDisconnect
 from typing import Dict
@@ -14,7 +14,10 @@ import json
 load_dotenv()
 
 # Import your models
-from models.requests import StatelessChatRequest, DocumentsEmbedRequest, SummaryRequest,SectionRequest,PlanRequest
+from models.requests import (
+    StatelessChatRequest, DocumentsEmbedRequest, SummaryRequest, SectionRequest, PlanRequest,
+    RecordingStartRequest, RecordingFinalizeRequest, RecordingCancelRequest,
+)
 
 # Import your orchestrator
 from services.orchestrator import NursingTutor
@@ -4989,6 +4992,290 @@ async def speech_to_text(audio: UploadFile = File(...)):
     except Exception as e:
         print(f"❌ [STT] Error: {e}")
         raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+
+
+# ============================================================================
+# FILE PROXY — serves chat uploads with a clean URL + inline disposition
+# so embedded viewers (Office Online for .docx/.pptx/.xlsx, browser PDF
+# viewer, etc.) can fetch them reliably. Firebase Storage download URLs
+# with `?alt=media&token=...` fail in third-party viewers because of the
+# query string and Content-Disposition headers Firebase sets.
+# ============================================================================
+from fastapi.responses import Response
+import mimetypes as _mimetypes
+
+
+@app.get("/files/proxy/{chat_id}/{filename}")
+async def files_proxy(chat_id: str, filename: str):
+    """
+    Stream a chat-attached file from Firebase Storage.
+
+    Security note: this endpoint is currently unauthenticated. The chat_id is
+    a UUID so unguessable in practice, but a leaked URL grants read access to
+    the file. Add auth (verify Firebase ID token + chat ownership) before
+    treating any of this as private.
+    """
+    try:
+        bucket = storage.bucket()
+        blob = bucket.blob(f"chats/{chat_id}/uploads/{filename}")
+
+        if not blob.exists():
+            raise HTTPException(status_code=404, detail="File not found")
+
+        # Most class files are <50MB; download into memory.
+        content = blob.download_as_bytes()
+
+        # Prefer the blob's stored content-type, fall back to the extension.
+        content_type = blob.content_type
+        if not content_type or content_type == "application/octet-stream":
+            guessed, _ = _mimetypes.guess_type(filename)
+            content_type = guessed or content_type or "application/octet-stream"
+
+        # `inline` so viewers render rather than trigger a download.
+        # Quote the filename in case it contains spaces.
+        safe_name = filename.replace('"', "")
+        headers = {
+            "Content-Disposition": f'inline; filename="{safe_name}"',
+            "Cache-Control": "private, max-age=3600",
+            "Content-Length": str(len(content)),
+        }
+        return Response(content=content, media_type=content_type, headers=headers)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ [Files] Proxy failed for chats/{chat_id}/uploads/{filename}: {e}")
+        raise HTTPException(status_code=500, detail=f"Proxy failed: {e}")
+
+
+# ============================================================================
+# CLASS RECORDING (chunked Whisper transcription)
+# ============================================================================
+from services import recording_service
+
+
+@app.post("/recordings/start")
+async def recording_start(req: RecordingStartRequest):
+    """Create a recording session. Returns {recording_id}."""
+    try:
+        return recording_service.start_recording(
+            user_id=req.user_id,
+            topic=req.topic or "",
+            chat_id=req.chat_id,
+            language=req.language or "en",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"❌ [Recording] start failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to start recording: {e}")
+
+
+@app.post("/recordings/{recording_id}/chunk")
+async def recording_chunk(
+    recording_id: str,
+    audio: UploadFile = File(...),
+    chunk_index: int = Form(...),
+    duration_ms: int = Form(0),
+):
+    """
+    Upload a single audio chunk (≤25MB). Returns the transcribed text
+    for this chunk plus the cumulative total_chunks count.
+    """
+    try:
+        audio_bytes = await audio.read()
+        if len(audio_bytes) == 0:
+            raise HTTPException(status_code=400, detail="Empty audio chunk")
+        if len(audio_bytes) > 25 * 1024 * 1024:
+            raise HTTPException(
+                status_code=413,
+                detail="Chunk exceeds 25MB Whisper limit. Rotate MediaRecorder more frequently.",
+            )
+
+        result = recording_service.transcribe_chunk(
+            recording_id=recording_id,
+            audio_bytes=audio_bytes,
+            chunk_index=chunk_index,
+            duration_ms=duration_ms,
+            filename=audio.filename or f"chunk_{chunk_index}.webm",
+        )
+        return {"success": True, **result}
+
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ [Recording] chunk {chunk_index} failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Chunk transcription failed: {e}")
+
+
+@app.post("/recordings/{recording_id}/finalize")
+async def recording_finalize(recording_id: str, req: RecordingFinalizeRequest):
+    """
+    Stitch chunks, save transcript, optionally create a chat seeded with
+    the transcript file, embed the transcript into that chat's vectorstore
+    so the tutor can answer questions about it, and mark the recording complete.
+    """
+    try:
+        result = recording_service.finalize_recording(
+            recording_id=recording_id,
+            topic=req.topic,
+            action=req.action or "save",
+            language=req.language,
+        )
+
+        # Embed the transcript into the new chat's vectorstore so the AI tutor
+        # can answer questions about the lecture. Only when we attached it to
+        # a chat (action="chat"|"study") and we actually got a transcript.
+        rec = recording_service.get_recording(recording_id)
+        transcript_text = rec.get("final_transcript") or ""
+        chat_id = result.get("chat_id")
+
+        if chat_id and transcript_text:
+            filename = f"recording_{recording_id}.txt"
+            file_id = uuid4().hex
+            tmp_path = None
+            try:
+                with tempfile.NamedTemporaryFile(suffix=".txt", delete=False, mode="w", encoding="utf-8") as tmp:
+                    tmp.write(transcript_text)
+                    tmp_path = tmp.name
+
+                updates: list = []
+                embedding_result = await embed_document_task(
+                    tmp_path,
+                    filename,
+                    chat_id,
+                    file_id,
+                    updates,
+                    language=(req.language or rec.get("language") or "english"),
+                )
+
+                # Persist the chat's vectorstore so it survives session restarts
+                try:
+                    session = ACTIVE_SESSIONS.get(chat_id)
+                    if session and session.session.vectorstore:
+                        await vectorstore_manager.upload_all_vectorstores(
+                            chat_id=chat_id,
+                            combined_vectorstore=session.session.vectorstore,
+                            file_documents={filename: embedding_result.get("documents", [])},
+                        )
+                except Exception as up_err:
+                    print(f"⚠️ [Recording] Vectorstore persist failed for {chat_id}: {up_err}")
+
+                result["embedded"] = True
+                print(f"🧠 [Recording] Embedded transcript into chat {chat_id}")
+            except Exception as embed_err:
+                print(f"⚠️ [Recording] Embedding failed (chat still created): {embed_err}")
+                result["embedded"] = False
+                result["embed_error"] = str(embed_err)
+            finally:
+                if tmp_path and os.path.exists(tmp_path):
+                    try:
+                        os.unlink(tmp_path)
+                    except Exception:
+                        pass
+
+        return result
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"❌ [Recording] finalize failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Finalize failed: {e}")
+
+
+@app.post("/recordings/{recording_id}/cancel")
+async def recording_cancel(recording_id: str, req: RecordingCancelRequest = RecordingCancelRequest()):
+    """Cancel a recording session and (optionally) delete uploaded chunks."""
+    try:
+        return recording_service.cancel_recording(
+            recording_id=recording_id,
+            delete_chunks=req.delete_chunks,
+        )
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        print(f"❌ [Recording] cancel failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Cancel failed: {e}")
+
+
+@app.get("/recordings/{recording_id}")
+async def recording_get(recording_id: str):
+    """Fetch a recording document (for clients not using Firestore listeners)."""
+    try:
+        return recording_service.get_recording(recording_id)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch recording: {e}")
+
+
+# ============================================================================
+# FILE PROXY
+# Streams chat-attached files with proper Content-Type so that 3rd-party
+# viewers (e.g., Microsoft Office Online) can render them. Firebase Storage
+# download URLs don't always play well with Office viewer — this proxy
+# normalizes the response.
+# ============================================================================
+_OFFICE_MIME_TYPES = {
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "doc": "application/msword",
+    "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "ppt": "application/vnd.ms-powerpoint",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "xls": "application/vnd.ms-excel",
+    "pdf": "application/pdf",
+    "txt": "text/plain; charset=utf-8",
+    "md": "text/plain; charset=utf-8",
+    "csv": "text/csv; charset=utf-8",
+    "json": "application/json",
+}
+
+
+@app.get("/files/proxy/{chat_id}/{filename:path}")
+async def files_proxy(chat_id: str, filename: str):
+    """
+    Stream a file from chats/{chat_id}/uploads/{filename} with a clean
+    Content-Type and inline disposition. The URL ends in the file's real
+    extension, which Office Online's viewer needs to recognize the format.
+    """
+    if not chat_id or not filename:
+        raise HTTPException(status_code=400, detail="Missing chat_id or filename")
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    if ".." in chat_id or "/" in chat_id:
+        raise HTTPException(status_code=400, detail="Invalid chat_id")
+
+    storage_path = f"chats/{chat_id}/uploads/{filename}"
+    try:
+        bucket = storage.bucket()
+        blob = bucket.blob(storage_path)
+        if not blob.exists():
+            raise HTTPException(status_code=404, detail=f"File not found: {storage_path}")
+
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        content_type = _OFFICE_MIME_TYPES.get(ext) or blob.content_type or "application/octet-stream"
+
+        data = blob.download_as_bytes()
+
+        return Response(
+            content=data,
+            media_type=content_type,
+            headers={
+                "Content-Disposition": f'inline; filename="{filename}"',
+                "Cache-Control": "public, max-age=300",
+                "Access-Control-Allow-Origin": "*",
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ [Files proxy] failed for {storage_path}: {e}")
+        raise HTTPException(status_code=500, detail=f"File proxy failed: {e}")
 
 
 # ============================================================================

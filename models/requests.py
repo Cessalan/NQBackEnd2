@@ -160,3 +160,25 @@ class DiagnosticQuizRequest(BaseModel):
     chat_id: str
     upload_ids: Optional[List[str]] = []
     language: str = "en"
+
+
+# ============================================================================
+# RECORDING REQUESTS
+# Class recording with chunked Whisper transcription.
+# ============================================================================
+
+class RecordingStartRequest(BaseModel):
+    user_id: str
+    topic: Optional[str] = ""
+    chat_id: Optional[str] = None
+    language: str = "en"
+
+
+class RecordingFinalizeRequest(BaseModel):
+    topic: Optional[str] = None
+    action: str = "save"          # "save" | "chat" | "study"
+    language: Optional[str] = None
+
+
+class RecordingCancelRequest(BaseModel):
+    delete_chunks: bool = True
