@@ -159,9 +159,9 @@ def get_loader_for_file(path):
             print("📄 Detected text-based PDF - Using standard loader")
             return PyPDFLoader(path)
     elif ext == ".txt": # txt file support
-        return TextLoader(path)
+        return TextLoader(path, encoding="utf-8")
     elif ext == ".csv":  #excel support
-        return CSVLoader(path)
+        return CSVLoader(path, encoding="utf-8")
     elif ext in [".doc", ".docx"]: # word document support
         return Docx2txtLoader(path) 
     elif ext in [".xls", ".xlsx"]: #excel support
@@ -2443,13 +2443,7 @@ async def generate_summary(request:SummaryRequest):
     
     nursing_tutor.session.name_last_document_used=request.filename
     
-    # === FIX FOR ATTRIBUTE ERROR ===
-    # The NursingTutor object seems to be missing the chat_id attribute internally.
-    # We enforce its existence here before passing it to set_session_context.
-    if not hasattr(nursing_tutor, 'chat_id'):
-        nursing_tutor.chat_id = request.chat_id
-        
-    set_session_context(nursing_tutor)
+    set_session_context(nursing_tutor.session)
     
     from tools.quiztools import _search_vectorstore_for_summary
     chunks = await _search_vectorstore_for_summary(request.filename, request.chat_id, "", "detailed")
@@ -5120,11 +5114,13 @@ async def recording_finalize(recording_id: str, req: RecordingFinalizeRequest):
     so the tutor can answer questions about it, and mark the recording complete.
     """
     try:
+        events_list = [e.dict() for e in req.events] if req.events else None
         result = recording_service.finalize_recording(
             recording_id=recording_id,
             topic=req.topic,
             action=req.action or "save",
             language=req.language,
+            events=events_list,
         )
 
         # Embed the transcript into the new chat's vectorstore so the AI tutor
@@ -5153,14 +5149,26 @@ async def recording_finalize(recording_id: str, req: RecordingFinalizeRequest):
                     language=(req.language or rec.get("language") or "english"),
                 )
 
-                # Persist the chat's vectorstore so it survives session restarts
+                # Persist the chat's vectorstore so it survives session restarts.
+                # Build directly from the just-embedded documents instead of pulling
+                # from ACTIVE_SESSIONS — the chat may have no active session entry
+                # yet (the user hasn't connected), so gating on it silently skipped
+                # the upload. When the chat already has a combined vectorstore from
+                # prior uploads/recordings, merge into it so we don't overwrite.
                 try:
-                    session = ACTIVE_SESSIONS.get(chat_id)
-                    if session and session.session.vectorstore:
+                    documents = embedding_result.get("documents", []) if embedding_result else []
+                    if documents:
+                        new_vs = FAISS.from_documents(documents, OpenAIEmbeddings())
+                        existing_combined = await vectorstore_manager.load_combined_vectorstore_from_firebase(chat_id)
+                        if existing_combined is not None:
+                            existing_combined.merge_from(new_vs)
+                            combined_vs = existing_combined
+                        else:
+                            combined_vs = new_vs
                         await vectorstore_manager.upload_all_vectorstores(
                             chat_id=chat_id,
-                            combined_vectorstore=session.session.vectorstore,
-                            file_documents={filename: embedding_result.get("documents", [])},
+                            combined_vectorstore=combined_vs,
+                            file_documents={filename: documents},
                         )
                 except Exception as up_err:
                     print(f"⚠️ [Recording] Vectorstore persist failed for {chat_id}: {up_err}")
@@ -5192,7 +5200,7 @@ async def recording_finalize(recording_id: str, req: RecordingFinalizeRequest):
 async def recording_cancel(recording_id: str, req: RecordingCancelRequest = RecordingCancelRequest()):
     """Cancel a recording session and (optionally) delete uploaded chunks."""
     try:
-        return recording_service.cancel_recording(
+        return await recording_service.cancel_recording(
             recording_id=recording_id,
             delete_chunks=req.delete_chunks,
         )

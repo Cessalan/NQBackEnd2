@@ -174,10 +174,17 @@ class RecordingStartRequest(BaseModel):
     language: str = "en"
 
 
+class RecordingEvent(BaseModel):
+    timestamp_ms: int
+    type: str  # "important" | "confusion"
+    note: Optional[str] = None
+
+
 class RecordingFinalizeRequest(BaseModel):
     topic: Optional[str] = None
     action: str = "save"          # "save" | "chat" | "study"
     language: Optional[str] = None
+    events: Optional[List[RecordingEvent]] = None
 
 
 class RecordingCancelRequest(BaseModel):

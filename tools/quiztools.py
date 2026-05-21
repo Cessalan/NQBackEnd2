@@ -1,4 +1,4 @@
-﻿from typing import Dict, Any, Optional,List
+from typing import Dict, Any, Optional,List
 from datetime import datetime
 from langchain_core.tools import tool
 from models.session import PersistentSessionContext
@@ -118,12 +118,11 @@ def set_session_context(session: PersistentSessionContext):
     """
     global _CURRENT_SESSION
 
-    # Only load vectorstore if not already cached in session
-    if session.vectorstore is None:
-        print(f"📥 set_session_context: Loading vectorstore for {session.chat_id} (not cached)")
-        session.vectorstore = get_chat_vectorstore(session.chat_id)
-    else:
-        print(f"✅ set_session_context: Using cached vectorstore for {session.chat_id}")
+    # Set both the context variable (for async safety) and the global (for backwards compatibility) first.
+    # This prevents RuntimeError in functions (like get_chat_vectorstore) called during initialization.
+    _session_context.set(session)
+    _CURRENT_SESSION = session
+    print(f"🔒 Session context set for chat_id: {session.chat_id} (coroutine-safe)")
 
     # Only load documents list if empty (avoids redundant Firebase list_blobs)
     if not session.documents:
@@ -132,10 +131,12 @@ def set_session_context(session: PersistentSessionContext):
     else:
         print(f"✅ set_session_context: Using cached documents list ({len(session.documents)} files)")
 
-    # Set both the context variable (for async safety) and the global (for backwards compatibility)
-    _session_context.set(session)
-    _CURRENT_SESSION = session
-    print(f"🔒 Session context set for chat_id: {session.chat_id} (coroutine-safe)")
+    # Only load vectorstore if not already cached in session
+    if session.vectorstore is None:
+        print(f"📥 set_session_context: Loading vectorstore for {session.chat_id} (not cached)")
+        session.vectorstore = get_chat_vectorstore(session.chat_id)
+    else:
+        print(f"✅ set_session_context: Using cached vectorstore for {session.chat_id}")
 
 
 def get_session() -> PersistentSessionContext:
@@ -929,40 +930,39 @@ async def _search_vectorstore_for_summary(
     
 def get_chat_vectorstore(
     chat_id: str, 
-) -> FAISS:
+) -> Optional[FAISS]:
     """
     Search vector store for relevant chunks to create summary
     """
     try:
-        session = get_session()
-        if(session.documents):
-            with tempfile.TemporaryDirectory() as tempdir:
-                # Use same pattern as your working code
-                bucket = storage.bucket()
-                
-                faiss_blob = bucket.blob(f"vectorstores/{chat_id}/index.faiss")
-                pkl_blob = bucket.blob(f"vectorstores/{chat_id}/index.pkl")
-                
-                faiss_path = os.path.join(tempdir, "index.faiss")
-                pkl_path = os.path.join(tempdir, "index.pkl")
-                
-                # Download files (same as your working code)
-                faiss_blob.download_to_filename(faiss_path)
-                pkl_blob.download_to_filename(pkl_path)
-                
-                # Load vector store (same as your working code)
-                vectorstore = FAISS.load_local(
-                    tempdir, 
-                    OpenAIEmbeddings(), 
-                    allow_dangerous_deserialization=True
-                )
-                
-                return vectorstore
-        else:
+        bucket = storage.bucket()
+        faiss_blob = bucket.blob(f"vectorstores/{chat_id}/index.faiss")
+        pkl_blob = bucket.blob(f"vectorstores/{chat_id}/index.pkl")
+        
+        # Check if vectorstore index files exist in Firebase Storage
+        if not faiss_blob.exists() or not pkl_blob.exists():
+            print(f"📭 get_chat_vectorstore: No vectorstore index files found in Firebase Storage for {chat_id}")
             return None
+            
+        with tempfile.TemporaryDirectory() as tempdir:
+            faiss_path = os.path.join(tempdir, "index.faiss")
+            pkl_path = os.path.join(tempdir, "index.pkl")
+            
+            # Download files
+            faiss_blob.download_to_filename(faiss_path)
+            pkl_blob.download_to_filename(pkl_path)
+            
+            # Load vector store
+            vectorstore = FAISS.load_local(
+                tempdir, 
+                OpenAIEmbeddings(), 
+                allow_dangerous_deserialization=True
+            )
+            
+            return vectorstore
                 
     except Exception as e:
-        print(f"HEY, COULD NOT FIND vectorstore for {chat_id}, exception",e)
+        print(f"HEY, COULD NOT FIND vectorstore for {chat_id}, exception:", e)
         return None
 
 @tool
