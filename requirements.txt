@@ -154,3 +154,4 @@ wrapt==1.17.3
 xlrd==2.0.2
 xlsxwriter==3.2.7
 yarl==1.15.2
+stripe==15.2.0

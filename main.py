@@ -2,7 +2,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, Response
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from fastapi import WebSocket, WebSocketDisconnect
 from typing import Dict
 import os
@@ -244,6 +244,29 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ============================================================================
+# Stripe billing webhook — grants/revokes Pro (users/{uid}.usage.tier)
+# ============================================================================
+from services import stripe_billing
+
+@app.post("/billing/webhook")
+async def stripe_webhook(request: Request):
+    """
+    Stripe sends signed events here. We verify the signature (raw body required)
+    and flip the user's tier in Firestore. Configure the endpoint URL + signing
+    secret in the Stripe dashboard; set STRIPE_WEBHOOK_SECRET in the env.
+    """
+    payload = await request.body()
+    sig = request.headers.get("stripe-signature", "")
+    event, err = stripe_billing.verify_and_parse(payload, sig)
+    if err:
+        # 400 tells Stripe to retry (except signature/secret issues, which are
+        # config problems on our side — still surfaced for visibility).
+        raise HTTPException(status_code=400, detail=err)
+    result = stripe_billing.handle_event(event)
+    print(f"💳 Stripe webhook: {event['type']} -> {result}")
+    return result
 
 # Global session storage
 ACTIVE_SESSIONS: Dict[str, NursingTutor] = {}

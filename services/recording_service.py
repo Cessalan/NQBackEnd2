@@ -447,16 +447,24 @@ def finalize_recording(recording_id: str, topic: Optional[str] = None,
     )
     full_text = header + transcript_text
 
+    # Files uploaded via the Admin SDK don't get a Firebase download token by
+    # default. Without it, the client-side getDownloadURL() returns a URL the
+    # browser can't fetch from in production ("Failed to fetch"). Setting the
+    # firebaseStorageDownloadTokens metadata makes getDownloadURL return a
+    # token-bearing URL that fetches anonymously, matching files uploaded
+    # via the JS SDK.
     transcript_url = None
     try:
+        download_token = uuid4().hex
         blob = _bucket().blob(transcript_path)
+        blob.metadata = {"firebaseStorageDownloadTokens": download_token}
         blob.upload_from_string(full_text, content_type="text/plain; charset=utf-8")
-        try:
-            blob.make_public()
-            transcript_url = blob.public_url
-        except Exception:
-            # Private bucket — return signed URL or just the path
-            transcript_url = None
+        bucket_name = _bucket().name
+        # Token-bearing Firebase Storage URL (same shape the JS SDK returns).
+        transcript_url = (
+            f"https://firebasestorage.googleapis.com/v0/b/{bucket_name}/o/"
+            f"{transcript_path.replace('/', '%2F')}?alt=media&token={download_token}"
+        )
     except Exception as e:
         print(f"⚠️ [Recording] Failed to save transcript to {transcript_path}: {e}")
 
