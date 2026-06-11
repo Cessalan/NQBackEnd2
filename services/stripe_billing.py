@@ -66,6 +66,30 @@ def _downgrade_by_customer(customer_id: str):
     return None
 
 
+def create_portal_session(uid: str, return_url: str):
+    """
+    Create a Stripe Billing Portal session for the user's saved customer.
+    The portal is where the user cancels/updates the subscription; the
+    resulting customer.subscription.deleted/updated webhook downgrades them.
+    Returns (url, None) on success or (None, reason) on failure.
+    """
+    if not STRIPE_SECRET_KEY:
+        return None, "stripe_not_configured"
+    db = firestore.client()
+    snap = db.collection("users").document(uid).get()
+    customer_id = (snap.to_dict() or {}).get("stripeCustomerId") if snap.exists else None
+    if not customer_id:
+        return None, "no_stripe_customer"
+    try:
+        session = stripe.billing_portal.Session.create(
+            customer=customer_id,
+            return_url=return_url,
+        )
+        return session.url, None
+    except stripe.error.StripeError as e:
+        return None, f"stripe_error: {getattr(e, 'user_message', None) or str(e)}"
+
+
 def handle_event(event) -> dict:
     """Dispatch a verified Stripe event. Returns a small status dict for logging."""
     etype = event["type"]

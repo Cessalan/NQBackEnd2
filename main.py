@@ -268,6 +268,36 @@ async def stripe_webhook(request: Request):
     print(f"💳 Stripe webhook: {event['type']} -> {result}")
     return result
 
+@app.post("/billing/create-portal-session")
+async def create_billing_portal_session(request: Request):
+    """
+    Open the Stripe Customer Billing Portal for the signed-in user (where they
+    can cancel or change the Pro subscription). The uid comes from a verified
+    Firebase ID token — never from the body — so a user can only ever open
+    their own portal. Cancellation itself is handled by Stripe; the existing
+    webhook downgrades the tier when the subscription ends.
+    """
+    from firebase_admin import auth as firebase_auth
+    authz = request.headers.get("authorization", "")
+    token = authz[7:] if authz.lower().startswith("bearer ") else ""
+    if not token:
+        raise HTTPException(status_code=401, detail="missing_id_token")
+    try:
+        decoded = firebase_auth.verify_id_token(token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="invalid_id_token")
+    uid = decoded["uid"]
+
+    # Send the user back where they came from; Origin is constrained by CORS.
+    return_url = request.headers.get("origin") or "https://chats.nursequizai.com"
+
+    url, err = stripe_billing.create_portal_session(uid, return_url)
+    if err == "no_stripe_customer":
+        raise HTTPException(status_code=404, detail=err)
+    if err:
+        raise HTTPException(status_code=500, detail=err)
+    return {"url": url}
+
 # Global session storage
 ACTIVE_SESSIONS: Dict[str, NursingTutor] = {}
 SESSION_LAST_ACTIVITY: Dict[str, float] = {}  # Track last activity time for each session
