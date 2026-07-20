@@ -27,3 +27,4 @@ Thumbs.db # Windows
 FireBaseAccess.json
 service-account-key.json
 secrets/*.json
+tools/active_users_cache.json

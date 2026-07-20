@@ -438,12 +438,32 @@ async def get_chat_context_from_db(chat_id: str) -> dict:
                         'role': message_data['role'],
                         'content': message_data['content']
                     })
-            
+
             # Extract quizzes separately to build the context
             if message_data.get('quizData'):
                 quizzes_created.append({
                     'timestamp': message_data.get('timestamp'),
                     'quiz_data': message_data['quizData']
+                })
+                # Also leave a compact marker in the conversation history.
+                # Without it, the intent analyzer and the LLM cannot see that
+                # a quiz was just generated — so when the user replies "answer
+                # my question, I don't want a quiz", the analyzer has no idea
+                # a quiz ever happened and fires another one.
+                quiz_data = message_data['quizData']
+                topics = []
+                if isinstance(quiz_data, list):
+                    topics = sorted({
+                        q.get('topic') for q in quiz_data
+                        if isinstance(q, dict) and q.get('topic')
+                    })[:4]
+                conversation_history.append({
+                    'role': 'assistant',
+                    'content': (
+                        f"[App generated a {len(quiz_data) if isinstance(quiz_data, list) else '?'}-question "
+                        f"practice quiz{' on: ' + ', '.join(topics) if topics else ''}. "
+                        "No written answer was given to the user's message.]"
+                    )
                 })
             
             # Extract study sheets separately to build the context

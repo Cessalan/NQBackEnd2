@@ -10,8 +10,76 @@ from dotenv import load_dotenv
 
 import asyncio
 import json
+import re as _lang_re
 # Load environment variables
 load_dotenv()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Session-language helpers
+# ═══════════════════════════════════════════════════════════════════════════
+# session.user_language is detected once per session and cached (LLM call is
+# ~500-1000ms). But a hard cache caused a real failure: one pasted foreign
+# snippet as the first message locked the whole session to that language, and
+# "IN ENGLISH" replies were ignored. These helpers catch the two cheap,
+# unambiguous signals that must beat the cache:
+#   1. An explicit inline request ("in english", "en français").
+#   2. A script mismatch (cached russian but the message is Latin-script).
+# Only when one of those fires do we pay for re-detection.
+
+_EXPLICIT_LANGUAGE_REQUESTS = (
+    (_lang_re.compile(r'\b(in|into|to)\s+english\b|\banglais\b', _lang_re.I), 'english'),
+    (_lang_re.compile(r'\ben\s+fran[çc]ais\b|\b(in|into|to)\s+french\b', _lang_re.I), 'french'),
+    (_lang_re.compile(r'\ben\s+espa[ñn]ol\b|\b(in|into|to)\s+spanish\b', _lang_re.I), 'spanish'),
+    (_lang_re.compile(r'\bem\s+portugu[êe]s\b|\b(in|into|to)\s+portuguese\b', _lang_re.I), 'portuguese'),
+    (_lang_re.compile(r'\bна\s+русском\b|\b(in|into|to)\s+russian\b', _lang_re.I), 'russian'),
+)
+
+# Languages whose dominant script is not Latin. Anything unlisted → latin.
+_NON_LATIN_LANGUAGE_SCRIPTS = {
+    'russian': 'cyrillic', 'ukrainian': 'cyrillic', 'bulgarian': 'cyrillic',
+    'arabic': 'arabic', 'farsi': 'arabic', 'persian': 'arabic', 'urdu': 'arabic',
+    'chinese': 'cjk', 'japanese': 'cjk', 'korean': 'cjk',
+    'greek': 'greek', 'hindi': 'devanagari',
+}
+
+
+def explicit_language_request(text: str):
+    """Language explicitly asked for inline, or None."""
+    for pattern, lang in _EXPLICIT_LANGUAGE_REQUESTS:
+        if pattern.search(text or ""):
+            return lang
+    return None
+
+
+def _dominant_script(text: str):
+    """Rough dominant script of a message, or None when too few letters."""
+    counts = {'latin': 0, 'cyrillic': 0, 'arabic': 0, 'cjk': 0, 'greek': 0, 'devanagari': 0}
+    for ch in text or "":
+        o = ord(ch)
+        if ('a' <= ch.lower() <= 'z') or (0x00C0 <= o <= 0x024F):
+            counts['latin'] += 1
+        elif 0x0400 <= o <= 0x04FF:
+            counts['cyrillic'] += 1
+        elif 0x0600 <= o <= 0x06FF:
+            counts['arabic'] += 1
+        elif (0x4E00 <= o <= 0x9FFF) or (0x3040 <= o <= 0x30FF) or (0xAC00 <= o <= 0xD7AF):
+            counts['cjk'] += 1
+        elif 0x0370 <= o <= 0x03FF:
+            counts['greek'] += 1
+        elif 0x0900 <= o <= 0x097F:
+            counts['devanagari'] += 1
+    script, n = max(counts.items(), key=lambda kv: kv[1])
+    return script if n >= 10 else None
+
+
+def cached_language_conflicts(cached_language: str, text: str) -> bool:
+    """True when the message's script contradicts the cached session language."""
+    script = _dominant_script(text)
+    if script is None:
+        return False
+    expected = _NON_LATIN_LANGUAGE_SCRIPTS.get((cached_language or '').lower(), 'latin')
+    return script != expected
 
 # Import your models
 from models.requests import (
@@ -249,6 +317,8 @@ app.add_middleware(
 # Stripe billing webhook — grants/revokes Pro (users/{uid}.usage.tier)
 # ============================================================================
 from services import stripe_billing
+# Server-side free-tier quota check (mirrors the client gate in UsageService.js)
+from services import usage_guard
 
 @app.post("/billing/webhook")
 async def stripe_webhook(request: Request):
@@ -579,6 +649,21 @@ async def process_chat_message(chat_id: str, message: dict, websocket: WebSocket
         user_input = message.get("input", "")
 
         # ═══════════════════════════════════════════════════════════════════
+        # STEP 0: Free-tier quota gate (server-side; the UI gate is bypassable)
+        # Same policy as the client: an empty bucket blocks the send entirely.
+        # code "quota_exceeded" tells the frontend to open the upgrade modal.
+        # ═══════════════════════════════════════════════════════════════════
+        quota = usage_guard.check_quota(chat_id)
+        if not quota["allowed"]:
+            print(f"🚫 Quota exceeded for chat {chat_id} — rejecting chat message")
+            await websocket.send_text(json.dumps({
+                "status": "error",
+                "code": "quota_exceeded",
+                "message": usage_guard.QUOTA_MESSAGE
+            }))
+            return
+
+        # ═══════════════════════════════════════════════════════════════════
         # STEP 1: Get or create session
         # ═══════════════════════════════════════════════════════════════════
         session_existed = chat_id in ACTIVE_SESSIONS
@@ -710,12 +795,24 @@ async def process_chat_message(chat_id: str, message: dict, websocket: WebSocket
         # Debug: Log current state of user_language
         print(f"🔍 DEBUG: session.user_language = {nursing_tutor.session.user_language}")
 
-        if nursing_tutor.session.user_language is not None:
+        requested_language = explicit_language_request(user_input)
+        cached_language = nursing_tutor.session.user_language
+
+        if requested_language:
+            # "IN ENGLISH", "en français", ... always beats the cache.
+            language = requested_language
+            nursing_tutor.session.user_language = language
+            print(f"🌐 Explicit language request honored: {language}")
+        elif cached_language is not None and not cached_language_conflicts(cached_language, user_input):
             # Reuse cached language - skip LLM call entirely
-            language = nursing_tutor.session.user_language
+            language = cached_language
             print(f"🌐 Using cached session language: {language} (skipped LLM detection)")
         else:
-            # First message in session - detect language and cache it
+            # First message in session, or the message's script contradicts the
+            # cached language (e.g. session locked to russian by one pasted
+            # snippet, but the user is clearly writing Latin-script English).
+            if cached_language is not None:
+                print(f"🌐 Cached language '{cached_language}' conflicts with message script - re-detecting")
             chat_history = full_context_from_db.get("conversation", [])[-10:] if full_context_from_db else []
             language = await LanguageDetector.detect_language(user_input, chat_history)
             nursing_tutor.session.user_language = language  # Cache for future messages
@@ -1581,7 +1678,20 @@ async def upload_multiple_files(
             # PROCESS FILES (EMBEDDING ONLY)
             # ========================================
             semaphore = asyncio.Semaphore(15)
-            
+
+            # Stream progress events the moment file tasks emit them (instead of
+            # one burst per file at the end), and heartbeat every 10s while
+            # waiting so Safari/proxies never see a silent connection and the
+            # frontend stall-watchdog knows the server is alive.
+            update_queue: asyncio.Queue = asyncio.Queue()
+
+            class _QueueSink:
+                """List-like sink: every append() streams immediately."""
+                def append(self, item):
+                    update_queue.put_nowait(item)
+
+            live_updates = _QueueSink()
+
             async def process_single_file_data(file_data):
                 async with semaphore:
                     return await process_file_from_bytes(
@@ -1589,76 +1699,97 @@ async def upload_multiple_files(
                         file_data["filename"],
                         chat_id,
                         user_id,
-                        language  # Pass browser language
+                        language,  # Pass browser language
+                        updates=live_updates
                     )
-            
+
             # Start all file processing tasks
-            tasks = [process_single_file_data(fd) for fd in valid_files]
-            
-            # Stream results as they complete
+            tasks = [asyncio.create_task(process_single_file_data(fd)) for fd in valid_files]
+            gather_task = asyncio.gather(*tasks, return_exceptions=True)
+
             total_words = 0
             completed_files = []
             file_documents = {}  # filename -> documents
             file_bytes_map = {}  # filename -> bytes (for background upload)
-            
-            for coro in asyncio.as_completed(tasks):
+            last_file_error = None  # remember why files failed (for batch error code)
+
+            # Drain the queue until all tasks are done and nothing is pending
+            while True:
+                if gather_task.done() and update_queue.empty():
+                    break
                 try:
-                    result = await coro
-                    
-                    # Extract updates, documents, insights, and file bytes
-                    updates = result.get("updates", [])
-                    documents = result.get("documents", [])
-                    insights = result.get("insights")  # ← NEW
-                    filename = result.get("filename", "unknown")
-                    file_bytes = result.get("file_bytes")
-                    
-                    print(f"🔍 DEBUG: insights type = {type(insights)}")  # ← ADD THIS
-                    print(f"🔍 DEBUG: insights value = {insights}") 
-                    
-                    print(f"🔍 Processing result for: {filename}")
-                    print(f"   Documents count: {len(documents)}")
-                    
-                    if insights:
-                        print(f"   Insights extracted from upload: {len(insights.get('topics', []))} topics")
-                    
-                    # Store documents for background upload
-                    if documents:
-                        file_documents[filename] = documents
-                    if file_bytes:
-                        file_bytes_map[filename] = file_bytes
-                    
-                    # ========================================
-                    # 🆕 STORE INSIGHTS IN SESSION
-                    # ========================================
-                    if insights and chat_id in ACTIVE_SESSIONS:
-                        session = ACTIVE_SESSIONS[chat_id]
-                        #update the session language using the front-end browser language when uploading
-                        session.session.user_language = language 
-                        if not hasattr(session.session, "file_insights"):
-                            session.session.file_insights = {}
-                        session.session.file_insights[filename] = insights
-                    
-                    # Stream JSON updates to frontend
-                    for update in updates:
-                        if not isinstance(update, dict):
-                            continue
-                        
-                        yield json.dumps(update) + "\n"
-                        
-                        if update.get("type") == "file_complete":
-                            total_words += update.get("word_count", 0)
-                            completed_files.append(update.get("file_id"))
-                
-                except Exception as e:
-                    print(f"❌ Task error: {e}")
-                    import traceback
-                    traceback.print_exc()
+                    update = await asyncio.wait_for(update_queue.get(), timeout=10.0)
+                except asyncio.TimeoutError:
+                    yield json.dumps({"type": "heartbeat"}) + "\n"
+                    continue
+
+                if not isinstance(update, dict):
+                    continue
+
+                yield json.dumps(update) + "\n"
+
+                if update.get("type") == "file_complete":
+                    total_words += update.get("word_count", 0)
+                    completed_files.append(update.get("file_id"))
+                elif update.get("type") in ("file_error", "embedding_error"):
+                    last_file_error = update.get("message") or last_file_error
+
+            # Collect per-file results (documents, insights, raw bytes)
+            for result in gather_task.result():
+                if isinstance(result, Exception):
+                    print(f"❌ Task error: {result}")
+                    last_file_error = str(result)
                     yield json.dumps({
                         "type": "file_error",
-                        "message": str(e)
+                        "message": str(result)
                     }) + "\n"
-                
-            
+                    continue
+
+                documents = result.get("documents", [])
+                insights = result.get("insights")
+                filename = result.get("filename", "unknown")
+                file_bytes = result.get("file_bytes")
+
+                print(f"🔍 Processing result for: {filename}")
+                print(f"   Documents count: {len(documents)}")
+
+                if insights:
+                    print(f"   Insights extracted from upload: {len(insights.get('topics', []))} topics")
+
+                # Store documents for background upload
+                if documents:
+                    file_documents[filename] = documents
+                if file_bytes:
+                    file_bytes_map[filename] = file_bytes
+
+                # ========================================
+                # STORE INSIGHTS IN SESSION
+                # ========================================
+                if insights and chat_id in ACTIVE_SESSIONS:
+                    session = ACTIVE_SESSIONS[chat_id]
+                    #update the session language using the front-end browser language when uploading
+                    session.session.user_language = language
+                    if not hasattr(session.session, "file_insights"):
+                        session.session.file_insights = {}
+                    session.session.file_insights[filename] = insights
+
+            # If every file failed to process, surface a batch error instead of
+            # a fake success — the frontend flips the loading box to its failed
+            # state on this. Quota/rate-limit failures get code "capacity" so
+            # the UI can tell users we're overloaded rather than blame them.
+            if not completed_files:
+                err_text = (last_file_error or "").lower()
+                overloaded = any(token in err_text for token in
+                                 ("429", "quota", "rate limit", "ratelimit", "overloaded"))
+                yield json.dumps({
+                    "type": "error",
+                    "code": "capacity" if overloaded else "processing_failed",
+                    "message": ("We have too many users right now and couldn't complete the request"
+                                if overloaded else "All files failed to process")
+                }) + "\n"
+                return
+
+
             # ========================================
             # Generate Upload Summary (1-2 sentences)
             # ========================================
@@ -1702,12 +1833,14 @@ async def upload_multiple_files(
 
                         Return ONLY the summary text in {prompt_language}, nothing else."""
                         
-                        summary_response = await llm.ainvoke([
-                            {"role": "user", "content": summary_prompt}
-                        ])
-                        
+                        # Bounded wait: a hung LLM call must not stall the stream
+                        summary_response = await asyncio.wait_for(
+                            llm.ainvoke([{"role": "user", "content": summary_prompt}]),
+                            timeout=20.0
+                        )
+
                         upload_summary = summary_response.content.strip()
-                        
+
                         # Yield summary to frontend
                         yield json.dumps({
                             "type": "upload_summary",
@@ -1715,42 +1848,15 @@ async def upload_multiple_files(
                             "file_count": len(valid_files),
                             "filenames": [f["filename"] for f in valid_files]
                         }) + "\n"
-                        
+
                         print(f"📝 Generated upload summary: {upload_summary}")
-                        
-                        
-                        title_prompt = f"""Generate a short, descriptive chat title in 3 to 6 words based on these uploaded study materials.
 
-                       
-                        Topics Found: {', '.join(unique_topics) if unique_topics else 'medical content'}
-                        Document Types: {', '.join(unique_doc_types) if unique_doc_types else 'study materials'}
+                        # Chat title isn't needed by the stream — generate and
+                        # save it in the background so it doesn't delay completion
+                        asyncio.create_task(generate_and_save_chat_title(
+                            chat_id, unique_topics, unique_doc_types, prompt_language
+                        ))
 
-                        Requirements:
-                        - Be concise and clear
-                        - Focus on the main topic/subject area
-                        - Max 6 words
-                        - Make it specific to the content (e.g., "Cardiac Pharmacology Notes", "NCLEX Respiratory Review")
-                        - Write in {prompt_language}
-
-                        Return ONLY the title, no quotes or extra text."""
-                        
-                        title_response = await llm.ainvoke([
-                            {"role": "user", "content": title_prompt}
-                        ])
-                        
-                        chat_title = title_response.content.strip().replace('"', '').replace("'", "")
-
-                        # Update Firebase chat document with new title
-                        from firebase_admin import firestore
-                        db = firestore.client()
-
-                        db.collection('chats').document(chat_id).update({
-                            'title': chat_title,
-                            'updatedAt': firestore.SERVER_TIMESTAMP
-                        })
-
-                        print(f"✅ Auto-generated and saved chat title: '{chat_title}'")
-                        
                     except Exception as summary_error:
                         print(f"⚠️ Summary generation failed: {summary_error}")
             
@@ -1902,12 +2008,76 @@ async def upload_multiple_files(
     
     return StreamingResponse(
         process_and_stream(),
-        media_type="application/x-ndjson"
+        media_type="application/x-ndjson",
+        headers={
+            # Prevent proxies/CDNs (and Safari) from buffering the NDJSON
+            # stream — without these, progress events arrive in one burst
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        }
     )
 
 # ============================================================================
 # HELPERS FOR FILE UPLOAD START
 # ============================================================================
+
+# Serialize FAISS index writes per chat — the index isn't safe under
+# concurrent mutation now that file embeddings run truly in parallel
+_VECTORSTORE_WRITE_LOCKS: Dict[str, asyncio.Lock] = {}
+
+def _get_vectorstore_write_lock(chat_id: str) -> asyncio.Lock:
+    if chat_id not in _VECTORSTORE_WRITE_LOCKS:
+        _VECTORSTORE_WRITE_LOCKS[chat_id] = asyncio.Lock()
+    return _VECTORSTORE_WRITE_LOCKS[chat_id]
+
+
+async def generate_and_save_chat_title(chat_id: str, unique_topics: list, unique_doc_types: list, prompt_language: str):
+    """Generate a chat title from upload insights and save it to Firestore.
+
+    Runs as a background task after the upload stream completes so it never
+    delays the user-facing upload flow.
+    """
+    try:
+        llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.5)
+
+        title_prompt = f"""Generate a short, descriptive chat title in 3 to 6 words based on these uploaded study materials.
+
+
+        Topics Found: {', '.join(unique_topics) if unique_topics else 'medical content'}
+        Document Types: {', '.join(unique_doc_types) if unique_doc_types else 'study materials'}
+
+        Requirements:
+        - Be concise and clear
+        - Focus on the main topic/subject area
+        - Max 6 words
+        - Make it specific to the content (e.g., "Cardiac Pharmacology Notes", "NCLEX Respiratory Review")
+        - Write in {prompt_language}
+
+        Return ONLY the title, no quotes or extra text."""
+
+        title_response = await llm.ainvoke([
+            {"role": "user", "content": title_prompt}
+        ])
+
+        chat_title = title_response.content.strip().replace('"', '').replace("'", "")
+
+        # Update Firebase chat document with new title (sync client → thread)
+        from firebase_admin import firestore
+        db = firestore.client()
+        await asyncio.to_thread(
+            db.collection('chats').document(chat_id).update,
+            {
+                'title': chat_title,
+                'updatedAt': firestore.SERVER_TIMESTAMP
+            }
+        )
+
+        print(f"✅ Auto-generated and saved chat title: '{chat_title}'")
+
+    except Exception as title_error:
+        print(f"⚠️ Background title generation failed: {title_error}")
+
+
 async def upload_everything_background(
     chat_id: str,
     vectorstore: FAISS,
@@ -2163,9 +2333,14 @@ async def firebase_upload_task_simple(file_bytes: bytes, filename: str, chat_id:
         print(f"❌ Background: Failed to upload {filename}: {e}")
         raise
 
-async def process_file_from_bytes(file_bytes: bytes, filename: str, chat_id: str, user_id: str, language: str = "english"):
-    """Process a file from bytes and return list of progress updates."""
-    updates = []
+async def process_file_from_bytes(file_bytes: bytes, filename: str, chat_id: str, user_id: str, language: str = "english", updates=None):
+    """Process a file from bytes and return list of progress updates.
+
+    `updates` can be any object with .append() — a plain list, or a streaming
+    sink that forwards each event to the client as it happens.
+    """
+    if updates is None:
+        updates = []
     file_id = str(uuid4())
     temp_path = None
     documents_for_vectorstore = []
@@ -2272,11 +2447,13 @@ async def embed_document_task(temp_path: str, filename: str, chat_id: str, file_
             raise FileNotFoundError(f"Temp file not found: {temp_path}")
         
         print(f"📄 Loading document: {filename}")
-        
-        # Load document
+
+        # Load document in a worker thread — PDF parsing/OCR is blocking CPU/IO
+        # work that would otherwise freeze the event loop and stall the
+        # progress stream for every connected client
         loader = get_loader_for_file(temp_path)
-        pages = loader.load()
-        
+        pages = await asyncio.to_thread(loader.load)
+
         print(f"✅ Loaded {len(pages)} pages from {filename}")
         
         updates.append({
@@ -2325,10 +2502,16 @@ async def embed_document_task(temp_path: str, filename: str, chat_id: str, file_
         ]
         
         print(f"🔤 Creating embeddings for {len(documents)} documents...")
-        
-        # Get embeddings
+
+        # Compute embeddings with the async client: the HTTP calls to OpenAI
+        # run without blocking the event loop, so progress events keep
+        # streaming and multiple files embed truly in parallel
         embeddings = OpenAIEmbeddings()
-        
+        texts = [doc.page_content for doc in documents]
+        metadatas = [doc.metadata for doc in documents]
+        vectors = await embeddings.aembed_documents(texts)
+        text_embeddings = list(zip(texts, vectors))
+
         # Get session
         if chat_id not in ACTIVE_SESSIONS:
             print(f"⚠️ No session found for {chat_id}, creating...")
@@ -2337,13 +2520,15 @@ async def embed_document_task(temp_path: str, filename: str, chat_id: str, file_
         session = ACTIVE_SESSIONS[chat_id]
         print(f"📤 Upload using session object id: {id(session.session)}")
 
-        # Add to combined vectorstore
-        if session.session.vectorstore:
-            print(f"➕ Adding to existing vectorstore")
-            session.session.vectorstore.add_documents(documents)
-        else:
-            print(f"🆕 Creating new vectorstore")
-            session.session.vectorstore = FAISS.from_documents(documents, embeddings)
+        # FAISS index mutation isn't safe under concurrent writes — serialize
+        # per chat (the slow embedding work above already happened in parallel)
+        async with _get_vectorstore_write_lock(chat_id):
+            if session.session.vectorstore:
+                print(f"➕ Adding to existing vectorstore")
+                session.session.vectorstore.add_embeddings(text_embeddings, metadatas=metadatas)
+            else:
+                print(f"🆕 Creating new vectorstore")
+                session.session.vectorstore = FAISS.from_embeddings(text_embeddings, embeddings, metadatas=metadatas)
 
         print(f"✅ Embedding complete for {filename}")
         print(f"📤 Vectorstore now set: {session.session.vectorstore is not None}")
@@ -3702,6 +3887,16 @@ async def generate_study_exam(request: StudyExamRequest):
     print(f"   Custom: {request.custom_instructions or 'none'}")
     print(f"{'='*60}")
 
+    # Free-tier quota gate. NOTE: matches the client's exam grace — any
+    # remaining budget admits the full exam; only an empty bucket blocks.
+    # (Raised before the try so `except Exception` can't turn it into a 500.)
+    quota = usage_guard.check_quota(request.chat_id)
+    if not quota["allowed"]:
+        print(f"🚫 Quota exceeded for chat {request.chat_id} — rejecting exam")
+        raise HTTPException(status_code=429, detail={
+            "code": "quota_exceeded", "message": usage_guard.QUOTA_MESSAGE
+        })
+
     try:
         session = await _setup_study_session(request.chat_id, request.language)
         source = "documents" if session.documents and session.vectorstore else "scratch"
@@ -3811,6 +4006,15 @@ async def generate_study_item(request: StudyItemRequest):
     print(f"📝 STUDY ITEM GENERATION - {request.node_type}: {request.node_label}")
     print(f"{'='*60}")
 
+    # Free-tier quota gate (server-side; raised before the try so the
+    # blanket `except Exception` can't turn the 429 into a 500).
+    quota = usage_guard.check_quota(request.chat_id)
+    if not quota["allowed"]:
+        print(f"🚫 Quota exceeded for chat {request.chat_id} — rejecting study item")
+        raise HTTPException(status_code=429, detail={
+            "code": "quota_exceeded", "message": usage_guard.QUOTA_MESSAGE
+        })
+
     try:
         # ------------------------------------------
         # STEP 1: Setup session using PersistentSessionContext
@@ -3903,6 +4107,14 @@ async def generate_study_item_stream(request: StudyItemRequest):
 
     async def stream_generator():
         try:
+            # Free-tier quota gate — rejected in-stream (status: error) so the
+            # frontend's existing stream-error handling picks it up.
+            quota = usage_guard.check_quota(request.chat_id)
+            if not quota["allowed"]:
+                print(f"🚫 Quota exceeded for chat {request.chat_id} — rejecting item stream")
+                yield f"data: {json.dumps({'status': 'error', 'code': 'quota_exceeded', 'message': usage_guard.QUOTA_MESSAGE})}\n\n"
+                return
+
             # Setup session
             session = await _setup_study_session(request.chat_id, request.language)
 
@@ -4042,6 +4254,14 @@ async def generate_study_audio(request: StudyAudioRequest):
 
     async def stream_generator():
         try:
+            # Free-tier quota gate — audio streams use 'audio_error' as their
+            # error status, so reject with that shape.
+            quota = usage_guard.check_quota(request.chat_id)
+            if not quota["allowed"]:
+                print(f"🚫 Quota exceeded for chat {request.chat_id} — rejecting audio")
+                yield f"data: {json.dumps({'status': 'audio_error', 'code': 'quota_exceeded', 'message': usage_guard.QUOTA_MESSAGE})}\n\n"
+                return
+
             # Setup session
             session = await _setup_study_session(request.chat_id, request.language)
 
@@ -4096,6 +4316,13 @@ async def generate_study_mindmap(request: StudyMindmapRequest):
 
     async def stream_generator():
         try:
+            # Free-tier quota gate — rejected in-stream (status: error).
+            quota = usage_guard.check_quota(request.chat_id)
+            if not quota["allowed"]:
+                print(f"🚫 Quota exceeded for chat {request.chat_id} — rejecting mindmap")
+                yield f"data: {json.dumps({'status': 'error', 'code': 'quota_exceeded', 'message': usage_guard.QUOTA_MESSAGE})}\n\n"
+                return
+
             session = await _setup_study_session(request.chat_id, request.language)
             session.user_language = request.language
 
@@ -4610,8 +4837,16 @@ Return ONLY valid JSON:
 
 @app.post("/chat/generate-title", response_model=GenerateTitleResponse)
 async def generate_chat_title(request: GenerateTitleRequest):
-    
-    if request.message:
+    # Never return None: an empty message or a failed LLM call (e.g. OpenAI
+    # quota/429) must still produce a valid response, otherwise FastAPI raises
+    # ResponseValidationError and the client gets a 500.
+    fallback_title = "New Chat"
+
+    message = (request.message or "").strip()
+    if not message:
+        return GenerateTitleResponse(title=fallback_title)
+
+    try:
         prompt = PromptTemplate(
             template="""
             You are an AI assistant for nursing students.
@@ -4620,30 +4855,41 @@ async def generate_chat_title(request: GenerateTitleRequest):
 
             Requirements:
             - Be concise and clear
-            - Write a title in the language of Message you received
             - Max 6 words
+            - CRITICAL: The title MUST be in the same language as the message
+              below. If the message is in English, the title MUST be in
+              English — never French, Spanish, Portuguese, or any other
+              language. Do not translate.
 
             Message:
             {message}
             """,
             input_variables=["message"]
         )
-        
-       
-        # Use gpt-4.1-nano for title generation (simple classification task)
+
+        # Use gpt-4.1-nano for title generation (simple classification task).
+        # Low temperature: at 0.8 the nano model drifted into random languages
+        # (French/Russian titles on English chats).
         llm = ChatOpenAI(
-            temperature=0.8,
+            temperature=0.2,
             model="gpt-4.1-nano",
             streaming=False
         )
 
         chain = prompt | llm | StrOutputParser()
-        generated_title = await chain.ainvoke({"message": request.message})
-        
+        generated_title = await asyncio.wait_for(
+            chain.ainvoke({"message": message}),
+            timeout=15.0
+        )
+
         # Clean up the title
         cleaned_title = generated_title.replace('"', '').replace("'", "").strip()
 
-        return GenerateTitleResponse(title=cleaned_title)
+        return GenerateTitleResponse(title=cleaned_title or fallback_title)
+
+    except Exception as title_error:
+        print(f"⚠️ Title generation failed, using fallback: {title_error}")
+        return GenerateTitleResponse(title=fallback_title)
 
 # ============================================================================
 # REWRITE ENDPOINT — natural-style paraphrase of an AI-generated message

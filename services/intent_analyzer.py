@@ -79,12 +79,53 @@ INTENT
                             document (often a past paper) presented as a quiz
 - "generate_flashcards"  - flashcards, cartes, flash cards
 - "generate_study_sheet" - study sheet, study guide, cheat sheet, fiche
+- "answer_question"      - user pasted or typed a question THEY need answered:
+                            homework, an assignment prompt, a case study with
+                            questions, a mock-exam question, an MCQ they want
+                            solved, "help me write/fill/complete X"
 - "explain"              - "what is X", "how does Y work", "explain Z"
 - "reformat_doc"         - "remove the answers", "make this a quiz", "turn this
                             into flashcards" applied to their document
 - "study_plan"           - "build me a plan", "what should I study first"
 - "conversation"         - chitchat, thanks, greetings, follow-up clarifications
 - "other"                - anything else
+
+THE MOST IMPORTANT DISTINCTION: answer_question vs generate_quiz
+Many users are students pasting their assignment/exam questions because they
+want ANSWERS they can study or submit. Generating a quiz at them instead of
+answering is the app's #1 observed failure mode. Real transcripts show users
+begging "ANSWER MY QUESTION, PLEASE" after being served four quizzes in a row.
+
+Classify as answer_question (recommended_tool="respond_directly"), NOT
+generate_quiz, when ANY of these hold:
+- The message is a pasted case study, scenario, or assignment block followed
+  by instructions like "outline...", "identify two...", "list four...",
+  "develop...", "explain...", "provide...", "state...", "match...", "fill in
+  the blanks", or lettered/numbered sub-questions (a), b), 1., 2.).
+- The message IS a multiple-choice question with options (A/B/C/D or a list
+  of choices). They want the correct answer + rationale, not a re-quiz.
+- The user asks to review, correct, rewrite, reference, or complete THEIR OWN
+  draft answer, care plan, reflection, progress note, or table.
+- The user asks "can you answer...", "what is the answer", "give me the
+  answer", "i need an answer", or similar in any language.
+
+Only classify generate_quiz when the user asks to BE TESTED: "quiz me",
+"test me", "give me practice questions", "make me an exam", "10 MCQs on X",
+or an equivalent explicit request for questions directed AT them.
+When genuinely ambiguous, prefer answer_question — a user who wanted a quiz
+will ask for one in the next message; a user who wanted an answer and got a
+quiz feels ignored.
+
+FRUSTRATION / REPEAT GUARD (absolute rule)
+If the recent conversation shows the app just generated a quiz (look for
+"[App generated a ...-question practice quiz...]" markers) and the user's new
+message is:
+- a complaint ("answer my question", "you did not answer", "I don't want
+  quizzes", "why are you not responding", ALL-CAPS pleading), OR
+- a repeat or near-repeat of their previous message, OR
+- a request for "the answer" to what they just sent
+then intent MUST be answer_question with recommended_tool="respond_directly".
+NEVER generate_quiz twice in a row against a complaint or a repeated message.
 
 DOCUMENT_ACTION
 - "extract_verbatim"  - pull questions/content directly from the document
@@ -204,6 +245,7 @@ CLASSIFY_INTENT_TOOL = {
                     "extract_from_doc",
                     "generate_flashcards",
                     "generate_study_sheet",
+                    "answer_question",
                     "explain",
                     "reformat_doc",
                     "study_plan",

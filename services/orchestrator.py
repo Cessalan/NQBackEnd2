@@ -82,6 +82,67 @@ class NursingTutor:
         re.IGNORECASE
     )
 
+    # User is asking for an answer / complaining about non-response. Kept
+    # deliberately broad: this only fires when the LAST assistant turn was a
+    # generated quiz, and the fallback is a plain written answer — the safe
+    # outcome either way.
+    ANSWER_COMPLAINT_PATTERNS = re.compile(
+        r'(answer\s+(my|the|this)\s+question|did\s*n[o\']t\s+answer|not\s+answer'
+        r'|don\'?t\s+want\s+(a\s+)?(quiz|question|generated)|no\s+quiz'
+        r'|i\s+(need|want)\s+(an?\s+)?answer|give\s+me\s+the\s+answer'
+        r'|what(\'s|\s+is)\s+the\s+answer|answer\s*,?\s*please|please\s+answer'
+        r'|why\s+(are\s+)?you\s+not\s+(respond|answer)|are\s+you\s+there'
+        r'|r[ée]ponds?\s+([àa]\s+)?ma\s+question|je\s+veux\s+(la\s+|une\s+)?r[ée]ponse)',
+        re.IGNORECASE
+    )
+
+    def _is_post_quiz_complaint(self, user_input: str) -> bool:
+        """
+        True when the previous assistant turn was a generated quiz and the
+        user's new message is either a complaint asking for an answer or a
+        near-repeat of what they already sent (their retry reflex when they
+        feel ignored).
+        """
+        try:
+            history = self.session.message_history or []
+            last_assistant = next(
+                (m for m in reversed(history)
+                 if m.get('role') == 'assistant' and m.get('content')),
+                None,
+            )
+            if not last_assistant:
+                return False
+            # Marker written by get_chat_context_from_db for quiz messages.
+            if not str(last_assistant['content']).startswith('[App generated a'):
+                return False
+
+            if self.ANSWER_COMPLAINT_PATTERNS.search(user_input):
+                return True
+
+            # Near-repeat of the previous user message = retry, not a fresh ask.
+            # The frontend persists the user's message before calling us, so an
+            # entry AFTER the quiz marker may be an echo of the current message.
+            # The message that provoked the quiz is the last user entry BEFORE
+            # the marker — that's what a retry repeats.
+            norm = lambda s: ' '.join(str(s).lower().split())
+            a = norm(user_input)
+            last_assistant_idx = max(
+                i for i, m in enumerate(history)
+                if m.get('role') == 'assistant' and m.get('content')
+            )
+            before_quiz = [
+                norm(m['content']) for m in history[:last_assistant_idx]
+                if m.get('role') == 'user' and isinstance(m.get('content'), str)
+            ]
+            if a and before_quiz:
+                b = before_quiz[-1]
+                if a == b or (len(a) > 40 and (a in b or b in a)):
+                    return True
+            return False
+        except Exception as e:
+            print(f"quiz-repeat guard failed open: {e}")
+            return False
+
     def _fast_route_check(self, user_input: str) -> Optional[str]:
         """
         Fast pattern-based routing check.
@@ -452,6 +513,23 @@ class NursingTutor:
                     fast_route_tool = "NO_TOOL"
 
             # ─────────────────────────────────────────────────────────────────
+            # DETERMINISTIC GUARD: never answer a complaint with another quiz.
+            # The analyzer is an LLM and can misfire; this is a hard stop.
+            # If the last assistant turn was a generated quiz and the user is
+            # complaining or re-sending the same message, force a direct
+            # written answer.
+            # ─────────────────────────────────────────────────────────────────
+            GENERATION_TOOLS = {
+                "generate_quiz_stream",
+                "generate_flashcards_stream",
+                "extract_questions_from_doc",
+            }
+            if fast_route_tool in GENERATION_TOOLS and self._is_post_quiz_complaint(user_input):
+                print("🛑 QUIZ-REPEAT GUARD: last turn was a quiz and the user "
+                      "is asking for an answer — forcing direct response.")
+                fast_route_tool = "NO_TOOL"
+
+            # ─────────────────────────────────────────────────────────────────
             # Doc-extraction has its own streaming path — not a langchain tool.
             # Handle it inline before the existing LLM dispatch branch.
             # ─────────────────────────────────────────────────────────────────
@@ -522,6 +600,17 @@ class NursingTutor:
                         yield json.dumps({
                             "answer_chunk": chunk.content
                         }) + "\n"
+
+                # An empty stream means the LLM call silently failed. Tell the
+                # user instead of completing with nothing — a "complete" with
+                # zero content renders as the app ignoring the message.
+                if not response_content.strip():
+                    print("⚠️ Empty response from LLM on ultra-fast path")
+                    yield json.dumps({
+                        "status": "error",
+                        "message": "The response came back empty. Please try again.",
+                    }) + "\n"
+                    return
 
                 # Update history and complete
                 self.session.message_history.append({
@@ -1128,25 +1217,38 @@ class NursingTutor:
                                 }) + "\n"
             else:
                 print("===NO TOOLS USED, STRAIGHT RESPONSE=====")
-                
+
                 response_content = ""
-            
+
                 # Stream the response chunk by chunk
                 async for chunk in self.llm.astream(messages):
                     if hasattr(chunk, 'content') and chunk.content:
                         response_content += chunk.content
-                        print(chunk.content)
                         # Yield each chunk properly formatted
                         yield json.dumps({
                             "answer_chunk":chunk.content
                         }) + "\n"
-            
-            # Add assistant response to history
-            self.session.message_history.append({
-                "role": "assistant",
-                "content": response_content if 'response_content' in locals() else response.content,
-                "timestamp": datetime.now().isoformat()
-            })
+
+                # Empty stream = silent LLM failure. Surface it instead of
+                # completing with nothing (the frontend would otherwise save
+                # an empty assistant message).
+                if not response_content.strip():
+                    print("⚠️ Empty response from LLM on straight-response path")
+                    yield json.dumps({
+                        "status": "error",
+                        "message": "The response came back empty. Please try again.",
+                    }) + "\n"
+                    return
+
+            # Add assistant response to history (skip empty content — an empty
+            # assistant turn poisons the context for follow-up messages)
+            final_content = response_content if 'response_content' in locals() else response.content
+            if final_content and str(final_content).strip():
+                self.session.message_history.append({
+                    "role": "assistant",
+                    "content": final_content,
+                    "timestamp": datetime.now().isoformat()
+                })
 
             # ═══════════════════════════════════════════════════════════════════
             # DISABLED: Prompt suggestions generation
@@ -1174,7 +1276,12 @@ class NursingTutor:
             
         except Exception as e:
             print("ERROR OCCURED DURING PROCESS MESSAGE",e)
+            import traceback
+            traceback.print_exc()
+            # "status" is what the frontend's stream_chunk handler routes to
+            # onStatusUpdate; "type" kept for any other consumers.
             yield json.dumps({
+                "status": "error",
                 "type": "error",
                 "message": f"Processing failed: {str(e)}"
             }) + "\n"
@@ -1215,6 +1322,29 @@ CRITICAL RULES:
 4. If user says "yes/okay/sure" → ACT IMMEDIATELY, don't ask again
 5. Preserve topic language - extract topics in user's language
 6. Respond in the SAME language as the user's current message
+
+ANSWERING vs QUIZZING (the #1 routing mistake — read carefully):
+• When the user pastes THEIR OWN homework, assignment, case study, or exam
+  question and wants it answered ("outline...", "identify two...", "list...",
+  an MCQ with options, "can you answer...", "i need an answer"), ANSWER IT
+  DIRECTLY as text. That is not a quiz request. Rule 1 applies to generating
+  NEW practice questions, not to answering the user's question.
+• If a quiz was just generated and the user complains ("answer my question",
+  "I don't want quizzes", repeats their message), apologize in one short
+  sentence and answer their original question in full. NEVER generate
+  another quiz in that situation.
+• Only call generate_quiz_stream when the user asks to BE TESTED ("quiz me",
+  "test me", "practice questions", "make me an exam").
+
+APP CAPABILITIES (answer accurately when asked — do not deny features):
+• Users CAN upload files with the paperclip button and CAN paste images
+  (screenshots, photos) directly into the message box.
+• Supported uploads: PDF, Word, PowerPoint, Excel, TXT/MD, and images
+  (JPG, PNG, BMP, TIFF, WebP, HEIC). Image text is extracted with OCR —
+  typed/printed text works well; handwriting and photos of objects (e.g. a
+  wound photo) may extract little or nothing. If a user needs visual
+  assessment of a photo, say honestly that the app currently reads text
+  from images, not the image itself.
 
 QUIZ MODE DEFAULTS:
 • Default: quiz_mode="knowledge" (factual recall questions)
