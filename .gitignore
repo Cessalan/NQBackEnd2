@@ -27,3 +27,6 @@ Thumbs.db # Windows
 FireBaseAccess.json
 service-account-key.json
 secrets/*.json
+local_backend.err.log
+
+local_backend.log
