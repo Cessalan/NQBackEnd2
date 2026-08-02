@@ -1,0 +1,441 @@
+✅ OPENAI_API_KEY found
+   Length: 164
+   First 15 chars: sk-proj-cIM8Pnc
+   Last 4 chars: ...GWUA
+   Type: <class 'str'>
+   Contains whitespace: False
+🚀 Started periodic cleanup task (30s interval, 60s timeout)
+INFO:     127.0.0.1:51030 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51030 - "POST /billing/webhook HTTP/1.1" 400 Bad Request
+💳 Stripe webhook: product.created -> {'status': 'ignored', 'reason': 'product.created'}
+INFO:     127.0.0.1:64902 - "POST /billing/webhook HTTP/1.1" 200 OK
+💳 Stripe webhook: price.created -> {'status': 'ignored', 'reason': 'price.created'}
+INFO:     127.0.0.1:64902 - "POST /billing/webhook HTTP/1.1" 200 OK
+💳 Stripe webhook: payment_intent.created -> {'status': 'ignored', 'reason': 'payment_intent.created'}
+INFO:     127.0.0.1:64902 - "POST /billing/webhook HTTP/1.1" 200 OK
+💳 Stripe webhook: customer.created -> {'status': 'ignored', 'reason': 'customer.created'}
+INFO:     127.0.0.1:64902 - "POST /billing/webhook HTTP/1.1" 200 OK
+💳 Stripe webhook: payment_intent.succeeded -> {'status': 'ignored', 'reason': 'payment_intent.succeeded'}
+INFO:     127.0.0.1:64902 - "POST /billing/webhook HTTP/1.1" 200 OK
+💳 Stripe webhook: charge.succeeded -> {'status': 'ignored', 'reason': 'charge.succeeded'}
+INFO:     127.0.0.1:64902 - "POST /billing/webhook HTTP/1.1" 200 OK
+💳 Stripe webhook: checkout.session.completed -> {'status': 'ignored', 'reason': 'no client_reference_id'}
+INFO:     127.0.0.1:64902 - "POST /billing/webhook HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51505 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51505 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58967 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58967 - "POST /warm_up HTTP/1.1" 200 OK
+💳 Stripe webhook: charge.succeeded -> {'status': 'ignored', 'reason': 'charge.succeeded'}
+INFO:     127.0.0.1:57648 - "POST /billing/webhook HTTP/1.1" 200 OK
+💳 Stripe webhook: invoice.finalized -> {'status': 'ignored', 'reason': 'invoice.finalized'}
+INFO:     127.0.0.1:57648 - "POST /billing/webhook HTTP/1.1" 200 OK
+💳 Stripe webhook: invoice.paid -> {'status': 'ignored', 'reason': 'invoice.paid'}
+INFO:     127.0.0.1:57648 - "POST /billing/webhook HTTP/1.1" 200 OK
+💳 Stripe webhook: payment_method.attached -> {'status': 'ignored', 'reason': 'payment_method.attached'}
+INFO:     127.0.0.1:57648 - "POST /billing/webhook HTTP/1.1" 200 OK
+💳 Stripe webhook: customer.created -> {'status': 'ignored', 'reason': 'customer.created'}
+INFO:     127.0.0.1:57648 - "POST /billing/webhook HTTP/1.1" 200 OK
+💳 Stripe webhook: customer.updated -> {'status': 'ignored', 'reason': 'customer.updated'}
+INFO:     127.0.0.1:57648 - "POST /billing/webhook HTTP/1.1" 200 OK
+💳 Stripe webhook: customer.subscription.created -> {'status': 'ignored', 'reason': 'customer.subscription.created'}
+INFO:     127.0.0.1:57648 - "POST /billing/webhook HTTP/1.1" 200 OK
+💳 Stripe webhook: checkout.session.completed -> {'status': 'upgraded', 'uid': 'VymBNcl0KiOrv1tbPPQgjHal0SG3'}
+INFO:     127.0.0.1:57648 - "POST /billing/webhook HTTP/1.1" 200 OK
+💳 Stripe webhook: payment_intent.succeeded -> {'status': 'ignored', 'reason': 'payment_intent.succeeded'}
+INFO:     127.0.0.1:57651 - "POST /billing/webhook HTTP/1.1" 200 OK
+💳 Stripe webhook: payment_intent.created -> {'status': 'ignored', 'reason': 'payment_intent.created'}
+INFO:     127.0.0.1:57652 - "POST /billing/webhook HTTP/1.1" 200 OK
+💳 Stripe webhook: invoice.created -> {'status': 'ignored', 'reason': 'invoice.created'}
+INFO:     127.0.0.1:57654 - "POST /billing/webhook HTTP/1.1" 200 OK
+💳 Stripe webhook: invoice.payment_succeeded -> {'status': 'ignored', 'reason': 'invoice.payment_succeeded'}
+INFO:     127.0.0.1:57655 - "POST /billing/webhook HTTP/1.1" 200 OK
+💳 Stripe webhook: invoice_payment.paid -> {'status': 'ignored', 'reason': 'invoice_payment.paid'}
+INFO:     127.0.0.1:49547 - "POST /billing/webhook HTTP/1.1" 200 OK
+💳 Stripe webhook: payment_link.updated -> {'status': 'ignored', 'reason': 'payment_link.updated'}
+INFO:     127.0.0.1:51508 - "POST /billing/webhook HTTP/1.1" 200 OK
+💳 Stripe webhook: payment_link.updated -> {'status': 'ignored', 'reason': 'payment_link.updated'}
+INFO:     127.0.0.1:51508 - "POST /billing/webhook HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53453 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53453 - "OPTIONS /billing/create-portal-session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53453 - "POST /billing/create-portal-session HTTP/1.1" 200 OK
+💳 Stripe webhook: billing_portal.configuration.created -> {'status': 'ignored', 'reason': 'billing_portal.configuration.created'}
+INFO:     127.0.0.1:49514 - "POST /billing/webhook HTTP/1.1" 200 OK
+💳 Stripe webhook: billing_portal.session.created -> {'status': 'ignored', 'reason': 'billing_portal.session.created'}
+INFO:     127.0.0.1:49514 - "POST /billing/webhook HTTP/1.1" 200 OK
+💳 Stripe webhook: customer.subscription.updated -> {'status': 'ignored', 'reason': 'sub status active'}
+INFO:     127.0.0.1:55728 - "POST /billing/webhook HTTP/1.1" 200 OK
+💳 Stripe webhook: customer.subscription.updated -> {'status': 'ignored', 'reason': 'sub status active'}
+INFO:     127.0.0.1:55728 - "POST /billing/webhook HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63455 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64223 - "POST /billing/create-portal-session HTTP/1.1" 200 OK
+💳 Stripe webhook: billing_portal.session.created -> {'status': 'ignored', 'reason': 'billing_portal.session.created'}
+INFO:     127.0.0.1:55192 - "POST /billing/webhook HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54058 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59151 - "OPTIONS /billing/create-portal-session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59151 - "POST /billing/create-portal-session HTTP/1.1" 200 OK
+💳 Stripe webhook: billing_portal.session.created -> {'status': 'ignored', 'reason': 'billing_portal.session.created'}
+INFO:     127.0.0.1:59697 - "POST /billing/webhook HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59062 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59062 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58901 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56173 - "POST /billing/webhook HTTP/1.1" 400 Bad Request
+💳 Stripe webhook: checkout.session.completed -> {'status': 'upgraded', 'uid': 'claude-stripe-test-user'}
+INFO:     127.0.0.1:56179 - "POST /billing/webhook HTTP/1.1" 200 OK
+
+============================================================
+📝 EXAM GENERATION - chat_id: claude-stripe-test-chat
+   Topic: x
+   Types: ['mcq', 'sata', 'casestudy']
+   Count: 1
+   Custom: none
+============================================================
+📭 get_chat_vectorstore: No vectorstore index files found in Firebase Storage for claude-stripe-test-chat
+files in chat according to storage []
+🔒 Session context set for chat_id: claude-stripe-test-chat (coroutine-safe)
+📥 set_session_context: Loading documents list for claude-stripe-test-chat
+files in chat according to storage []
+📥 set_session_context: Loading vectorstore for claude-stripe-test-chat (not cached)
+📭 get_chat_vectorstore: No vectorstore index files found in Firebase Storage for claude-stripe-test-chat
+📚 Study session setup: 0 documents, vectorstore: False
+🎮 [QUIZ_WITH_BANK] Quiz mode received: knowledge
+
+============================================================
+🧠 [CONCEPT-FIRST] Extracting 1 concepts from content...
+============================================================
+
+📊 distribute_question_types called: total=1, types=['mcq', 'sata', 'casestudy']
+📊 Small quiz distribution: ['mcq', 'sata', 'casestudy']
+
+============================================================
+⚡ [PARALLEL] Generating 1 questions concurrently...
+============================================================
+
+
+============================================================
+Generating Question 1
+Target answer position: C
+Quiz mode: knowledge
+Learning objective: general
+Existing topics available: 0
+============================================================
+
+💭 Question 1 reasoning:
+   concept: The normal range for serum ammonia levels in patients with liver failure
+   student_context_adjustment: The question uses clear, direct language suitable for nursing students reviewing critical lab values.
+   question_style: Value/Range: 'What is the normal range for X?' was chosen because it directly tests factual knowledge of normal serum ammonia levels.
+   distractors: ['A) 5 to 15 µmol/L — a lower range that might be confused with normal values for other blood tests.', 'B) 50 to 100 µmol/L — a higher range that could be mistaken as normal due to elevated ammonia in liver failure.', 'D) 100 to 150 µmol/L — an excessively high range, possibly assumed normal by students unaware of the precise normal limits.']
+   validation: Option C is the only answer correctly identifying the normal serum ammonia range as 15 to 45 µmol/L, based solely on the document content.
+? Topic assigned: Serum Ammonia Levels
+✅ Generated exam with 1 questions
+   Distribution: {'mcq': 1}
+INFO:     127.0.0.1:60761 - "POST /study/generate-exam HTTP/1.1" 200 OK
+💳 Stripe webhook: customer.subscription.deleted -> {'status': 'downgraded', 'uid': 'claude-stripe-test-user'}
+INFO:     127.0.0.1:53447 - "POST /billing/webhook HTTP/1.1" 200 OK
+
+============================================================
+📝 EXAM GENERATION - chat_id: claude-stripe-test-chat
+   Topic: x
+   Types: ['mcq', 'sata', 'casestudy']
+   Count: 1
+   Custom: none
+============================================================
+🚫 Quota exceeded for chat claude-stripe-test-chat — rejecting exam
+INFO:     127.0.0.1:58809 - "POST /study/generate-exam HTTP/1.1" 429 Too Many Requests
+
+============================================================
+📝 EXAM GENERATION - chat_id: claude-stripe-test-chat
+   Topic: x
+   Types: ['mcq', 'sata', 'casestudy']
+   Count: 1
+   Custom: none
+============================================================
+📭 get_chat_vectorstore: No vectorstore index files found in Firebase Storage for claude-stripe-test-chat
+files in chat according to storage []
+🔒 Session context set for chat_id: claude-stripe-test-chat (coroutine-safe)
+📥 set_session_context: Loading documents list for claude-stripe-test-chat
+files in chat according to storage []
+📥 set_session_context: Loading vectorstore for claude-stripe-test-chat (not cached)
+📭 get_chat_vectorstore: No vectorstore index files found in Firebase Storage for claude-stripe-test-chat
+📚 Study session setup: 0 documents, vectorstore: False
+🎮 [QUIZ_WITH_BANK] Quiz mode received: knowledge
+
+============================================================
+🧠 [CONCEPT-FIRST] Extracting 1 concepts from content...
+============================================================
+
+📊 distribute_question_types called: total=1, types=['mcq', 'sata', 'casestudy']
+📊 Small quiz distribution: ['mcq', 'sata', 'casestudy']
+
+============================================================
+⚡ [PARALLEL] Generating 1 questions concurrently...
+============================================================
+
+
+============================================================
+Generating Question 1
+Target answer position: B
+Quiz mode: knowledge
+Learning objective: general
+Existing topics available: 0
+============================================================
+
+💭 Question 1 reasoning:
+   concept: The primary nursing intervention for preventing pressure ulcers is regular repositioning of immobile patients to relieve pressure.
+   student_context_adjustment: The question uses clear language appropriate for nursing students to test their understanding of the core prevention strategy for pressure ulcers.
+   question_style: Mechanism: 'How does X work?' style, focusing on the main intervention mechanism to prevent pressure ulcers.
+   distractors: ['Option A: Using special mattresses — students might think mattresses alone prevent ulcers without repositioning.', 'Option C: Applying creams regularly — students may confuse skin care with pressure relief.', 'Option D: Increasing fluid intake — students might incorrectly assume hydration prevents ulcers directly.']
+   validation: Only regular repositioning directly relieves pressure to prevent ulcers, making option B the sole correct answer.
+? Topic assigned: Pressure Ulcer Prevention
+✅ Generated exam with 1 questions
+   Distribution: {'mcq': 1}
+INFO:     127.0.0.1:62259 - "POST /study/generate-exam HTTP/1.1" 200 OK
+✅ WebSocket connected for chat_id: claude-ws-quota-test-chat
+📨 Received WebSocket message: type=chat_message, chat_id=claude-ws-quota-test-chat
+🚫 Quota exceeded for chat claude-ws-quota-test-chat — rejecting chat message
+❌ WebSocket disconnected for chat_id: claude-ws-quota-test-chat
+Client claude-ws-quota-test-chat disconnected
+🧹 Session claude-ws-quota-test-chat expired (idle 122s)
+💳 Stripe webhook: payout.created -> {'status': 'ignored', 'reason': 'payout.created'}
+INFO:     127.0.0.1:55343 - "POST /billing/webhook HTTP/1.1" 200 OK
+💳 Stripe webhook: payout.reconciliation_completed -> {'status': 'ignored', 'reason': 'payout.reconciliation_completed'}
+INFO:     127.0.0.1:55343 - "POST /billing/webhook HTTP/1.1" 200 OK
+💳 Stripe webhook: payout.paid -> {'status': 'ignored', 'reason': 'payout.paid'}
+INFO:     127.0.0.1:54473 - "POST /billing/webhook HTTP/1.1" 200 OK
+💳 Stripe webhook: payout.updated -> {'status': 'ignored', 'reason': 'payout.updated'}
+INFO:     127.0.0.1:54473 - "POST /billing/webhook HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54443 - "OPTIONS /chat/generate-title HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54443 - "POST /chat/generate-title HTTP/1.1" 200 OK
+✅ WebSocket connected for chat_id: RxotHtq7BHT9MAxNjB8X
+📨 Received WebSocket message: type=chat_message, chat_id=RxotHtq7BHT9MAxNjB8X
+🔍 ACTIVE_SESSIONS keys: []
+🔍 Looking for chat_id: RxotHtq7BHT9MAxNjB8X
+🔍 Session exists: False
+🔒 Session context set for chat_id: RxotHtq7BHT9MAxNjB8X (coroutine-safe)
+📥 set_session_context: Loading documents list for RxotHtq7BHT9MAxNjB8X
+files in chat according to storage []
+📥 set_session_context: Loading vectorstore for RxotHtq7BHT9MAxNjB8X (not cached)
+📭 get_chat_vectorstore: No vectorstore index files found in Firebase Storage for RxotHtq7BHT9MAxNjB8X
+🆕 Created new session for chat RxotHtq7BHT9MAxNjB8X
+📊 Session vectorstore status: NOT in memory
+📊 Session object id: 1622319365840
+⚡ Starting parallel loading operations for RxotHtq7BHT9MAxNjB8X...
+📝 No file insights found in Firebase for RxotHtq7BHT9MAxNjB8X
+✅ File insights loaded for RxotHtq7BHT9MAxNjB8X
+📥 Loading vectorstore from Firebase for chat RxotHtq7BHT9MAxNjB8X...
+🔍 Checking for combined vectorstore: vectorstores/RxotHtq7BHT9MAxNjB8X/
+📭 No combined vectorstore found for RxotHtq7BHT9MAxNjB8X
+⚠️ No vectorstore found in Firebase for RxotHtq7BHT9MAxNjB8X - background upload may still be in progress
+✅ Chat context loaded for RxotHtq7BHT9MAxNjB8X
+⚡ Parallel loading completed in 328ms
+🔍 DEBUG: session.user_language = None
+🌐 Detected language: english (with context: True)
+🌐 Detected and cached language: english
+📦 Using pre-fetched context (skipped duplicate Firebase query)
+About to create messages to feed llm
+🔒 Session context set for chat_id: RxotHtq7BHT9MAxNjB8X (coroutine-safe)
+📥 set_session_context: Loading documents list for RxotHtq7BHT9MAxNjB8X
+files in chat according to storage []
+📥 set_session_context: Loading vectorstore for RxotHtq7BHT9MAxNjB8X (not cached)
+📭 get_chat_vectorstore: No vectorstore index files found in Firebase Storage for RxotHtq7BHT9MAxNjB8X
+📝 Normal message (not a continuation): 'hi...'
+SYSTEM PROMPT You are an AI nursing tutor helping students with clinical skills, quizzes, flashcards, and study materials.
+
+CORE TOOLS (use these, never write content manually):
+• generate_quiz_stream: For ANY quiz/question request (max 15 questions)
+  - ALWAYS pass user_prompt=<exact user message verbatim> — used for accurate mode detection
+  - quiz_mode="knowledge" (DEFAULT) for factual questions
+  - quiz_mode="nclex" ONLY when user explicitly asks for NCLEX/clinical scenarios/judgment
+  - source_preference="documents" when student has uploaded files
+• generate_flashcards_stream: For flashcard requests (max 15 cards)
+• generate_study_sheet_stream: When user explicitly asks for study sheet/guide
+• search_documents: Search student's uploaded materials
+• summarize_document: For document summaries
+• generate_audio_content: For audio content (teach, summarize, deep_dive, simplify, progress)
+
+CRITICAL RULES:
+1. NEVER write questions as text - ALWAYS use generate_quiz_stream tool
+2. If user has documents and asks for quiz → source_preference="documents"
+3. If user asks for >15 items → inform them of limit, ask if 15 is okay
+4. If user says "yes/okay/sure" → ACT IMMEDIATELY, don't ask again
+5. Preserve topic language - extract topics in user's language
+6. Respond in the SAME language as the user's current message
+
+ANSWERING vs QUIZZING (the #1 routing mistake — read carefully):
+• When the user pastes THEIR OWN homework, assignment, case study, or exam
+  question and wants it answered ("outline...", "identify two...", "list...",
+  an MCQ with options, "can you answer...", "i need an answer"), ANSWER IT
+  DIRECTLY as text. That is not a quiz request. Rule 1 applies to generating
+  NEW practice questions, not to answering the user's question.
+• If a quiz was just generated and the user complains ("answer my question",
+  "I don't want quizzes", repeats their message), apologize in one short
+  sentence and answer their original question in full. NEVER generate
+  another quiz in that situation.
+• Only call generate_quiz_stream when the user asks to BE TESTED ("quiz me",
+  "test me", "practice questions", "make me an exam").
+
+APP CAPABILITIES (answer accurately when asked — do not deny features):
+• Users CAN upload files with the paperclip button and CAN paste images
+  (screenshots, photos) directly into the message box.
+• Supported uploads: PDF, Word, PowerPoint, Excel, TXT/MD, and images
+  (JPG, PNG, BMP, TIFF, WebP, HEIC). Image text is extracted with OCR —
+  typed/printed text works well; handwriting and photos of objects (e.g. a
+  wound photo) may extract little or nothing. If a user needs visual
+  assessment of a photo, say honestly that the app currently reads text
+  from images, not the image itself.
+
+QUIZ MODE DEFAULTS:
+• Default: quiz_mode="knowledge" (factual recall questions)
+• Use quiz_mode="nclex" when user says: "NCLEX", "NCLEX-style", "clinical scenarios", "patient scenarios", "clinical judgment", "testing judgment"
+• ALWAYS include user_prompt=<verbatim user message> in every generate_quiz_stream call
+
+LEARNING OBJECTIVE DETECTION (pass learning_objective= in generate_quiz_stream):
+Infer the student's intent from their message and set learning_objective accordingly:
+• "exam_prep"   → user says: "exam", "test tomorrow", "NCLEX exam", "prepare for", "ready for my exam", "cramming"
+• "weak_areas"  → user says: "struggling with", "don't understand", "weak on", "keep getting wrong", "confused about", "help me with"
+• "first_review"→ user says: "just started", "first time", "new to", "learning for the first time", "beginner", "intro"
+• "deep_dive"   → user says: "deep dive", "in depth", "really understand", "mechanisms", "pathophysiology", "why does"
+• "quick_check" → user says: "quick", "just a few", "fast review", "check myself", "rapid", "briefly"
+• "general"     → (default) no clear intent signal detected
+RULE: If ambiguous, default to "general". Never ask the user to clarify their intent — infer it.
+
+SMART BEHAVIOR:
+• When user enters bare topic → search_documents first, don't auto-generate content
+• For "practice weak areas" after quiz → analyze quiz data, use empathetic_message
+• For meta-questions about quizzes ("why was that hard?") → answer normally, don't generate new quiz
+
+SESSION CONTEXT:
+• Documents: none
+• Last file: none
+• Language: english
+
+No recent quiz or flashcard activity
+
+
+
+FILE INSIGHTS:
+No file insights available yet.
+
+EMPATHETIC MESSAGE RULES (only for post-quiz practice):
+• MAX 2 sentences, ~50 words, casual/friendly tone
+• Include actual score and specific weak topics
+• Avoid robotic phrases: "I understand", "You've got this", "Let's tackle this together"
+• Tone by performance: <50% warm/understanding, 50-70% encouraging, 70-85% praise+push, 85%+ celebrate+challenge
+System Prompt created
+⚡ FAST ROUTE: Detected conversational pattern - skipping tool routing
+⚡ ULTRA-FAST: Conversational message detected, streaming immediately
+✅ Stream complete for RxotHtq7BHT9MAxNjB8X, connection stays open for follow-up messages
+📊 Active: 1 sessions, 1 connections
+📊 Active: 1 sessions, 1 connections
+📊 Active: 1 sessions, 1 connections
+📊 Active: 1 sessions, 1 connections
+📨 Received WebSocket message: type=ping, chat_id=RxotHtq7BHT9MAxNjB8X
+📊 Active: 1 sessions, 1 connections
+📊 Active: 1 sessions, 1 connections
+📊 Active: 1 sessions, 1 connections
+📊 Active: 1 sessions, 1 connections
+📨 Received WebSocket message: type=ping, chat_id=RxotHtq7BHT9MAxNjB8X
+📊 Active: 1 sessions, 1 connections
+📊 Active: 1 sessions, 1 connections
+📊 Active: 1 sessions, 1 connections
+📊 Active: 1 sessions, 1 connections
+📨 Received WebSocket message: type=ping, chat_id=RxotHtq7BHT9MAxNjB8X
+📊 Active: 1 sessions, 1 connections
+📊 Active: 1 sessions, 1 connections
+📊 Active: 1 sessions, 1 connections
+📊 Active: 1 sessions, 1 connections
+📨 Received WebSocket message: type=ping, chat_id=RxotHtq7BHT9MAxNjB8X
+📊 Active: 1 sessions, 1 connections
+📊 Active: 1 sessions, 1 connections
+📊 Active: 1 sessions, 1 connections
+📊 Active: 1 sessions, 1 connections
+📨 Received WebSocket message: type=ping, chat_id=RxotHtq7BHT9MAxNjB8X
+📊 Active: 1 sessions, 1 connections
+📊 Active: 1 sessions, 1 connections
+📊 Active: 1 sessions, 1 connections
+📊 Active: 1 sessions, 1 connections
+📨 Received WebSocket message: type=ping, chat_id=RxotHtq7BHT9MAxNjB8X
+📊 Active: 1 sessions, 1 connections
+📊 Active: 1 sessions, 1 connections
+📊 Active: 1 sessions, 1 connections
+📊 Active: 1 sessions, 1 connections
+🧹 Session RxotHtq7BHT9MAxNjB8X expired (idle 135s)
+🧹 Cleaned up session for chat_id: RxotHtq7BHT9MAxNjB8X
+📊 Active: 0 sessions, 1 connections
+📨 Received WebSocket message: type=ping, chat_id=RxotHtq7BHT9MAxNjB8X
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📨 Received WebSocket message: type=ping, chat_id=RxotHtq7BHT9MAxNjB8X
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📨 Received WebSocket message: type=ping, chat_id=RxotHtq7BHT9MAxNjB8X
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📨 Received WebSocket message: type=ping, chat_id=RxotHtq7BHT9MAxNjB8X
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📨 Received WebSocket message: type=ping, chat_id=RxotHtq7BHT9MAxNjB8X
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📨 Received WebSocket message: type=ping, chat_id=RxotHtq7BHT9MAxNjB8X
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📨 Received WebSocket message: type=ping, chat_id=RxotHtq7BHT9MAxNjB8X
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📨 Received WebSocket message: type=ping, chat_id=RxotHtq7BHT9MAxNjB8X
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📨 Received WebSocket message: type=ping, chat_id=RxotHtq7BHT9MAxNjB8X
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📨 Received WebSocket message: type=ping, chat_id=RxotHtq7BHT9MAxNjB8X
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📨 Received WebSocket message: type=ping, chat_id=RxotHtq7BHT9MAxNjB8X
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📨 Received WebSocket message: type=ping, chat_id=RxotHtq7BHT9MAxNjB8X
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📨 Received WebSocket message: type=ping, chat_id=RxotHtq7BHT9MAxNjB8X
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📨 Received WebSocket message: type=ping, chat_id=RxotHtq7BHT9MAxNjB8X
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+📨 Received WebSocket message: type=ping, chat_id=RxotHtq7BHT9MAxNjB8X
+📊 Active: 0 sessions, 1 connections
+📊 Active: 0 sessions, 1 connections
+❌ WebSocket disconnected for chat_id: RxotHtq7BHT9MAxNjB8X
+Client RxotHtq7BHT9MAxNjB8X disconnected
+🧹 Session RxotHtq7BHT9MAxNjB8X expired (idle 172827s)
+INFO:     127.0.0.1:54839 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54839 - "POST /warm_up HTTP/1.1" 200 OK

@@ -11,8 +11,12 @@ from dotenv import load_dotenv
 import asyncio
 import json
 import re as _lang_re
-# Load environment variables
+# Load environment variables. `.env.local` (if present) OVERRIDES `.env` —
+# it holds local sandbox credentials (e.g. Stripe test keys) and is excluded
+# from git AND from the Docker image, so a deployed backend can never pick it
+# up. Delete or empty it to go back to the real `.env` values locally.
 load_dotenv()
+load_dotenv(".env.local", override=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -656,8 +660,10 @@ async def process_chat_message(chat_id: str, message: dict, websocket: WebSocket
         quota = usage_guard.check_quota(chat_id)
         if not quota["allowed"]:
             print(f"🚫 Quota exceeded for chat {chat_id} — rejecting chat message")
+            # Must be the top-level {type:"error"} envelope: the frontend
+            # dispatcher switches on `type` and drops unknown envelopes.
             await websocket.send_text(json.dumps({
-                "status": "error",
+                "type": "error",
                 "code": "quota_exceeded",
                 "message": usage_guard.QUOTA_MESSAGE
             }))

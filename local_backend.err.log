@@ -1,0 +1,57 @@
+INFO:     Started server process [27620]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1785283726.161442   21496 alts_credentials.cc:93] ALTS creds ignored. Not running on GCP and untrusted ALTS is not enabled.
+INFO:stripe:message='Request to Stripe api' method=post url=https://api.stripe.com/v1/billing_portal/sessions
+INFO:stripe:message='Stripe API response' path=https://api.stripe.com/v1/billing_portal/sessions response_code=200
+INFO:stripe:message='Request to Stripe api' method=post url=https://api.stripe.com/v1/billing_portal/sessions
+INFO:stripe:message='Stripe API response' path=https://api.stripe.com/v1/billing_portal/sessions response_code=200
+INFO:stripe:message='Request to Stripe api' method=post url=https://api.stripe.com/v1/billing_portal/sessions
+INFO:stripe:message='Stripe API response' path=https://api.stripe.com/v1/billing_portal/sessions response_code=200
+INFO:services.quiz_with_bank:Question types requested: ['mcq', 'sata', 'casestudy']
+INFO:services.quiz_with_bank:Quiz mode: knowledge
+INFO:services.quiz_with_bank:Generating all 1 questions fresh via LLM (bank bypassed)
+INFO:services.quiz_with_bank:Question Bank result: 0 from bank, 1 to generate
+INFO:services.quiz_with_bank:Generating 1 questions via LLM (concept-first approach)...
+INFO:services.quiz_with_bank:🧠 Step 1: Extracting 1 unique concepts...
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:services.quiz_with_bank:✅ Extracted 1 concepts for quiz generation
+INFO:services.quiz_with_bank:   Concept 1: The normal range for serum ammonia levels in patients with l...
+INFO:services.quiz_with_bank:✅ Got 1 concepts, generating one question per concept...
+INFO:services.quiz_with_bank:Question type distribution: ['mcq', 'sata', 'casestudy']
+INFO:services.quiz_with_bank:⚡ PARALLEL GENERATION: Starting 1 questions in parallel...
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:services.quiz_with_bank:✅ Q1/1 (mcq): What is the normal range for serum ammonia levels ...
+INFO:services.quiz_with_bank:⚡ PARALLEL GENERATION COMPLETE: 1 questions generated
+INFO:services.quiz_with_bank:Quiz complete: 1 questions total (0 from bank, 1 generated)
+C:\Users\Billion\Desktop\NQBackEnd\NQBackEnd2\venv\Lib\site-packages\google\cloud\firestore_v1\base_collection.py:304: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  return query.where(field_path, op_string, value)
+INFO:services.quiz_with_bank:Question types requested: ['mcq', 'sata', 'casestudy']
+INFO:services.quiz_with_bank:Quiz mode: knowledge
+INFO:services.quiz_with_bank:Generating all 1 questions fresh via LLM (bank bypassed)
+INFO:services.quiz_with_bank:Question Bank result: 0 from bank, 1 to generate
+INFO:services.quiz_with_bank:Generating 1 questions via LLM (concept-first approach)...
+INFO:services.quiz_with_bank:🧠 Step 1: Extracting 1 unique concepts...
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:services.quiz_with_bank:✅ Extracted 1 concepts for quiz generation
+INFO:services.quiz_with_bank:   Concept 1: The primary nursing intervention for preventing pressure ulc...
+INFO:services.quiz_with_bank:✅ Got 1 concepts, generating one question per concept...
+INFO:services.quiz_with_bank:Question type distribution: ['mcq', 'sata', 'casestudy']
+INFO:services.quiz_with_bank:⚡ PARALLEL GENERATION: Starting 1 questions in parallel...
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:services.quiz_with_bank:✅ Q1/1 (mcq): What is the primary nursing intervention to preven...
+INFO:services.quiz_with_bank:⚡ PARALLEL GENERATION COMPLETE: 1 questions generated
+INFO:services.quiz_with_bank:Quiz complete: 1 questions total (0 from bank, 1 generated)
+INFO:     ('127.0.0.1', 55228) - "WebSocket /ws/claude-ws-quota-test-chat" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:     ('127.0.0.1', 59745) - "WebSocket /ws/RxotHtq7BHT9MAxNjB8X" [accepted]
+INFO:     connection open
+C:\Users\Billion\Desktop\NQBackEnd\NQBackEnd2\venv\Lib\site-packages\google\cloud\firestore_v1\base_collection.py:304: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  return query.where(field_path, op_string, value)
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:     connection closed

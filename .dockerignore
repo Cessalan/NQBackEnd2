@@ -1,0 +1,11 @@
+# Keep the build context lean. NOTE: .env is deliberately NOT ignored —
+# the image relies on it for secrets not set on the Cloud Run service
+# (Stripe keys; load_dotenv() won't override console-set env vars).
+# .env.local IS ignored: it holds local sandbox (test-mode) credentials
+# that must never reach production.
+.env.local
+venv/
+.git/
+__pycache__/
+*.pyc
+.pytest_cache/

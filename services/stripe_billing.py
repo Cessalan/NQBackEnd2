@@ -16,6 +16,7 @@ Env vars:
   STRIPE_SECRET_KEY      (sk_...)     — optional here; set so future API calls work
 """
 
+import json
 import os
 import stripe
 from firebase_admin import firestore
@@ -34,14 +35,22 @@ def verify_and_parse(payload: bytes, sig_header: str):
     if not STRIPE_WEBHOOK_SECRET:
         return None, "webhook_secret_not_configured"
     try:
-        event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
-        return event, None
+        # construct_event verifies the signature. We then return the PLAIN
+        # parsed JSON, not the stripe Event wrapper: in stripe-python 15.x
+        # event["data"]["object"] is a StripeObject that doesn't support
+        # dict-style .get(), which handle_event relies on.
+        stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
+        return json.loads(payload.decode("utf-8")), None
     except ValueError:
         # Malformed JSON body
         return None, "invalid_payload"
     except stripe.error.SignatureVerificationError:
         # Bad/spoofed signature — reject
         return None, "invalid_signature"
+    except Exception as e:
+        # Signed but structurally unexpected payload — reject as malformed
+        # rather than letting it bubble up as a 500.
+        return None, f"unparseable_event: {type(e).__name__}"
 
 
 def _set_user_tier(uid: str, tier: str, extra: dict = None):
