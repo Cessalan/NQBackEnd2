@@ -93,6 +93,13 @@ class StudyItemRequest(BaseModel):
     context_tags: Optional[List[str]] = []  # Tags for better context
     asked_hashes: Optional[List[str]] = []  # Previously shown content hashes (anti-repeat)
     language: str = "en"                  # Language for content
+    # Diagnostic mode: the auto-launched FIRST node of a plan. Generates a short
+    # calibration quiz (3 questions) instead of the standard 12. Production data
+    # showed quiz-first plans completing node 1 at 67% vs 89% for lesson-first —
+    # opening with a full 12-question test drives anxious students off. The
+    # frontend also suppresses scoring for these.
+    is_diagnostic: bool = False
+    num_questions: Optional[int] = None   # Override question count (None = default)
 
 
 class StudyAudioRequest(BaseModel):

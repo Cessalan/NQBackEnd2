@@ -21,6 +21,12 @@ class PersistentSessionContext:
     name_last_document_used:str = field(default="")
     message_history: List[tuple] = field(default_factory=list)
     tool_calls: List[Dict] = field(default_factory=list)
+
+    # Exam-pressure signals from the current message (services/urgency_detector.py).
+    urgency_context: Dict[str, Any] = field(default_factory=dict)
+    # Set once the tutor has acknowledged the student's situation, so follow-up
+    # turns move on to helping instead of re-opening with sympathy.
+    crisis_acknowledged: bool = False
     studysheet_history: str = field(default="")
     # FIX: Changed from class-level `= []` to instance-level `field(default_factory=list)`
     # The old code shared one list across ALL sessions, causing cross-user contamination

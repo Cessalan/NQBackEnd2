@@ -2880,6 +2880,20 @@ async def generate_section(request: SectionRequest):
 from models.requests import StudyPlanRequest, StudyItemRequest, StudyAudioRequest, StudyReviewPlanRequest, DiagnosticQuizRequest, StudyMindmapRequest, StudyInterpretRequest, StudyExamRequest
 import hashlib
 
+# ── Study node sizes ────────────────────────────────────────────────────────
+# Both were 12. Production analysis (2026-08-03) showed:
+#   - flashcards are 2.03x over-represented as the node people quit on, and
+#     completing one DROPS the odds of doing the next node by 6.5pp — a
+#     fatigue signature pointing at set length, not at the format itself
+#   - quizzes are the best momentum node in the product (+5.1pp continuation),
+#     so the plan should contain MORE of them, each one shorter
+# Shorter units also mean a free user's question budget buys ~2 quizzes per
+# window instead of one, so the throttle stops cutting mid-node.
+# Keep STUDY_QUIZ_QUESTIONS in mind alongside FREE_LIMIT in usage_guard.py.
+STUDY_QUIZ_QUESTIONS = 5
+STUDY_FLASHCARD_CARDS = 5
+STUDY_DIAGNOSTIC_QUESTIONS = 3   # auto-launched first node — calibration only
+
 @app.post("/study/plan")
 async def generate_study_plan(request: StudyPlanRequest):
     """
@@ -3022,18 +3036,34 @@ Return ONLY valid JSON (all strings must be in {prompt_language}):
   {{"id": "node_4", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Final Test", "tags": ["topic1", "assessment"], "difficulty": 2}}"""
         elif review_format == "Visual Concept Maps":
             structure_rule = "- LESSON: Introduce the topic (content comes from document)\n   - AUDIO: Listen to the lesson explained out loud\n   - MINDMAP: Visual concept map linking key ideas\n   - QUIZ: Test understanding of that specific topic"
-            node_types = '- "lesson": Introduction to ONE topic from the document\n- "audio": Audio explanation of that topic (listen instead of reading)\n- "mindmap": Visual concept map for that topic\n- "quiz": Questions testing that topic (will generate 12 questions)'
+            node_types = f'- "lesson": Introduction to ONE topic from the document\n- "audio": Audio explanation of that topic (listen instead of reading)\n- "mindmap": Visual concept map for that topic\n- "quiz": Questions testing that topic (will generate {STUDY_QUIZ_QUESTIONS} questions)'
             example_json_rows = f"""  {{"id": "node_1", "type": "lesson", "label": "{unique_topics[0] if unique_topics else 'Topic 1'}", "tags": ["topic1"], "difficulty": 1}},
   {{"id": "node_2", "type": "audio", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Listen", "tags": ["topic1", "audio"], "difficulty": 1}},
   {{"id": "node_3", "type": "mindmap", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Concept Map", "tags": ["topic1", "visual"], "difficulty": 1}},
   {{"id": "node_4", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Quiz", "tags": ["topic1", "assessment"], "difficulty": 1}}"""
         else: # Default (mixed)
-            structure_rule = "- LESSON: Introduce the topic (content comes from document)\n   - AUDIO: Listen to the lesson explained out loud\n   - FLASHCARD: Key terms and definitions from that topic\n   - QUIZ: Test understanding of that specific topic"
-            node_types = '- "lesson": Introduction to ONE topic from the document\n- "audio": Audio explanation of that topic (listen instead of reading)\n- "flashcard": Key terms from that topic (will generate 12 cards)\n- "quiz": Questions testing that topic (will generate 12 questions)'
+            # MUST stay in sync with the default branch of
+            # _build_study_path_prompt — this endpoint is StartStudyModal's
+            # fallback when /study/start fails, and a mismatch would hand the
+            # student a differently-shaped plan depending on which path ran.
+            structure_rule = (
+                "- LESSON: Introduce the topic (content comes from document)\n"
+                "   - QUIZ: Short check on what was just introduced\n"
+                "   - AUDIO: Listen to the topic explained out loud\n"
+                "   - FLASHCARD: Key terms and definitions from that topic\n"
+                "   - QUIZ: Final check on that topic"
+            )
+            node_types = (
+                '- "lesson": Introduction to ONE topic from the document\n'
+                '- "audio": Audio explanation of that topic (listen instead of reading)\n'
+                f'- "flashcard": Key terms from that topic (will generate {STUDY_FLASHCARD_CARDS} cards)\n'
+                f'- "quiz": Questions testing that topic (will generate {STUDY_QUIZ_QUESTIONS} questions)'
+            )
             example_json_rows = f"""  {{"id": "node_1", "type": "lesson", "label": "{unique_topics[0] if unique_topics else 'Topic 1'}", "tags": ["topic1"], "difficulty": 1}},
-  {{"id": "node_2", "type": "audio", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Listen", "tags": ["topic1", "audio"], "difficulty": 1}},
-  {{"id": "node_3", "type": "flashcard", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Vocabulaire", "tags": ["topic1", "terms"], "difficulty": 1}},
-  {{"id": "node_4", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Quiz", "tags": ["topic1", "assessment"], "difficulty": 1}}"""
+  {{"id": "node_2", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Quiz", "tags": ["topic1", "assessment"], "difficulty": 1}},
+  {{"id": "node_3", "type": "audio", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Listen", "tags": ["topic1", "audio"], "difficulty": 1}},
+  {{"id": "node_4", "type": "flashcard", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Vocabulaire", "tags": ["topic1", "terms"], "difficulty": 1}},
+  {{"id": "node_5", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Final Test", "tags": ["topic1", "assessment"], "difficulty": 2}}"""
 
         path_prompt = f"""Create a Duolingo-style study path for this document.
 
@@ -3047,7 +3077,9 @@ STRUCTURE RULES:
 2. Each unit follows this pattern:
    {structure_rule}
 
-3. Total: 12-20 nodes (4 nodes per topic)
+3. Total: 12-20 nodes. Emit EVERY node of the unit pattern for each topic —
+   if that would exceed 20 nodes, use FEWER TOPICS rather than dropping nodes
+   from a unit. A complete short unit beats a truncated long one.
 4. Progress through topics in logical order
 
 NODE TYPES:
@@ -3215,18 +3247,38 @@ def _build_study_path_prompt(unique_topics: List[str], key_terms: List[str], rev
   {{"id": "node_4", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Final Test", "tags": ["topic1", "assessment"], "difficulty": 2}}"""
     elif review_format == "Visual Concept Maps":
         structure_rule = "- LESSON: Introduce the topic (content comes from document)\n   - AUDIO: Listen to the lesson explained out loud\n   - MINDMAP: Visual concept map linking key ideas\n   - QUIZ: Test understanding of that specific topic"
-        node_types = '- "lesson": Introduction to ONE topic from the document\n- "audio": Audio explanation of that topic (listen instead of reading)\n- "mindmap": Visual concept map for that topic\n- "quiz": Questions testing that topic (will generate 12 questions)'
+        node_types = f'- "lesson": Introduction to ONE topic from the document\n- "audio": Audio explanation of that topic (listen instead of reading)\n- "mindmap": Visual concept map for that topic\n- "quiz": Questions testing that topic (will generate {STUDY_QUIZ_QUESTIONS} questions)'
         example_json_rows = f"""  {{"id": "node_1", "type": "lesson", "label": "{unique_topics[0] if unique_topics else 'Topic 1'}", "tags": ["topic1"], "difficulty": 1}},
   {{"id": "node_2", "type": "audio", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Listen", "tags": ["topic1", "audio"], "difficulty": 1}},
   {{"id": "node_3", "type": "mindmap", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Concept Map", "tags": ["topic1", "visual"], "difficulty": 1}},
   {{"id": "node_4", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Quiz", "tags": ["topic1", "assessment"], "difficulty": 1}}"""
     else:
-        structure_rule = "- LESSON: Introduce the topic (content comes from document)\n   - AUDIO: Listen to the lesson explained out loud\n   - FLASHCARD: Key terms and definitions from that topic\n   - QUIZ: Test understanding of that specific topic"
-        node_types = '- "lesson": Introduction to ONE topic from the document\n- "audio": Audio explanation of that topic (listen instead of reading)\n- "flashcard": Key terms from that topic (will generate 12 cards)\n- "quiz": Questions testing that topic (will generate 12 questions)'
+        # DEFAULT UNIT — reordered from production data (2026-08-03):
+        #   lesson  → highest completion (28.8%), best opener
+        #   quiz    → the momentum node (+5.1pp continuation), so it lands
+        #             EARLY and again at the end; two short 5-question quizzes
+        #             beat one long 12-question one
+        #   audio   → neutral (85.0% continuation), sits mid-unit
+        #   flashcard → costs 6.5pp of continuation, so it comes late and
+        #             short (5 cards); a closing quiz restores momentum
+        structure_rule = (
+            "- LESSON: Introduce the topic (content comes from document)\n"
+            "   - QUIZ: Short check on what was just introduced\n"
+            "   - AUDIO: Listen to the topic explained out loud\n"
+            "   - FLASHCARD: Key terms and definitions from that topic\n"
+            "   - QUIZ: Final check on that topic"
+        )
+        node_types = (
+            '- "lesson": Introduction to ONE topic from the document\n'
+            '- "audio": Audio explanation of that topic (listen instead of reading)\n'
+            f'- "flashcard": Key terms from that topic (will generate {STUDY_FLASHCARD_CARDS} cards)\n'
+            f'- "quiz": Questions testing that topic (will generate {STUDY_QUIZ_QUESTIONS} questions)'
+        )
         example_json_rows = f"""  {{"id": "node_1", "type": "lesson", "label": "{unique_topics[0] if unique_topics else 'Topic 1'}", "tags": ["topic1"], "difficulty": 1}},
-  {{"id": "node_2", "type": "audio", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Listen", "tags": ["topic1", "audio"], "difficulty": 1}},
-  {{"id": "node_3", "type": "flashcard", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Vocabulaire", "tags": ["topic1", "terms"], "difficulty": 1}},
-  {{"id": "node_4", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Quiz", "tags": ["topic1", "assessment"], "difficulty": 1}}"""
+  {{"id": "node_2", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Quiz", "tags": ["topic1", "assessment"], "difficulty": 1}},
+  {{"id": "node_3", "type": "audio", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Listen", "tags": ["topic1", "audio"], "difficulty": 1}},
+  {{"id": "node_4", "type": "flashcard", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Vocabulaire", "tags": ["topic1", "terms"], "difficulty": 1}},
+  {{"id": "node_5", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Final Test", "tags": ["topic1", "assessment"], "difficulty": 2}}"""
 
     return f"""Create a Duolingo-style study path for this document.
 
@@ -3240,7 +3292,9 @@ STRUCTURE RULES:
 2. Each unit follows this pattern:
    {structure_rule}
 
-3. Total: 12-20 nodes (4 nodes per topic)
+3. Total: 12-20 nodes. Emit EVERY node of the unit pattern for each topic —
+   if that would exceed 20 nodes, use FEWER TOPICS rather than dropping nodes
+   from a unit. A complete short unit beats a truncated long one.
 4. Progress through topics in logical order
 
 NODE TYPES:
@@ -3431,7 +3485,7 @@ async def start_study_journey(request: StudyPlanRequest):
                     async for chunk in stream_quiz_with_bank(
                         topic=node_label,
                         difficulty="medium",
-                        num_questions=12,
+                        num_questions=STUDY_QUIZ_QUESTIONS,
                         source=source,
                         session=study_session,
                         chat_id=study_session.chat_id,
@@ -3464,7 +3518,7 @@ async def start_study_journey(request: StudyPlanRequest):
                     cards = []
                     async for chunk in stream_flashcards(
                         topic=node_label,
-                        num_cards=12,
+                        num_cards=STUDY_FLASHCARD_CARDS,
                         source=source,
                         session=study_session,
                         chat_id=study_session.chat_id
@@ -4043,13 +4097,13 @@ async def generate_study_item(request: StudyItemRequest):
         elif request.node_type == "flashcard":
             # Flashcards use stream_flashcards (same as chat tools)
             content = await _generate_flashcard_via_stream(
-                session, request.node_label, num_cards=12
+                session, request.node_label, num_cards=STUDY_FLASHCARD_CARDS
             )
 
         elif request.node_type == "quiz":
             # Quizzes use stream_quiz_with_bank (same as chat tools)
             content = await _generate_quiz_via_stream(
-                session, request.node_label, num_questions=12
+                session, request.node_label, num_questions=STUDY_QUIZ_QUESTIONS
             )
 
         elif request.node_type == "audio":
@@ -4128,12 +4182,18 @@ async def generate_study_item_stream(request: StudyItemRequest):
             source = "documents" if session.documents and session.vectorstore else "scratch"
 
             if request.node_type == "quiz":
-                # Stream quiz generation
+                # Stream quiz generation.
+                # Diagnostic (first node of a plan) is deliberately short — it
+                # exists to calibrate the plan, not to test. See StudyItemRequest.
+                quiz_size = request.num_questions or (
+                    STUDY_DIAGNOSTIC_QUESTIONS if request.is_diagnostic
+                    else STUDY_QUIZ_QUESTIONS
+                )
                 questions = []
                 async for chunk in stream_quiz_with_bank(
                     topic=request.node_label,
                     difficulty="medium",
-                    num_questions=12,
+                    num_questions=quiz_size,
                     source=source,
                     session=session,
                     chat_id=session.chat_id,
@@ -4171,7 +4231,7 @@ async def generate_study_item_stream(request: StudyItemRequest):
                 cards = []
                 async for chunk in stream_flashcards(
                     topic=request.node_label,
-                    num_cards=12,
+                    num_cards=STUDY_FLASHCARD_CARDS,
                     source=source,
                     session=session,
                     chat_id=session.chat_id
@@ -4192,12 +4252,29 @@ async def generate_study_item_stream(request: StudyItemRequest):
                 yield f"data: {json.dumps({'status': 'complete', 'type': 'flashcard', 'content': content, 'hash': content_hash})}\n\n"
 
             elif request.node_type == "lesson":
-                # Lessons don't have a streaming generator, generate synchronously
+                # Streams page-by-page (see _stream_lesson_with_context) so the
+                # student can start reading page 1 while the rest is written.
+                # Falls back to the blocking generator if the stream dies before
+                # producing a usable payload.
                 yield f"data: {json.dumps({'status': 'generating', 'message': 'Creating lesson...'})}\n\n"
 
-                content = await _generate_lesson_with_context(
-                    session, request.node_label, request.language
-                )
+                content = None
+                try:
+                    async for chunk in _stream_lesson_with_context(
+                        session, request.node_label, request.language
+                    ):
+                        if chunk.get("status") == "lesson_content":
+                            content = chunk.get("content")
+                        else:
+                            yield f"data: {json.dumps(chunk)}\n\n"
+                except Exception as lesson_err:
+                    print(f"⚠️ Lesson stream failed, falling back to blocking: {lesson_err}")
+
+                if not content or not content.get("pages"):
+                    content = await _generate_lesson_with_context(
+                        session, request.node_label, request.language
+                    )
+
                 content_hash = hashlib.md5(json.dumps(content, sort_keys=True).encode()).hexdigest()[:12]
                 yield f"data: {json.dumps({'status': 'complete', 'type': 'lesson', 'content': content, 'hash': content_hash})}\n\n"
 
@@ -4839,6 +4916,205 @@ Return ONLY valid JSON:
         content_json = content_json.strip()
 
     return json.loads(content_json)
+
+
+def _strip_code_fence(text: str) -> str:
+    """Remove a ```json ... ``` wrapper if the model added one."""
+    text = (text or "").strip()
+    if text.startswith("```"):
+        parts = text.split("```")
+        if len(parts) > 1:
+            text = parts[1]
+            if text.startswith("json"):
+                text = text[4:]
+    return text.strip()
+
+
+def _drain_json_objects(buf: str, cursor: int):
+    """Pull every COMPLETE brace-balanced object out of `buf` starting at `cursor`.
+
+    Lets us emit lesson pages the moment each one finishes streaming, without
+    waiting for the enclosing JSON document to close. Respects string literals
+    and escapes so braces inside content text don't corrupt the depth count.
+
+    Returns (list_of_object_strings, new_cursor). An object still mid-stream is
+    left alone — the next call picks it up once more tokens arrive.
+    """
+    out = []
+    i = cursor
+    n = len(buf)
+    while i < n:
+        while i < n and buf[i] != '{':
+            i += 1
+        if i >= n:
+            break
+        depth = 0
+        in_str = False
+        esc = False
+        j = i
+        closed = False
+        while j < n:
+            c = buf[j]
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == '\\':
+                    esc = True
+                elif c == '"':
+                    in_str = False
+            else:
+                if c == '"':
+                    in_str = True
+                elif c == '{':
+                    depth += 1
+                elif c == '}':
+                    depth -= 1
+                    if depth == 0:
+                        closed = True
+                        break
+            j += 1
+        if not closed:
+            break  # incomplete tail — wait for more tokens
+        out.append(buf[i:j + 1])
+        i = j + 1
+        cursor = i
+    return out, cursor
+
+
+async def _stream_lesson_with_context(
+    session: PersistentSessionContext,
+    topic: str,
+    language: str
+):
+    """Streaming twin of _generate_lesson_with_context.
+
+    WHY: lessons were the only auto-launched node type generated in a single
+    blocking call. In production, lesson-first plans persisted node-0 content
+    for only 79% of sessions vs 95% for quiz-first — users abandon a dead
+    loading screen. Emitting each page as it completes puts readable content on
+    screen in seconds instead of ~30.
+
+    Yields dicts:
+        {"status": "lesson_title", "title": str}
+        {"status": "lesson_page_ready", "page": {...}, "index": int}
+        {"status": "lesson_content", "content": {...}}   # terminal, full payload
+    """
+    context = ""
+    if session.vectorstore:
+        docs = session.vectorstore.similarity_search(query=topic, k=1000)
+        full_text = "\n\n".join([doc.page_content for doc in docs])
+        context = full_text[:12000]
+        print(f"📚 Lesson context (stream): {len(docs)} chunks, {len(context)} chars")
+
+    if not context:
+        print(f"⚠️ WARNING: No document context for lesson on '{topic}'")
+        context = "NO DOCUMENT CONTENT AVAILABLE"
+
+    llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.5, streaming=True)
+    prompt_language = _language_for_prompt(language)
+
+    prompt = f"""Create a MULTI-PAGE lesson about: {topic}
+
+🚨🚨🚨 CRITICAL INSTRUCTION 🚨🚨🚨
+You MUST ONLY use information from the document content below.
+DO NOT add any information from your general knowledge.
+DO NOT hallucinate or make up facts.
+If something is not in the document, DO NOT include it.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STUDENT'S DOCUMENT CONTENT (USE ONLY THIS):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{context[:10000]}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STRICT RULES:
+1. Extract ONLY facts/concepts that appear in the document above
+2. Use the EXACT terminology and definitions from the document
+3. Every "content" field must be paraphrased from the document
+4. Every "highlight" must quote or summarize document content
+5. If the document doesn't cover enough for 5 pages, use fewer pages
+
+STYLE: Duolingo-style swipeable cards. ONE concept per page.
+
+STRUCTURE:
+- Page 1: Introduction to the topic (based on document)
+- Pages 2-4: ONE key concept per page FROM THE DOCUMENT
+- Last page: Summary of document concepts taught
+
+EACH PAGE:
+- "title": Short catchy title (3-5 words)
+- "content": 1-2 sentences with **bold** key terms FROM DOCUMENT
+- "highlight": Key fact FROM DOCUMENT (or null)
+
+Write in {prompt_language}.
+
+IMPORTANT: emit "title" FIRST, then "pages" in order, so the student can begin
+reading page 1 while the remaining pages are still being written.
+
+Return ONLY valid JSON:
+{{
+  "title": "Main Lesson Title",
+  "pages": [
+    {{"title": "👋 Welcome!", "content": "...", "highlight": null}},
+    {{"title": "Key Point 1", "content": "...", "highlight": "..."}},
+    {{"title": "Key Point 2", "content": "...", "highlight": "..."}},
+    {{"title": "Key Point 3", "content": "...", "highlight": "..."}},
+    {{"title": "🎯 Summary", "content": "...", "highlight": null}}
+  ]
+}}"""
+
+    buf = ""
+    cursor = -1          # -1 until the start of the pages array is located
+    pages = []
+    title = None
+
+    async for chunk in llm.astream([{"role": "user", "content": prompt}]):
+        piece = getattr(chunk, "content", "") or ""
+        if not piece:
+            continue
+        buf += piece
+
+        # Lesson title — emit as soon as its string literal closes.
+        if title is None:
+            m = _lang_re.search(r'"title"\s*:\s*"((?:[^"\\]|\\.)*)"', buf)
+            if m:
+                try:
+                    title = json.loads(f'"{m.group(1)}"')
+                except Exception:
+                    title = m.group(1)
+                yield {"status": "lesson_title", "title": title}
+
+        # Locate `"pages": [` once, then drain complete page objects after it.
+        if cursor < 0:
+            pm = _lang_re.search(r'"pages"\s*:\s*\[', buf)
+            if pm:
+                cursor = pm.end()
+
+        if cursor >= 0:
+            objs, cursor = _drain_json_objects(buf, cursor)
+            for obj_str in objs:
+                try:
+                    page = json.loads(obj_str)
+                except Exception:
+                    continue
+                pages.append(page)
+                yield {
+                    "status": "lesson_page_ready",
+                    "page": page,
+                    "index": len(pages) - 1,
+                }
+
+    # Authoritative parse of the whole document; fall back to the pages already
+    # emitted if the model closed the JSON badly.
+    content = None
+    try:
+        content = json.loads(_strip_code_fence(buf))
+    except Exception as e:
+        print(f"⚠️ Lesson stream: full-JSON parse failed ({e}); using streamed pages")
+    if not isinstance(content, dict) or not content.get("pages"):
+        content = {"title": title or topic, "pages": pages}
+
+    yield {"status": "lesson_content", "content": content}
 
 
 @app.post("/chat/generate-title", response_model=GenerateTitleResponse)

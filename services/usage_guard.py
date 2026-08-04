@@ -33,7 +33,7 @@ import time
 from firebase_admin import firestore
 
 # ── Tunables — keep identical to FREE_LIMIT / WINDOW_MS in UsageService.js ──
-FREE_LIMIT = 30                      # question-units per window (free tier)
+FREE_LIMIT = 12                      # question-units per window (free tier)
 WINDOW_MS = 3 * 60 * 60 * 1000       # rolling window length (3 hours, in ms)
 
 # User-facing rejection copy (the frontend may show its own localized copy;

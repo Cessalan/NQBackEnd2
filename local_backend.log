@@ -439,3 +439,399 @@ Client RxotHtq7BHT9MAxNjB8X disconnected
 🧹 Session RxotHtq7BHT9MAxNjB8X expired (idle 172827s)
 INFO:     127.0.0.1:54839 - "OPTIONS /warm_up HTTP/1.1" 200 OK
 INFO:     127.0.0.1:54839 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63372 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63372 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61493 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61493 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51775 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51775 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61254 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61254 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61133 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62859 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62297 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62297 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61759 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61759 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54272 - "POST /warm_up HTTP/1.1" 200 OK
+*Upload received: user VymBNcl0KiOrv1tbPPQgjHal0SG3, chat:ust5S2f4y49WoOryiWEX, language:en*
+✅ Read file: Notes De Cours .pdf (7908882 bytes)
+INFO:     127.0.0.1:63873 - "POST /chat/upload-files HTTP/1.1" 200 OK
+🆕 Creating new session for ust5S2f4y49WoOryiWEX
+🔒 Session context set for chat_id: ust5S2f4y49WoOryiWEX (coroutine-safe)
+📥 set_session_context: Loading documents list for ust5S2f4y49WoOryiWEX
+files in chat according to storage []
+📥 set_session_context: Loading vectorstore for ust5S2f4y49WoOryiWEX (not cached)
+📭 get_chat_vectorstore: No vectorstore index files found in Firebase Storage for ust5S2f4y49WoOryiWEX
+📚 Checking for existing documents...
+🔍 Checking for combined vectorstore: vectorstores/ust5S2f4y49WoOryiWEX/
+📭 No combined vectorstore found for ust5S2f4y49WoOryiWEX
+📝 No existing vectorstore, will create new one
+✅ Saved temp file: C:\Users\Billion\AppData\Local\Temp\tmpe0hckyik.pdf
+📄 Loading document: Notes De Cours .pdf
+📊 PDF Analysis: 290 chars/page → TEXT-BASED
+📄 Detected text-based PDF - Using standard loader
+📊 Active: 1 sessions, 0 connections
+✅ Loaded 172 pages from Notes De Cours .pdf
+📝 Extracted 9288 words from Notes De Cours .pdf
+✂️ Split into 74 chunks
+🔤 Creating embeddings for 74 documents...
+📤 Upload using session object id: 1622320159568
+🆕 Creating new vectorstore
+✅ Embedding complete for Notes De Cours .pdf
+📤 Vectorstore now set: True
+INFO:     127.0.0.1:59052 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59052 - "POST /warm_up HTTP/1.1" 200 OK
+✅ Extracted insights from Notes De Cours .pdf:
+   Topics: ['Clinical management of hypertension and related renal diseases', 'Diagnostic approach and treatment of nephropathies', 'Medical history taking and physical examination in internal medicine']
+   Concepts: ['Hypertension (HTA)', 'Dyslipidemia (DLPD)', 'Immunoglobulin A nephropathy (IgA nephropathy)']...
+   Educational insights: 3 generated
+✅ Cleaned up temp file: C:\Users\Billion\AppData\Local\Temp\tmpe0hckyik.pdf
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:54269 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54269 - "POST /warm_up HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+💳 Stripe webhook: balance.available -> {'status': 'ignored', 'reason': 'balance.available'}
+INFO:     127.0.0.1:64812 - "POST /billing/webhook HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:62746 - "OPTIONS /study/generate-item-stream HTTP/1.1" 200 OK
+
+============================================================
+🌊 STUDY ITEM STREAMING - lesson: Impact of Sleep Duration on Male Hormonal Health - Review
+============================================================
+INFO:     127.0.0.1:62746 - "POST /study/generate-item-stream HTTP/1.1" 200 OK
+files in chat according to storage [{'filename': 'Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf', 'path': 'chats/jhh4ldoMOBhhTv3NKCqU/uploads/Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf'}]
+🔒 Session context set for chat_id: jhh4ldoMOBhhTv3NKCqU (coroutine-safe)
+✅ set_session_context: Using cached documents list (1 files)
+✅ set_session_context: Using cached vectorstore for jhh4ldoMOBhhTv3NKCqU
+📚 Study session setup: 1 documents, vectorstore: True
+📚 Lesson context: 30 chunks, 12000 chars
+
+============================================================
+🌊 STUDY ITEM STREAMING - lesson: Impact of Sleep Duration on Male Hormonal Health - Review
+============================================================
+INFO:     127.0.0.1:60168 - "POST /study/generate-item-stream HTTP/1.1" 200 OK
+files in chat according to storage [{'filename': 'Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf', 'path': 'chats/jhh4ldoMOBhhTv3NKCqU/uploads/Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf'}]
+🔒 Session context set for chat_id: jhh4ldoMOBhhTv3NKCqU (coroutine-safe)
+✅ set_session_context: Using cached documents list (1 files)
+✅ set_session_context: Using cached vectorstore for jhh4ldoMOBhhTv3NKCqU
+📚 Study session setup: 1 documents, vectorstore: True
+📚 Lesson context: 30 chunks, 12000 chars
+
+============================================================
+🌊 STUDY ITEM STREAMING - lesson: Impact of Sleep Duration on Male Hormonal Health - Review
+============================================================
+INFO:     127.0.0.1:62919 - "POST /study/generate-item-stream HTTP/1.1" 200 OK
+files in chat according to storage [{'filename': 'Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf', 'path': 'chats/jhh4ldoMOBhhTv3NKCqU/uploads/Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf'}]
+🔒 Session context set for chat_id: jhh4ldoMOBhhTv3NKCqU (coroutine-safe)
+✅ set_session_context: Using cached documents list (1 files)
+✅ set_session_context: Using cached vectorstore for jhh4ldoMOBhhTv3NKCqU
+📚 Study session setup: 1 documents, vectorstore: True
+📚 Lesson context: 30 chunks, 12000 chars
+
+============================================================
+🌊 STUDY ITEM STREAMING - lesson: Impact of Sleep Duration on Male Hormonal Health - Review
+============================================================
+INFO:     127.0.0.1:56948 - "POST /study/generate-item-stream HTTP/1.1" 200 OK
+files in chat according to storage [{'filename': 'Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf', 'path': 'chats/jhh4ldoMOBhhTv3NKCqU/uploads/Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf'}]
+🔒 Session context set for chat_id: jhh4ldoMOBhhTv3NKCqU (coroutine-safe)
+✅ set_session_context: Using cached documents list (1 files)
+✅ set_session_context: Using cached vectorstore for jhh4ldoMOBhhTv3NKCqU
+📚 Study session setup: 1 documents, vectorstore: True
+📚 Lesson context: 30 chunks, 12000 chars
+
+============================================================
+🌊 STUDY ITEM STREAMING - lesson: Impact of Sleep Duration on Male Hormonal Health - Review
+============================================================
+INFO:     127.0.0.1:60202 - "POST /study/generate-item-stream HTTP/1.1" 200 OK
+files in chat according to storage [{'filename': 'Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf', 'path': 'chats/jhh4ldoMOBhhTv3NKCqU/uploads/Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf'}]
+🔒 Session context set for chat_id: jhh4ldoMOBhhTv3NKCqU (coroutine-safe)
+✅ set_session_context: Using cached documents list (1 files)
+✅ set_session_context: Using cached vectorstore for jhh4ldoMOBhhTv3NKCqU
+📚 Study session setup: 1 documents, vectorstore: True
+📚 Lesson context: 30 chunks, 12000 chars
+
+============================================================
+🌊 STUDY ITEM STREAMING - lesson: Impact of Sleep Duration on Male Hormonal Health - Review
+============================================================
+INFO:     127.0.0.1:58516 - "POST /study/generate-item-stream HTTP/1.1" 200 OK
+files in chat according to storage [{'filename': 'Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf', 'path': 'chats/jhh4ldoMOBhhTv3NKCqU/uploads/Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf'}]
+🔒 Session context set for chat_id: jhh4ldoMOBhhTv3NKCqU (coroutine-safe)
+✅ set_session_context: Using cached documents list (1 files)
+✅ set_session_context: Using cached vectorstore for jhh4ldoMOBhhTv3NKCqU
+📚 Study session setup: 1 documents, vectorstore: True
+📚 Lesson context: 30 chunks, 12000 chars
+
+============================================================
+🌊 STUDY ITEM STREAMING - lesson: Impact of Sleep Duration on Male Hormonal Health - Review
+============================================================
+INFO:     127.0.0.1:58516 - "POST /study/generate-item-stream HTTP/1.1" 200 OK
+files in chat according to storage [{'filename': 'Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf', 'path': 'chats/jhh4ldoMOBhhTv3NKCqU/uploads/Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf'}]
+🔒 Session context set for chat_id: jhh4ldoMOBhhTv3NKCqU (coroutine-safe)
+✅ set_session_context: Using cached documents list (1 files)
+✅ set_session_context: Using cached vectorstore for jhh4ldoMOBhhTv3NKCqU
+📚 Study session setup: 1 documents, vectorstore: True
+📚 Lesson context: 30 chunks, 12000 chars
+
+============================================================
+🌊 STUDY ITEM STREAMING - lesson: Impact of Sleep Duration on Male Hormonal Health - Review
+============================================================
+INFO:     127.0.0.1:60202 - "POST /study/generate-item-stream HTTP/1.1" 200 OK
+files in chat according to storage [{'filename': 'Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf', 'path': 'chats/jhh4ldoMOBhhTv3NKCqU/uploads/Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf'}]
+🔒 Session context set for chat_id: jhh4ldoMOBhhTv3NKCqU (coroutine-safe)
+✅ set_session_context: Using cached documents list (1 files)
+✅ set_session_context: Using cached vectorstore for jhh4ldoMOBhhTv3NKCqU
+📚 Study session setup: 1 documents, vectorstore: True
+📚 Lesson context: 30 chunks, 12000 chars
+
+============================================================
+🌊 STUDY ITEM STREAMING - lesson: Impact of Sleep Duration on Male Hormonal Health - Review
+============================================================
+INFO:     127.0.0.1:62746 - "POST /study/generate-item-stream HTTP/1.1" 200 OK
+files in chat according to storage [{'filename': 'Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf', 'path': 'chats/jhh4ldoMOBhhTv3NKCqU/uploads/Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf'}]
+🔒 Session context set for chat_id: jhh4ldoMOBhhTv3NKCqU (coroutine-safe)
+✅ set_session_context: Using cached documents list (1 files)
+✅ set_session_context: Using cached vectorstore for jhh4ldoMOBhhTv3NKCqU
+📚 Study session setup: 1 documents, vectorstore: True
+📚 Lesson context: 30 chunks, 12000 chars
+
+============================================================
+🌊 STUDY ITEM STREAMING - lesson: Impact of Sleep Duration on Male Hormonal Health - Review
+============================================================
+
+============================================================
+🌊 STUDY ITEM STREAMING - lesson: Impact of Sleep Duration on Male Hormonal Health - Review
+============================================================
+
+============================================================
+🌊 STUDY ITEM STREAMING - lesson: Impact of Sleep Duration on Male Hormonal Health - Review
+============================================================
+INFO:     127.0.0.1:56948 - "POST /study/generate-item-stream HTTP/1.1" 200 OK
+files in chat according to storage [{'filename': 'Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf', 'path': 'chats/jhh4ldoMOBhhTv3NKCqU/uploads/Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf'}]
+🔒 Session context set for chat_id: jhh4ldoMOBhhTv3NKCqU (coroutine-safe)
+✅ set_session_context: Using cached documents list (1 files)
+✅ set_session_context: Using cached vectorstore for jhh4ldoMOBhhTv3NKCqU
+📚 Study session setup: 1 documents, vectorstore: True
+📚 Lesson context: 30 chunks, 12000 chars
+INFO:     127.0.0.1:62919 - "POST /study/generate-item-stream HTTP/1.1" 200 OK
+files in chat according to storage [{'filename': 'Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf', 'path': 'chats/jhh4ldoMOBhhTv3NKCqU/uploads/Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf'}]
+🔒 Session context set for chat_id: jhh4ldoMOBhhTv3NKCqU (coroutine-safe)
+✅ set_session_context: Using cached documents list (1 files)
+✅ set_session_context: Using cached vectorstore for jhh4ldoMOBhhTv3NKCqU
+📚 Study session setup: 1 documents, vectorstore: True
+📚 Lesson context: 30 chunks, 12000 chars
+INFO:     127.0.0.1:60168 - "POST /study/generate-item-stream HTTP/1.1" 200 OK
+files in chat according to storage [{'filename': 'Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf', 'path': 'chats/jhh4ldoMOBhhTv3NKCqU/uploads/Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf'}]
+🔒 Session context set for chat_id: jhh4ldoMOBhhTv3NKCqU (coroutine-safe)
+✅ set_session_context: Using cached documents list (1 files)
+✅ set_session_context: Using cached vectorstore for jhh4ldoMOBhhTv3NKCqU
+📚 Study session setup: 1 documents, vectorstore: True
+📚 Lesson context: 30 chunks, 12000 chars
+📊 Active: 1 sessions, 0 connections
+
+============================================================
+🌊 STUDY ITEM STREAMING - lesson: Impact of Sleep Duration on Male Hormonal Health - Review
+============================================================
+INFO:     127.0.0.1:58516 - "POST /study/generate-item-stream HTTP/1.1" 200 OK
+files in chat according to storage [{'filename': 'Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf', 'path': 'chats/jhh4ldoMOBhhTv3NKCqU/uploads/Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf'}]
+🔒 Session context set for chat_id: jhh4ldoMOBhhTv3NKCqU (coroutine-safe)
+✅ set_session_context: Using cached documents list (1 files)
+✅ set_session_context: Using cached vectorstore for jhh4ldoMOBhhTv3NKCqU
+📚 Study session setup: 1 documents, vectorstore: True
+📚 Lesson context: 30 chunks, 12000 chars
+
+============================================================
+🌊 STUDY ITEM STREAMING - lesson: Impact of Sleep Duration on Male Hormonal Health - Review
+============================================================
+INFO:     127.0.0.1:62919 - "POST /study/generate-item-stream HTTP/1.1" 200 OK
+files in chat according to storage [{'filename': 'Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf', 'path': 'chats/jhh4ldoMOBhhTv3NKCqU/uploads/Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf'}]
+🔒 Session context set for chat_id: jhh4ldoMOBhhTv3NKCqU (coroutine-safe)
+✅ set_session_context: Using cached documents list (1 files)
+✅ set_session_context: Using cached vectorstore for jhh4ldoMOBhhTv3NKCqU
+📚 Study session setup: 1 documents, vectorstore: True
+📚 Lesson context: 30 chunks, 12000 chars
+
+============================================================
+🌊 STUDY ITEM STREAMING - lesson: Impact of Sleep Duration on Male Hormonal Health - Review
+============================================================
+INFO:     127.0.0.1:58516 - "POST /study/generate-item-stream HTTP/1.1" 200 OK
+files in chat according to storage [{'filename': 'Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf', 'path': 'chats/jhh4ldoMOBhhTv3NKCqU/uploads/Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf'}]
+🔒 Session context set for chat_id: jhh4ldoMOBhhTv3NKCqU (coroutine-safe)
+✅ set_session_context: Using cached documents list (1 files)
+✅ set_session_context: Using cached vectorstore for jhh4ldoMOBhhTv3NKCqU
+📚 Study session setup: 1 documents, vectorstore: True
+📚 Lesson context: 30 chunks, 12000 chars
+
+============================================================
+🌊 STUDY ITEM STREAMING - lesson: Impact of Sleep Duration on Male Hormonal Health - Review
+============================================================
+
+============================================================
+🌊 STUDY ITEM STREAMING - lesson: Impact of Sleep Duration on Male Hormonal Health - Review
+============================================================
+
+============================================================
+🌊 STUDY ITEM STREAMING - lesson: Impact of Sleep Duration on Male Hormonal Health - Review
+============================================================
+INFO:     127.0.0.1:60202 - "POST /study/generate-item-stream HTTP/1.1" 200 OK
+files in chat according to storage [{'filename': 'Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf', 'path': 'chats/jhh4ldoMOBhhTv3NKCqU/uploads/Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf'}]
+🔒 Session context set for chat_id: jhh4ldoMOBhhTv3NKCqU (coroutine-safe)
+✅ set_session_context: Using cached documents list (1 files)
+✅ set_session_context: Using cached vectorstore for jhh4ldoMOBhhTv3NKCqU
+📚 Study session setup: 1 documents, vectorstore: True
+📚 Lesson context: 30 chunks, 12000 chars
+INFO:     127.0.0.1:62746 - "POST /study/generate-item-stream HTTP/1.1" 200 OK
+files in chat according to storage [{'filename': 'Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf', 'path': 'chats/jhh4ldoMOBhhTv3NKCqU/uploads/Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf'}]
+🔒 Session context set for chat_id: jhh4ldoMOBhhTv3NKCqU (coroutine-safe)
+✅ set_session_context: Using cached documents list (1 files)
+✅ set_session_context: Using cached vectorstore for jhh4ldoMOBhhTv3NKCqU
+📚 Study session setup: 1 documents, vectorstore: True
+📚 Lesson context: 30 chunks, 12000 chars
+INFO:     127.0.0.1:56948 - "POST /study/generate-item-stream HTTP/1.1" 200 OK
+files in chat according to storage [{'filename': 'Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf', 'path': 'chats/jhh4ldoMOBhhTv3NKCqU/uploads/Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf'}]
+🔒 Session context set for chat_id: jhh4ldoMOBhhTv3NKCqU (coroutine-safe)
+✅ set_session_context: Using cached documents list (1 files)
+✅ set_session_context: Using cached vectorstore for jhh4ldoMOBhhTv3NKCqU
+📚 Study session setup: 1 documents, vectorstore: True
+📚 Lesson context: 30 chunks, 12000 chars
+
+============================================================
+🌊 STUDY ITEM STREAMING - lesson: Impact of Sleep Duration on Male Hormonal Health - Review
+============================================================
+INFO:     127.0.0.1:60168 - "POST /study/generate-item-stream HTTP/1.1" 200 OK
+files in chat according to storage [{'filename': 'Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf', 'path': 'chats/jhh4ldoMOBhhTv3NKCqU/uploads/Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf'}]
+🔒 Session context set for chat_id: jhh4ldoMOBhhTv3NKCqU (coroutine-safe)
+✅ set_session_context: Using cached documents list (1 files)
+✅ set_session_context: Using cached vectorstore for jhh4ldoMOBhhTv3NKCqU
+📚 Study session setup: 1 documents, vectorstore: True
+📚 Lesson context: 30 chunks, 12000 chars
+
+============================================================
+🌊 STUDY ITEM STREAMING - lesson: Impact of Sleep Duration on Male Hormonal Health - Review
+============================================================
+INFO:     127.0.0.1:62919 - "POST /study/generate-item-stream HTTP/1.1" 200 OK
+files in chat according to storage [{'filename': 'Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf', 'path': 'chats/jhh4ldoMOBhhTv3NKCqU/uploads/Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf'}]
+🔒 Session context set for chat_id: jhh4ldoMOBhhTv3NKCqU (coroutine-safe)
+✅ set_session_context: Using cached documents list (1 files)
+✅ set_session_context: Using cached vectorstore for jhh4ldoMOBhhTv3NKCqU
+📚 Study session setup: 1 documents, vectorstore: True
+📚 Lesson context: 30 chunks, 12000 chars
+
+============================================================
+🌊 STUDY ITEM STREAMING - lesson: Impact of Sleep Duration on Male Hormonal Health - Review
+============================================================
+INFO:     127.0.0.1:62746 - "POST /study/generate-item-stream HTTP/1.1" 200 OK
+files in chat according to storage [{'filename': 'Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf', 'path': 'chats/jhh4ldoMOBhhTv3NKCqU/uploads/Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf'}]
+🔒 Session context set for chat_id: jhh4ldoMOBhhTv3NKCqU (coroutine-safe)
+✅ set_session_context: Using cached documents list (1 files)
+✅ set_session_context: Using cached vectorstore for jhh4ldoMOBhhTv3NKCqU
+📚 Study session setup: 1 documents, vectorstore: True
+📚 Lesson context: 30 chunks, 12000 chars
+
+============================================================
+🌊 STUDY ITEM STREAMING - lesson: Impact of Sleep Duration on Male Hormonal Health - Review
+============================================================
+INFO:     127.0.0.1:56948 - "POST /study/generate-item-stream HTTP/1.1" 200 OK
+files in chat according to storage [{'filename': 'Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf', 'path': 'chats/jhh4ldoMOBhhTv3NKCqU/uploads/Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf'}]
+🔒 Session context set for chat_id: jhh4ldoMOBhhTv3NKCqU (coroutine-safe)
+✅ set_session_context: Using cached documents list (1 files)
+✅ set_session_context: Using cached vectorstore for jhh4ldoMOBhhTv3NKCqU
+📚 Study session setup: 1 documents, vectorstore: True
+📚 Lesson context: 30 chunks, 12000 chars
+
+============================================================
+🌊 STUDY ITEM STREAMING - lesson: Impact of Sleep Duration on Male Hormonal Health - Review
+============================================================
+
+============================================================
+🌊 STUDY ITEM STREAMING - lesson: Impact of Sleep Duration on Male Hormonal Health - Review
+============================================================
+
+============================================================
+🌊 STUDY ITEM STREAMING - lesson: Impact of Sleep Duration on Male Hormonal Health - Review
+============================================================
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:60168 - "POST /study/generate-item-stream HTTP/1.1" 200 OK
+files in chat according to storage [{'filename': 'Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf', 'path': 'chats/jhh4ldoMOBhhTv3NKCqU/uploads/Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf'}]
+🔒 Session context set for chat_id: jhh4ldoMOBhhTv3NKCqU (coroutine-safe)
+✅ set_session_context: Using cached documents list (1 files)
+✅ set_session_context: Using cached vectorstore for jhh4ldoMOBhhTv3NKCqU
+📚 Study session setup: 1 documents, vectorstore: True
+📚 Lesson context: 30 chunks, 12000 chars
+INFO:     127.0.0.1:62919 - "POST /study/generate-item-stream HTTP/1.1" 200 OK
+files in chat according to storage [{'filename': 'Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf', 'path': 'chats/jhh4ldoMOBhhTv3NKCqU/uploads/Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf'}]
+🔒 Session context set for chat_id: jhh4ldoMOBhhTv3NKCqU (coroutine-safe)
+✅ set_session_context: Using cached documents list (1 files)
+✅ set_session_context: Using cached vectorstore for jhh4ldoMOBhhTv3NKCqU
+📚 Study session setup: 1 documents, vectorstore: True
+📚 Lesson context: 30 chunks, 12000 chars
+INFO:     127.0.0.1:58516 - "POST /study/generate-item-stream HTTP/1.1" 200 OK
+files in chat according to storage [{'filename': 'Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf', 'path': 'chats/jhh4ldoMOBhhTv3NKCqU/uploads/Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf'}]
+🔒 Session context set for chat_id: jhh4ldoMOBhhTv3NKCqU (coroutine-safe)
+✅ set_session_context: Using cached documents list (1 files)
+✅ set_session_context: Using cached vectorstore for jhh4ldoMOBhhTv3NKCqU
+📚 Study session setup: 1 documents, vectorstore: True
+📚 Lesson context: 30 chunks, 12000 chars
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:63525 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63525 - "POST /warm_up HTTP/1.1" 200 OK

@@ -5,6 +5,7 @@ from typing import AsyncGenerator, Optional, Tuple
 from datetime import datetime
 from tools.quiztools import search_documents,summarize_document,get_chat_context_from_db
 from services.intent_analyzer import analyze_intent, should_skip_analysis
+from services.urgency_detector import detect_urgency
 import json
 import re
 
@@ -298,6 +299,49 @@ class NursingTutor:
             # ═══════════════════════════════════════════════════════════════════
             # END CONTINUATION CHECK
             # ═══════════════════════════════════════════════════════════════════
+
+            # ═══════════════════════════════════════════════════════════════════
+            # STEP: EXAM-PRESSURE CHECK
+            # ═══════════════════════════════════════════════════════════════════
+            # Reads deadline / zero-baseline / distress signals out of the message
+            # (services/urgency_detector.py). Durable facts are kept for the rest
+            # of the session so later turns still know the exam is in 2 days —
+            # without that, the deadline is forgotten on the very next message.
+            #
+            # A student in crisis is acknowledged and given a plan BEFORE any tool
+            # can fire: throwing a quiz at someone who just said they know nothing
+            # is the behaviour this exists to stop. Returning here also skips the
+            # analyzer and research calls, which is the right trade on a turn we
+            # have already decided will not generate content.
+            # ═══════════════════════════════════════════════════════════════════
+            urgency = self._merge_urgency(detect_urgency(user_input))
+            self.session.urgency_context = urgency
+            if urgency["signals"]:
+                print(f"🚨 Urgency signals {urgency['signals']} → crisis={urgency['is_crisis']}")
+
+            if urgency["is_crisis"] and not self.session.crisis_acknowledged:
+                self.session.crisis_acknowledged = True
+
+                acknowledgement = ""
+                async for piece in self._stream_crisis_support(user_input, urgency, language):
+                    acknowledgement += piece
+                    yield json.dumps({"answer_chunk": piece}) + "\n"
+
+                self.session.message_history.append({
+                    "role": "assistant",
+                    "content": acknowledgement,
+                    "timestamp": datetime.now().isoformat()
+                })
+
+                suggestions = await self._generate_dynamic_suggestions()
+                if suggestions:
+                    yield json.dumps({
+                        "status": "suggested_prompts",
+                        "suggestions": suggestions
+                    }) + "\n"
+
+                yield json.dumps({"status": "complete"}) + "\n"
+                return
 
             # Create nursing-specific system prompt
             system_prompt = self._create_system_prompt()
@@ -1287,6 +1331,144 @@ class NursingTutor:
             }) + "\n"
 
     
+    def _describe_deadline(self, days) -> str:
+        """Plain-language deadline used in both the support prompt and the
+        system prompt, so the tutor never invents a different timeline."""
+        if days is None:
+            return "no exam date named yet"
+        if days == 0:
+            return "the exam is TODAY"
+        if days == 1:
+            return "the exam is tomorrow"
+        return f"the exam is in {days} days"
+
+    def _merge_urgency(self, fresh: dict) -> dict:
+        """
+        Carry durable facts forward across turns.
+
+        detect_urgency reads a single message, but a student states their deadline
+        once and then spends the next turns answering questions about topics.
+        Without this, "exam in 2 days" is forgotten on the very next message and
+        generation silently goes back to being untimed — which is the whole
+        problem this feature exists to fix.
+
+        Only facts persist. `is_crisis` and `has_explicit_request` describe THIS
+        message and are always taken fresh. Panic is treated as a mood rather than
+        a fact, so it is not carried either.
+        """
+        previous = getattr(self.session, "urgency_context", None) or {}
+        merged = dict(fresh)
+
+        for key in ("days_to_exam", "confidence_baseline"):
+            if merged.get(key) is None and previous.get(key) is not None:
+                merged[key] = previous[key]
+
+        return merged
+
+    def _format_urgency_context(self) -> str:
+        """Render the detected situation for the system prompt."""
+        ctx = getattr(self.session, "urgency_context", None) or {}
+
+        # An explicit request on its own ("quiz me on X") is not pressure — only a
+        # deadline, a zero baseline or distress is. Without one of those this block
+        # stays quiet rather than nudging the model toward a tone nobody asked for.
+        has_pressure = any((
+            ctx.get("days_to_exam") is not None,
+            ctx.get("confidence_baseline"),
+            ctx.get("emotional_state"),
+        ))
+        if not has_pressure:
+            return "- No exam-pressure signals in this message. Respond normally."
+
+        lines = [f"- Deadline: {self._describe_deadline(ctx.get('days_to_exam'))}."]
+
+        if ctx.get("confidence_baseline") == "very_low":
+            lines.append("- The student says they are starting from zero / have not studied.")
+        if ctx.get("emotional_state") == "panicking":
+            lines.append("- The student sounds stressed or scared. Take it seriously; do not perform sympathy.")
+        if ctx.get("has_explicit_request"):
+            lines.append("- They already said what they want. Give them that, do not redirect them.")
+        if self.session.crisis_acknowledged:
+            lines.append(
+                "- You have ALREADY acknowledged their situation earlier in this "
+                "conversation. Do not open with sympathy again — move on to helping."
+            )
+
+        return "\n".join(lines)
+
+    async def _stream_crisis_support(
+        self,
+        user_input: str,
+        urgency: dict,
+        language: str
+    ) -> AsyncGenerator[str, None]:
+        """
+        First reply to a student who is out of time and out of depth.
+
+        Deliberately runs on self.llm (no tools bound) so this turn cannot end in
+        a quiz. The goal is that the student feels understood and leaves the turn
+        knowing what the plan is — generation happens on the next turn, once we
+        know what is actually on their exam.
+        """
+        deadline = self._describe_deadline(urgency.get("days_to_exam"))
+        knows_nothing = urgency.get("confidence_baseline") == "very_low"
+        distressed = urgency.get("emotional_state") == "panicking"
+
+        situation = [f"Deadline: {deadline}."]
+        if knows_nothing:
+            situation.append("They say they know nothing / have not started studying.")
+        if distressed:
+            situation.append("They sound panicked or badly stressed.")
+
+        prompt = f"""You are a nursing tutor. A student just told you they are in trouble.
+
+THEIR SITUATION:
+{chr(10).join('- ' + s for s in situation)}
+
+Write the reply that makes them feel understood and gives them a way forward.
+
+STRUCTURE (three short paragraphs, under 120 words total):
+
+1. Name what you heard, concretely. Use their real numbers — "{deadline}". If they
+   said they know nothing, say that back without softening it and without making
+   them feel stupid about it.
+
+2. Say what is realistically achievable in that time, honestly. In two days nobody
+   covers a whole course, and pretending otherwise is a lie they will find out about
+   during the exam. What IS achievable: the highest-yield material, and enough
+   familiarity with the question format that they stop losing marks to confusion.
+   Give them that version of the plan in one or two sentences.
+
+3. Ask exactly ONE question so you can build the real plan: what subjects are on
+   this exam, and which one worries them most.
+
+HARD RULES:
+- Write in {language}. Match their language exactly.
+- Separate the three paragraphs with a blank line. One dense block is harder to
+  read for someone who is already overwhelmed.
+- Do NOT generate questions, flashcards or a study sheet in this reply. You are
+  planning with them first. Do not list your features or capabilities either.
+- Do NOT promise they will be fine or that they can learn everything in time.
+- Ask ONE question, not three. They are stressed, not patient.
+- Sound like a person who has helped a lot of students through this, not like an
+  app. Short sentences. No emoji in this particular reply.
+
+BANNED — these read as a script and destroy the effect:
+"I understand it can be challenging", "It's completely normal to struggle",
+"Many nursing students experience this", "You've got this", "Let's tackle this
+together", "Don't give up", "Take a deep breath", "I'm here to help you succeed".
+
+The student's message: {user_input}"""
+
+        messages = [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": user_input}
+        ]
+
+        async for chunk in self.llm.astream(messages):
+            if hasattr(chunk, 'content') and chunk.content:
+                yield chunk.content
+
     def _create_system_prompt(self) -> str:
         """
         Create nursing-specific system prompt.
@@ -1370,6 +1552,16 @@ SESSION CONTEXT:
 • Documents: {"YES - " + str(len(self.session.documents)) + " files" if self.session.documents else "none"}
 • Last file: {self.session.documents[-1]["filename"] if self.session.documents else "none"}
 • Language: {self.session.user_language or "auto-detect"}
+
+STUDENT SITUATION (detected from their message — trust this over your own guess):
+{self._format_urgency_context()}
+
+UNDER EXAM PRESSURE (applies only when the block above shows a deadline, a zero baseline, or stress):
+• Acknowledge the deadline once, in ONE sentence, then generate. Don't re-open with it every turn.
+• Scope to the time they actually have and SAY what you cut: "2 days, so I'm skipping dosage calc and putting all 15 on cardiac drugs." Cutting silently is what makes the app feel like it isn't listening.
+• Never imply they can cover a whole course in 2 days. What the time buys is high-yield material plus enough question-format familiarity to stop losing easy marks.
+• If they've named their subjects but have no plan yet, give the plan first (topics, order, what you're leaving out), then ask if they want to start there.
+• If the block says you already acknowledged their situation, skip the sympathy and go straight to the work.
 
 {self._get_last_activity_summary()}
 
