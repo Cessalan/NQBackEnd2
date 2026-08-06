@@ -2918,6 +2918,14 @@ async def generate_study_plan(request: StudyPlanRequest):
     print(f"📚 STUDY PATH GENERATION - chat_id: {request.chat_id}")
     print(f"{'='*60}")
 
+    # Plan-creation gate. Raised BEFORE the try so the blanket except below
+    # can't swallow it into a 500 (same pattern as the question gate on
+    # /study/generate-item).
+    plan_quota = usage_guard.check_plan_quota(request.chat_id)
+    if not plan_quota["allowed"]:
+        print(f"🚫 Plan quota exceeded for chat {request.chat_id} — rejecting /study/plan")
+        raise HTTPException(status_code=429, detail=usage_guard.PLAN_QUOTA_MESSAGE)
+
     try:
         # ------------------------------------------
         # STEP 1: Get or create session & load insights
@@ -3391,6 +3399,15 @@ async def start_study_journey(request: StudyPlanRequest):
 
     async def stream_generator():
         try:
+            # Plan-creation gate. This endpoint generates a full path AND the
+            # first node, so it's the most expensive call in the product —
+            # reject before any LLM work. Yielded in-stream as status:error so
+            # the frontend's existing handler picks it up.
+            plan_quota = usage_guard.check_plan_quota(request.chat_id)
+            if not plan_quota["allowed"]:
+                print(f"🚫 Plan quota exceeded for chat {request.chat_id} — rejecting /study/start")
+                yield f"data: {json.dumps({'status': 'error', 'code': 'plan_quota_exceeded', 'message': usage_guard.PLAN_QUOTA_MESSAGE})}\n\n"
+                return
             # ---------- STEP 1: session + topics ----------
             if request.chat_id not in ACTIVE_SESSIONS:
                 ACTIVE_SESSIONS[request.chat_id] = NursingTutor(request.chat_id)

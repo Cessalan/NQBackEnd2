@@ -33,7 +33,7 @@ import time
 from firebase_admin import firestore
 
 # ── Tunables — keep identical to FREE_LIMIT / WINDOW_MS in UsageService.js ──
-FREE_LIMIT = 12                      # question-units per window (free tier)
+FREE_LIMIT = 50                      # question-units per window (free tier)
 WINDOW_MS = 3 * 60 * 60 * 1000       # rolling window length (3 hours, in ms)
 
 # User-facing rejection copy (the frontend may show its own localized copy;
@@ -104,4 +104,63 @@ def check_quota(chat_id: str) -> dict:
 
     except Exception as e:
         print(f"⚠️ usage_guard: quota check failed for chat {chat_id}: {e} — failing open")
+        return {"allowed": True, "reason": "check_failed", "tier": None}
+
+
+# ── Plan quota ──────────────────────────────────────────────────────────────
+# Second, independent meter: how many NEW study plans a free user may create
+# per rolling 30 days. Enforced server-side because generating a path plus its
+# first node is the single most expensive call in the product — a client-only
+# gate leaves the spend one devtools edit away.
+#
+# Keep identical to FREE_PLANS_PER_WINDOW / PLAN_WINDOW_MS in UsageService.js.
+FREE_PLANS_PER_WINDOW = 3
+PLAN_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
+
+PLAN_QUOTA_MESSAGE = (
+    "You've started all your free study plans for this month. "
+    "Upgrade to Pro for a plan on every subject, or wait for the window to reset."
+)
+
+
+def check_plan_quota(chat_id: str) -> dict:
+    """
+    Read-only plan-creation check for the user who owns `chat_id`.
+
+    Mirrors derivePlanQuota() in UsageService.js. Returns
+    {"allowed": bool, "reason": str|None, "tier": str|None};
+    reason is "plan_quota_exceeded" when blocked. Fails open, like check_quota —
+    a Firestore hiccup must never stop a paying-or-not student from studying.
+    """
+    try:
+        uid = _resolve_uid(chat_id)
+        if not uid:
+            return {"allowed": True, "reason": "no_user", "tier": None}
+
+        doc = firestore.client().collection("users").document(uid).get()
+        data = (doc.to_dict() or {}) if doc.exists else {}
+
+        # Tier is on `usage` — that's the billing source of truth the Stripe
+        # webhook writes. planUsage only carries the rolling counter.
+        if (data.get("usage") or {}).get("tier") == "pro":
+            return {"allowed": True, "reason": None, "tier": "pro"}
+
+        plan_usage = data.get("planUsage") or {}
+        now_ms = int(time.time() * 1000)
+        window_start = plan_usage.get("windowStart")
+        count = plan_usage.get("count")
+        if not isinstance(window_start, (int, float)):
+            window_start = 0
+        if not isinstance(count, (int, float)):
+            count = 0
+
+        if not window_start or now_ms - window_start >= PLAN_WINDOW_MS:
+            count = 0
+
+        if count < FREE_PLANS_PER_WINDOW:
+            return {"allowed": True, "reason": None, "tier": "free"}
+        return {"allowed": False, "reason": "plan_quota_exceeded", "tier": "free"}
+
+    except Exception as e:
+        print(f"⚠️ usage_guard: plan check failed for chat {chat_id}: {e} — failing open")
         return {"allowed": True, "reason": "check_failed", "tier": None}
