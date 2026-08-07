@@ -3506,14 +3506,31 @@ async def start_study_journey(request: StudyPlanRequest):
             # ---------- STEP 2: plan generation (one LLM call, no redundant topic extraction) ----------
             yield f"data: {json.dumps({'status': 'plan_generating'})}\n\n"
 
+            # ── Narrate the real decisions as they're made ────────────────
+            # These aren't decorative loading messages: each one reports a fact
+            # the planner has actually established. Plan generation is 3-8s of
+            # otherwise-blank time, and it's exactly where the adaptation the
+            # student is paying for happens — showing the work is what makes a
+            # generated plan feel chosen rather than canned.
+            yield f"data: {json.dumps({'status': 'plan_thinking', 'step': 'topics', 'topics': unique_topics})}\n\n"
+
             llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.3)
             prompt_language = _language_for_prompt(request.language)
             user_prefs = request.userPreferences or {}
             review_format = user_prefs.get("reviewFormat", "Visual Concept Maps")
 
             days_to_exam = _days_to_exam(user_prefs)
-            print(f"🗓️  Plan archetype: {_plan_archetype(days_to_exam)} "
+            archetype = _plan_archetype(days_to_exam)
+            print(f"🗓️  Plan archetype: {archetype} "
                   f"(days_to_exam={days_to_exam}, hardest={user_prefs.get('hardestTopics')})")
+
+            yield f"data: {json.dumps({'status': 'plan_thinking', 'step': 'archetype', 'archetype': archetype, 'days_to_exam': days_to_exam})}\n\n"
+
+            hardest = [t for t in (user_prefs.get("hardestTopics") or []) if t]
+            if hardest:
+                yield f"data: {json.dumps({'status': 'plan_thinking', 'step': 'focus', 'hardest': hardest})}\n\n"
+
+            yield f"data: {json.dumps({'status': 'plan_thinking', 'step': 'building'})}\n\n"
             path_prompt = _build_study_path_prompt(
                 unique_topics,
                 key_terms,
