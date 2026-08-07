@@ -3020,90 +3020,19 @@ Return ONLY valid JSON (all strings must be in {prompt_language}):
         # ------------------------------------------
         user_prefs = request.userPreferences or {}
         review_format = user_prefs.get("reviewFormat", "Visual Concept Maps")
-        
-        # Customize the structure based on user preference
-        if review_format == "Flashcards":
-            structure_rule = "- AUDIO: Listen to an intro for that topic\n   - FLASHCARD: Key terms and definitions from that topic\n   - FLASHCARD: Advanced concepts\n   - QUIZ: Quick test"
-            node_types = '- "audio": Short audio intro for the topic\n- "flashcard": Key terms\n- "quiz": Questions testing that topic'
-            example_json_rows = f"""  {{"id": "node_1", "type": "audio", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Listen", "tags": ["topic1", "audio"], "difficulty": 1}},
-  {{"id": "node_2", "type": "flashcard", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Basics", "tags": ["topic1", "terms"], "difficulty": 1}},
-  {{"id": "node_3", "type": "flashcard", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Advanced", "tags": ["topic1", "advanced"], "difficulty": 2}},
-  {{"id": "node_4", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Quiz", "tags": ["topic1", "assessment"], "difficulty": 1}}"""
-        elif review_format == "Audio Summaries":
-            structure_rule = "- AUDIO: Listen to a summary\n   - LESSON: Read the details\n   - QUIZ: Test understanding"
-            node_types = '- "audio": Listen to summary\n- "lesson": Read details\n- "quiz": Questions testing that topic'
-            example_json_rows = f"""  {{"id": "node_1", "type": "audio", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Audio", "tags": ["topic1", "audio"], "difficulty": 1}},
-  {{"id": "node_2", "type": "lesson", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Lesson", "tags": ["topic1", "lesson"], "difficulty": 2}},
-  {{"id": "node_3", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Quiz", "tags": ["topic1", "assessment"], "difficulty": 1}}"""
-        elif review_format == "Practice Questions":
-            structure_rule = "- QUIZ: Initial assessment\n   - LESSON: Review concepts\n   - AUDIO: Listen to a recap\n   - QUIZ: Final test"
-            node_types = '- "quiz": Assessment questions\n- "lesson": Review content\n- "audio": Short audio recap'
-            example_json_rows = f"""  {{"id": "node_1", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Pre-Test", "tags": ["topic1", "assessment"], "difficulty": 1}},
-  {{"id": "node_2", "type": "lesson", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Review", "tags": ["topic1", "lesson"], "difficulty": 2}},
-  {{"id": "node_3", "type": "audio", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Recap", "tags": ["topic1", "audio"], "difficulty": 1}},
-  {{"id": "node_4", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Final Test", "tags": ["topic1", "assessment"], "difficulty": 2}}"""
-        elif review_format == "Visual Concept Maps":
-            structure_rule = "- LESSON: Introduce the topic (content comes from document)\n   - AUDIO: Listen to the lesson explained out loud\n   - MINDMAP: Visual concept map linking key ideas\n   - QUIZ: Test understanding of that specific topic"
-            node_types = f'- "lesson": Introduction to ONE topic from the document\n- "audio": Audio explanation of that topic (listen instead of reading)\n- "mindmap": Visual concept map for that topic\n- "quiz": Questions testing that topic (will generate {STUDY_QUIZ_QUESTIONS} questions)'
-            example_json_rows = f"""  {{"id": "node_1", "type": "lesson", "label": "{unique_topics[0] if unique_topics else 'Topic 1'}", "tags": ["topic1"], "difficulty": 1}},
-  {{"id": "node_2", "type": "audio", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Listen", "tags": ["topic1", "audio"], "difficulty": 1}},
-  {{"id": "node_3", "type": "mindmap", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Concept Map", "tags": ["topic1", "visual"], "difficulty": 1}},
-  {{"id": "node_4", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Quiz", "tags": ["topic1", "assessment"], "difficulty": 1}}"""
-        else: # Default (mixed)
-            # MUST stay in sync with the default branch of
-            # _build_study_path_prompt — this endpoint is StartStudyModal's
-            # fallback when /study/start fails, and a mismatch would hand the
-            # student a differently-shaped plan depending on which path ran.
-            structure_rule = (
-                "- LESSON: Introduce the topic (content comes from document)\n"
-                "   - QUIZ: Short check on what was just introduced\n"
-                "   - AUDIO: Listen to the topic explained out loud\n"
-                "   - FLASHCARD: Key terms and definitions from that topic\n"
-                "   - QUIZ: Final check on that topic"
-            )
-            node_types = (
-                '- "lesson": Introduction to ONE topic from the document\n'
-                '- "audio": Audio explanation of that topic (listen instead of reading)\n'
-                f'- "flashcard": Key terms from that topic (will generate {STUDY_FLASHCARD_CARDS} cards)\n'
-                f'- "quiz": Questions testing that topic (will generate {STUDY_QUIZ_QUESTIONS} questions)'
-            )
-            example_json_rows = f"""  {{"id": "node_1", "type": "lesson", "label": "{unique_topics[0] if unique_topics else 'Topic 1'}", "tags": ["topic1"], "difficulty": 1}},
-  {{"id": "node_2", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Quiz", "tags": ["topic1", "assessment"], "difficulty": 1}},
-  {{"id": "node_3", "type": "audio", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Listen", "tags": ["topic1", "audio"], "difficulty": 1}},
-  {{"id": "node_4", "type": "flashcard", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Vocabulaire", "tags": ["topic1", "terms"], "difficulty": 1}},
-  {{"id": "node_5", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Final Test", "tags": ["topic1", "assessment"], "difficulty": 2}}"""
 
-        path_prompt = f"""Create a Duolingo-style study path for this document.
-
-🚨 CRITICAL: The study path MUST be structured around these CORE TOPICS from the student's document:
-{unique_topics}
-
-KEY TERMS to include: {key_terms}
-
-STRUCTURE RULES:
-1. Create ONE learning unit per main topic (3-5 units total)
-2. Each unit follows this pattern:
-   {structure_rule}
-
-3. Total: 12-20 nodes. Emit EVERY node of the unit pattern for each topic —
-   if that would exceed 20 nodes, use FEWER TOPICS rather than dropping nodes
-   from a unit. A complete short unit beats a truncated long one.
-4. Progress through topics in logical order
-
-NODE TYPES:
-{node_types}
-
-Return ONLY valid JSON array in {prompt_language}:
-[
-{example_json_rows},
-  ... (repeat for each main topic)
-]
-
-IMPORTANT:
-- Node labels MUST reference the actual topics from the document
-- DO NOT create generic labels like "Introduction to Medicine"
-- ALL labels MUST be written in {prompt_language} — translate topic names if the document is in a different language
-- Keep labels concise and meaningful"""
+        # Single source of truth for the path prompt — this endpoint used to
+        # carry a byte-for-byte duplicate of _build_study_path_prompt, which
+        # meant every change had to be made twice or the /study/plan fallback
+        # would hand the student a differently-shaped plan than /study/start.
+        path_prompt = _build_study_path_prompt(
+            unique_topics,
+            key_terms,
+            review_format,
+            prompt_language,
+            days_to_exam=_days_to_exam(user_prefs),
+            hardest_topics=user_prefs.get("hardestTopics") or [],
+        )
 
         response = await llm.ainvoke([{"role": "user", "content": path_prompt}])
 
@@ -3231,8 +3160,152 @@ IMPORTANT:
 # significantly without changing any node-content rendering.
 # ============================================================================
 
-def _build_study_path_prompt(unique_topics: List[str], key_terms: List[str], review_format: str, prompt_language: str) -> str:
-    """Build the study-path planning prompt for the configured review format."""
+def _build_deadline_path_prompt(
+    unique_topics, key_terms, prompt_language, archetype, days_to_exam, hardest_topics
+) -> str:
+    """Prompt for the SPRINT and FOCUS shapes — plans built against a deadline."""
+    focus_line = (
+        f"\nThe student says these are hardest for them: {hardest_topics}. "
+        "Cover these FIRST and give them the most nodes.\n"
+        if hardest_topics else "\n"
+    )
+
+    if archetype == "sprint":
+        when = "today" if days_to_exam == 0 else ("tomorrow" if days_to_exam == 1 else f"in {days_to_exam} days")
+        return f"""Create a LAST-MINUTE triage study path. The student's exam is {when}.
+
+🚨 THERE IS NO TIME TO TEACH NEW MATERIAL. Do NOT include "lesson", "audio",
+"flashcard" or "mindmap" nodes. The only job of this path is to find out what
+the student does not know and drill exactly that.
+
+CORE TOPICS from their document:
+{unique_topics}
+
+KEY TERMS: {key_terms}
+{focus_line}
+STRUCTURE — 6 to 8 nodes TOTAL, no more:
+1. "quiz" — rapid check across the highest-yield material (label it "<Topic> - Quick Check")
+2. For each of the 2-3 most important topics, in priority order:
+   - "exam": a short mini-test on that topic
+   - "quiz": drill on the specific ideas that mini-test covers
+3. Finish with ONE "quiz" labelled "<main topic> - Final Check"
+
+RULES:
+- Prioritise breadth of coverage over depth. High-yield only.
+- Every label MUST name a real topic from the document.
+- ALL labels in {prompt_language}.
+
+Return ONLY a valid JSON array:
+[
+  {{"id": "node_1", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Quick Check", "tags": ["topic1", "assessment"], "difficulty": 1}},
+  {{"id": "node_2", "type": "exam", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Mini-Test", "tags": ["topic1", "assessment"], "difficulty": 2}},
+  {{"id": "node_3", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Drill", "tags": ["topic1", "assessment"], "difficulty": 2}}
+]"""
+
+    # FOCUS — 3 to 9 days out
+    return f"""Create a FOCUSED review path. The student's exam is in {days_to_exam} days.
+
+There is time to relearn weak areas, but NOT to cover everything from scratch.
+Lead with assessment so the path targets real gaps rather than guessing.
+
+CORE TOPICS from their document:
+{unique_topics}
+
+KEY TERMS: {key_terms}
+{focus_line}
+STRUCTURE — 10 to 14 nodes TOTAL:
+1. Open with ONE "quiz" across the material ("<Topic> - Quick Check")
+2. Then per topic, hardest first:
+   - "lesson": a tight refresher on that topic
+   - "quiz": check it landed
+   - "exam": mini-test to confirm
+3. Close with ONE "exam" labelled "<main topic> - Final Test"
+
+RULES:
+- Do NOT include "audio" or "mindmap" nodes — there isn't time.
+- At most ONE "flashcard" node, and only for a heavy terminology topic.
+- Every label MUST name a real topic from the document.
+- ALL labels in {prompt_language}.
+
+Return ONLY a valid JSON array:
+[
+  {{"id": "node_1", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Quick Check", "tags": ["topic1", "assessment"], "difficulty": 1}},
+  {{"id": "node_2", "type": "lesson", "label": "{unique_topics[0] if unique_topics else 'Topic 1'}", "tags": ["topic1"], "difficulty": 1}},
+  {{"id": "node_3", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Quiz", "tags": ["topic1", "assessment"], "difficulty": 2}},
+  {{"id": "node_4", "type": "exam", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Mini-Test", "tags": ["topic1", "assessment"], "difficulty": 2}}
+]"""
+
+
+def _days_to_exam(user_prefs: dict):
+    """Days until the student's exam, or None if they didn't give a date.
+
+    PlanOnboarding sends both `examDaysAway` (computed client-side) and an ISO
+    `examDate`. Prefer the raw date so a plan built today for an exam set last
+    week isn't using a stale day count.
+    """
+    if not user_prefs:
+        return None
+    iso = user_prefs.get("examDate")
+    if iso:
+        try:
+            from datetime import datetime, timezone
+            exam = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+            if exam.tzinfo is None:
+                exam = exam.replace(tzinfo=timezone.utc)
+            return max(0, (exam - datetime.now(timezone.utc)).days)
+        except Exception:
+            pass
+    days = user_prefs.get("examDaysAway")
+    return int(days) if isinstance(days, (int, float)) else None
+
+
+# ── Plan archetypes by time-to-exam ─────────────────────────────────────────
+# The exam date has been collected since June and never reached the generator,
+# so a student sitting an exam tomorrow got the same 15-20 node plan as someone
+# three weeks out — and did two lessons before running out of time.
+#
+# Node mix per archetype is driven by measured behaviour (2026-08-03):
+#   quiz      +5.1pp continuation — the momentum node, so it leads and closes
+#   exam      0.32x quit rate     — the MOST tolerated node, and underused
+#   lesson    best raw completion, but -3.2pp continuation
+#   flashcard -6.5pp continuation — latest slot, or dropped under time pressure
+SPRINT_MAX_DAYS = 2      # can't teach new material; triage and drill
+FOCUS_MAX_DAYS = 9       # shore up weak spots
+
+
+def _plan_archetype(days_to_exam):
+    if days_to_exam is None:
+        return "master"
+    if days_to_exam <= SPRINT_MAX_DAYS:
+        return "sprint"
+    if days_to_exam <= FOCUS_MAX_DAYS:
+        return "focus"
+    return "master"
+
+
+def _build_study_path_prompt(
+    unique_topics: List[str],
+    key_terms: List[str],
+    review_format: str,
+    prompt_language: str,
+    days_to_exam=None,
+    hardest_topics=None,
+) -> str:
+    """Build the study-path planning prompt.
+
+    Shape is chosen by time-to-exam first (sprint / focus / master); the user's
+    review_format preference only applies to the master shape, because under
+    deadline pressure the format that works is not a preference question.
+    """
+    archetype = _plan_archetype(days_to_exam)
+    hardest_topics = [t for t in (hardest_topics or []) if t]
+
+    if archetype in ("sprint", "focus"):
+        return _build_deadline_path_prompt(
+            unique_topics, key_terms, prompt_language,
+            archetype, days_to_exam, hardest_topics,
+        )
+
     if review_format == "Flashcards":
         structure_rule = "- AUDIO: Listen to an intro for that topic\n   - FLASHCARD: Key terms and definitions from that topic\n   - FLASHCARD: Advanced concepts\n   - QUIZ: Quick test"
         node_types = '- "audio": Short audio intro for the topic\n- "flashcard": Key terms\n- "quiz": Questions testing that topic'
@@ -3438,7 +3511,17 @@ async def start_study_journey(request: StudyPlanRequest):
             user_prefs = request.userPreferences or {}
             review_format = user_prefs.get("reviewFormat", "Visual Concept Maps")
 
-            path_prompt = _build_study_path_prompt(unique_topics, key_terms, review_format, prompt_language)
+            days_to_exam = _days_to_exam(user_prefs)
+            print(f"🗓️  Plan archetype: {_plan_archetype(days_to_exam)} "
+                  f"(days_to_exam={days_to_exam}, hardest={user_prefs.get('hardestTopics')})")
+            path_prompt = _build_study_path_prompt(
+                unique_topics,
+                key_terms,
+                review_format,
+                prompt_language,
+                days_to_exam=days_to_exam,
+                hardest_topics=user_prefs.get("hardestTopics") or [],
+            )
             response = await llm.ainvoke([{"role": "user", "content": path_prompt}])
 
             path_json = response.content.strip()
@@ -3462,7 +3545,12 @@ async def start_study_journey(request: StudyPlanRequest):
                 "nodes": nodes,
                 "topics": unique_topics,
                 "total_nodes": len(nodes),
-                "estimated_time_minutes": len(nodes) * 3
+                "estimated_time_minutes": len(nodes) * 3,
+                # Lets the preview say WHY the plan looks the way it does.
+                # Without this the reshaping is invisible, and an invisible
+                # feature never teaches anyone to set an exam date.
+                "archetype": _plan_archetype(days_to_exam),
+                "days_to_exam": days_to_exam,
             }
             yield f"data: {json.dumps({'status': 'plan_ready', 'plan': plan_payload})}\n\n"
 
@@ -3498,11 +3586,17 @@ async def start_study_journey(request: StudyPlanRequest):
                     yield f"data: {json.dumps({'status': 'first_node_ready', 'node_id': node_id, 'type': 'audio', 'content': content, 'hash': content_hash})}\n\n"
 
                 elif node_type == "quiz":
+                    # This endpoint only ever generates the plan's FIRST node,
+                    # which auto-launches — so a quiz here IS the diagnostic and
+                    # must match the 3-question calibration the UI promises.
+                    # (/study/generate-item-stream gets this via
+                    # StudyItemRequest.is_diagnostic; this path has no request
+                    # flag because the node is implicit.)
                     questions = []
                     async for chunk in stream_quiz_with_bank(
                         topic=node_label,
                         difficulty="medium",
-                        num_questions=STUDY_QUIZ_QUESTIONS,
+                        num_questions=STUDY_DIAGNOSTIC_QUESTIONS,
                         source=source,
                         session=study_session,
                         chat_id=study_session.chat_id,
