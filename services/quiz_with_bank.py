@@ -57,11 +57,18 @@ async def extract_concepts_from_content(
     num_concepts: int,
     language: str = "english",
     quiz_mode: str = "knowledge",
-    learning_objective: str = "general"
+    learning_objective: str = "general",
+    avoid_concepts: List[str] = None
 ) -> List[str]:
     """
     Extract distinct, testable concepts from document content, guided by the
     student's learning objective so the most relevant concepts are selected.
+
+    avoid_concepts: questions the student has already been asked in this quiz.
+    Uniqueness is guaranteed by picking distinct concepts up front rather than
+    de-duplicating questions afterwards, so extending a quiz has to exclude the
+    earlier batch HERE — a second call with no memory would happily re-extract
+    the same high-yield concepts and ask the same things again.
     """
     llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.7)
 
@@ -102,6 +109,18 @@ async def extract_concepts_from_content(
     }
     selection_guidance = objective_instructions.get(learning_objective, objective_instructions["general"])
 
+    # Capped: the exclusion list grows with every batch, and past a dozen or so
+    # it costs more prompt than it buys in novelty.
+    avoid_block = ""
+    if avoid_concepts:
+        recent = [c for c in avoid_concepts if c][-12:]
+        if recent:
+            joined = "\n".join(f"- {c[:160]}" for c in recent)
+            avoid_block = (
+                "\nALREADY ASKED — do not test these again, and avoid close "
+                f"paraphrases or narrower restatements of them:\n{joined}\n"
+            )
+
     if quiz_mode == "nclex":
         prompt = f"""You are a nursing education expert preparing a student for NCLEX.
 From the following content about "{topic}", extract exactly {num_concepts} DISTINCT clinical concepts to test.
@@ -113,7 +132,7 @@ Each concept should be:
 - Focused on nursing assessment, prioritization, or intervention
 - Distinct enough from other concepts to produce unique questions
 - Written as a testable scenario seed (not a question itself)
-
+{avoid_block}
 Content:
 {content[:8000]}
 
@@ -130,7 +149,7 @@ Each concept should be:
 - A specific, testable fact or principle (e.g., "The normal range for serum ammonia in liver failure")
 - Distinct enough from other concepts to produce unique questions
 - Clear and focused on one idea
-
+{avoid_block}
 Content:
 {content[:8000]}
 
@@ -184,6 +203,8 @@ async def stream_quiz_questions(
     learning_objective: str = "general",
     user_prompt: str = None,
     additional_context: str = None,
+    existing_questions: List[str] = None,
+    index_offset: int = 0,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Generate quiz questions fresh from document content via LLM.
@@ -203,6 +224,11 @@ async def stream_quiz_questions(
                         to match questions to these topics when applicable.
         quiz_mode: "knowledge" for factual recall questions (default),
                    "nclex" for clinical judgment questions
+        existing_questions: Question text already in this quiz. Set when EXTENDING
+                   a quiz on demand so the new batch avoids repeating the old one.
+        index_offset: Position the first new question occupies in the full quiz.
+                   Without it an extension batch would re-emit index 0 and the
+                   client would overwrite the questions already on screen.
 
     Yields:
         Status updates and complete questions in the same format as
@@ -341,7 +367,10 @@ async def stream_quiz_questions(
     # ==========================================
 
     all_questions = []
-    question_index = 0
+    # Starts past the questions already on screen when this is an extension, so
+    # emitted indices continue the quiz instead of restarting it.
+    question_index = index_offset
+    quiz_total = index_offset + num_questions
 
     for question in bank_questions:
         # Check cancellation
@@ -353,7 +382,7 @@ async def stream_quiz_questions(
         yield {
             "status": "generating",
             "current": question_index + 1,
-            "total": num_questions,
+            "total": quiz_total,
             "source": "bank"  # Indicates this came from the bank
         }
 
@@ -421,13 +450,14 @@ async def stream_quiz_questions(
             num_concepts=questions_to_generate,
             language=session.user_language or "english",
             quiz_mode=quiz_mode,
-            learning_objective=learning_objective
+            learning_objective=learning_objective,
+            avoid_concepts=existing_questions
         )
 
         if not concepts:
             logger.warning("⚠️ Concept extraction failed, falling back to topic-only generation")
             # Fallback: generate simple concept placeholders
-            concepts = [f"Aspect {i+1} of {topic}" for i in range(questions_to_generate)]
+            concepts = [f"Aspect {index_offset + i + 1} of {topic}" for i in range(questions_to_generate)]
 
         logger.info(f"✅ Got {len(concepts)} concepts, generating one question per concept...")
 
@@ -517,7 +547,7 @@ async def stream_quiz_questions(
         yield {
             "status": "generating",
             "current": question_index + 1,
-            "total": num_questions,
+            "total": quiz_total,
             "source": "llm",
             "parallel": True,
             "batch_size": len(concepts)

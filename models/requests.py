@@ -196,3 +196,35 @@ class RecordingFinalizeRequest(BaseModel):
 
 class RecordingCancelRequest(BaseModel):
     delete_chunks: bool = True
+
+
+class NodeDebriefItem(BaseModel):
+    """One question the student answered, with how it went."""
+    question: str
+    correct: bool
+    question_type: str = "mcq"                    # mcq | sata | casestudy
+    rationale: str = ""                           # Why the right answer is right
+
+
+class NodeDebriefRequest(BaseModel):
+    """
+    Post-node debrief: what went right, what went wrong, what to work on.
+
+    Fired straight after a scored node, which is the moment the student is
+    most receptive — she has just felt the misses. The items carry their
+    QUESTION TYPE so the debrief can name a format pattern ("all four you
+    missed were select-all-that-apply"), which is the finding that changes
+    how a student studies rather than just what.
+    """
+    chat_id: str
+    topic: str = ""
+    node_type: str = "quiz"                       # quiz | exam | flashcard
+    score_percent: int = 0
+    items: List[NodeDebriefItem] = []
+    days_until_exam: Optional[int] = None         # Sharpens the "work on" line
+    language: str = "en"
+    # Accumulated per-format record for the WHOLE plan, e.g.
+    # [{"type": "sata", "correct": 3, "total": 12}]. Lets the debrief say
+    # "this keeps happening" instead of judging a single node in isolation —
+    # the difference between feedback about a quiz and feedback about her.
+    plan_formats: List[dict] = []

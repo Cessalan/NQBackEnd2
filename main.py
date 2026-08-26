@@ -1568,11 +1568,26 @@ def get_post_upload_actions(language: str) -> list:
     """
     Get the action buttons to show after file upload.
 
-    These are the primary actions a student would want after uploading notes:
-    1. Quiz - Test their knowledge
-    2. Flashcards - Memorize key concepts
-    3. Study sheet - Get a summary breakdown
-    4. Audio - Listen to a lecture on the topics
+    Four chips, ordered by measured click share. Six chips wrapped to a ragged
+    4+2 second row and diluted the menu; these four cover ~93% of all recorded
+    chip clicks and fit one row.
+
+    1. Check my understanding - explain it back, get corrected (dialogue)
+    2. Quiz me      - 47% of chip clicks, 228 distinct users
+    3. Study sheet  - 27% of chip clicks, 111 distinct users
+    4. Flashcards   - 18% of chip clicks, 103 distinct users
+
+    Audio and concept map were REMOVED from this menu, not from the product:
+    in chat they were near-dead (28 and 44 artifacts ever), but inside a study
+    session they are heavily used (study_audio 1,566, study_mindmap 407). They
+    were in the wrong surface, so they stay in Study Mode where they work.
+    The frontend still renders both ids if any other caller emits them.
+
+    "checkme" is deliberately FIRST. Explain-it-back-and-get-corrected is the
+    interaction with the strongest observed link to conversion, but it had no
+    UI surface at all — students only reached it by free-typing into the
+    composer. First position is what makes it testable; re-measure click share
+    after a few weeks and drop it if it can't clear ~10% from this slot.
 
     Args:
         language: User's language
@@ -1584,19 +1599,17 @@ def get_post_upload_actions(language: str) -> list:
 
     if is_french:
         return [
+            {"id": "checkme", "label": "Vérifie ma compréhension", "icon": "💬"},
             {"id": "quiz", "label": "Teste-moi sur ces sujets", "icon": "🧪"},
-            {"id": "flashcards", "label": "Créer des flashcards", "icon": "📇"},
             {"id": "studysheet", "label": "Fais-moi un résumé", "icon": "📝"},
-            {"id": "audio", "label": "Écouter une leçon audio", "icon": "🎧"},
-            {"id": "mindmap", "label": "Créer une carte mentale", "icon": "🧠"}
+            {"id": "flashcards", "label": "Créer des flashcards", "icon": "📇"}
         ]
     else:
         return [
+            {"id": "checkme", "label": "Check my understanding", "icon": "💬"},
             {"id": "quiz", "label": "Quiz me on these topics", "icon": "🧪"},
-            {"id": "flashcards", "label": "Create flashcards to study", "icon": "📇"},
             {"id": "studysheet", "label": "Break it down for me", "icon": "📝"},
-            {"id": "audio", "label": "Listen to an audio lesson", "icon": "🎧"},
-            {"id": "mindmap", "label": "Create a mind map", "icon": "🧠"}
+            {"id": "flashcards", "label": "Create flashcards to study", "icon": "📇"}
         ]
 
 
@@ -2877,7 +2890,7 @@ async def generate_section(request: SectionRequest):
 # Duolingo-style learning path generation (NOT USED FOR CHATINTERFACE, IT IS FOR STUDY PLAN VERY SEPARATE)
 # ============================================================================
 
-from models.requests import StudyPlanRequest, StudyItemRequest, StudyAudioRequest, StudyReviewPlanRequest, DiagnosticQuizRequest, StudyMindmapRequest, StudyInterpretRequest, StudyExamRequest
+from models.requests import StudyPlanRequest, StudyItemRequest, StudyAudioRequest, StudyReviewPlanRequest, DiagnosticQuizRequest, StudyMindmapRequest, StudyInterpretRequest, StudyExamRequest, NodeDebriefRequest
 import hashlib
 
 # ── Study node sizes ────────────────────────────────────────────────────────
@@ -4056,6 +4069,259 @@ If the request is out of scope, return:
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/study/node-debrief")
+async def node_debrief(request: NodeDebriefRequest):
+    """
+    Post-node coaching moment: "I noticed something about how you answer."
+
+    The goal is DISCOVERY, not reporting. A score tells a student how she did;
+    this is meant to tell her something about herself she could not have seen —
+    specifically the difference between not knowing the content and knowing it
+    but reasoning through the question the wrong way. Those need opposite fixes
+    and a percentage cannot tell them apart.
+
+    Split of responsibility, deliberately:
+      * PYTHON decides whether a pattern exists and computes the evidence.
+      * The MODEL only writes the voice around numbers it was handed.
+
+    A model asked to find its own pattern will always find one, and a
+    confidently invented pattern is worse than no insight at all — it teaches
+    the student to distrust everything else the product says. So when the
+    evidence is thin this returns hasPattern=False and admits it.
+
+    Never raises: the transition screen must render regardless.
+    """
+    NEWLINE = chr(10)
+
+    print("")
+    print("=" * 60)
+    print(f"NODE INSIGHT - chat: {request.chat_id} | topic: {request.topic}")
+    print(f"   {request.score_percent}% over {len(request.items)} items")
+    print("=" * 60)
+
+    # ── Buckets ──────────────────────────────────────────────────────────
+    # Three ways a nursing question can be hard, each needing a different fix:
+    #   knowledge  — do you know the fact (mcq)
+    #   priority   — can you order actions / read a scenario (casestudy)
+    #   multi      — can you judge each option independently (sata)
+    BUCKET_OF = {"mcq": "knowledge", "casestudy": "priority", "sata": "multi"}
+    BUCKET_NAME = {
+        "knowledge": "knowledge",
+        "priority": "prioritization",
+        "multi": "select-all-that-apply",
+    }
+    BUCKETS = ("knowledge", "priority", "multi")
+
+    def tally(items):
+        out = {b: {"correct": 0, "total": 0} for b in BUCKETS}
+        for it in items:
+            b = BUCKET_OF.get(it.question_type)
+            if not b:
+                continue
+            out[b]["total"] += 1
+            if it.correct:
+                out[b]["correct"] += 1
+        return out
+
+    node = tally(request.items)
+
+    # Plan-wide totals, so a pattern can be claimed across the session rather
+    # than off one unlucky quiz.
+    plan = {b: {"correct": 0, "total": 0} for b in BUCKETS}
+    for pf in request.plan_formats:
+        b = BUCKET_OF.get(pf.get("type"))
+        if not b:
+            continue
+        plan[b]["correct"] += pf.get("correct") or 0
+        plan[b]["total"] += pf.get("total") or 0
+
+    # Prefer whichever view has more evidence behind it.
+    combined = {}
+    for b in BUCKETS:
+        src = plan[b] if plan[b]["total"] >= node[b]["total"] else node[b]
+        combined[b] = dict(src)
+
+    missed_items = [i for i in request.items if not i.correct]
+    correct_items = [i for i in request.items if i.correct]
+
+    def acc(d):
+        return (d["correct"] / d["total"]) if d["total"] else None
+
+    # ── Does a real pattern exist? ───────────────────────────────────────
+    # Requires BOTH sides: demonstrated strength somewhere, and a clearly
+    # sampled weakness somewhere else. Without the strong side this is just
+    # "you are bad at this", which is not an insight and does not land.
+    MIN_WEAK = 3
+    MIN_STRONG = 3
+
+    strong_bucket = None
+    k = combined["knowledge"]
+    if k["total"] >= MIN_STRONG and (acc(k) or 0) >= 0.75:
+        strong_bucket = "knowledge"
+
+    weak_candidates = [
+        (b, combined[b]) for b in ("priority", "multi")
+        if combined[b]["total"] >= MIN_WEAK and (acc(combined[b]) or 1) < 0.55
+    ]
+    weak_candidates.sort(key=lambda kv: acc(kv[1]) or 0)
+    weak_bucket = weak_candidates[0][0] if weak_candidates else None
+
+    if not (strong_bucket and weak_bucket):
+        # How much evidence is actually missing, so the screen can say "N more
+        # of these and I'll have something specific" instead of an open-ended
+        # "keep going". Only a real SAMPLING shortfall counts: if both sides
+        # are sampled and she is simply good at all of them, more questions
+        # will not produce a pattern and the promise would be a lie. 0 means
+        # "don't promise anything".
+        shortfalls = []
+        if not strong_bucket and combined["knowledge"]["total"] < MIN_STRONG:
+            shortfalls.append(MIN_STRONG - combined["knowledge"]["total"])
+        if not weak_bucket:
+            under_sampled = [
+                MIN_WEAK - combined[b]["total"]
+                for b in ("priority", "multi")
+                if combined[b]["total"] < MIN_WEAK
+            ]
+            if under_sampled:
+                shortfalls.append(min(under_sampled))
+        to_pattern = max(shortfalls) if shortfalls else 0
+
+        print(f"   no pattern yet - insufficient evidence (needs {to_pattern} more)")
+        return {
+            "hasPattern": False,
+            "noticed": "",
+            "evidence": [],
+            "pattern": "",
+            "skill": "",
+            "toPattern": to_pattern,
+            "stillLooking": "I'm still figuring out your pattern. Keep going and I'll look for one.",
+            "generated": False,
+        }
+
+    # ── Evidence: computed, never written by the model ───────────────────
+    s, w = combined[strong_bucket], combined[weak_bucket]
+    evidence = [
+        f"{s['correct']} of {s['total']} {BUCKET_NAME[strong_bucket]} questions correct",
+        f"{w['correct']} of {w['total']} on {BUCKET_NAME[weak_bucket]}",
+    ]
+    node_w = node[weak_bucket]
+    node_misses_in_weak = node_w["total"] - node_w["correct"]
+    if len(missed_items) >= 2 and node_misses_in_weak >= 2:
+        evidence.append(
+            f"{node_misses_in_weak} of your {len(missed_items)} misses here "
+            f"involved {BUCKET_NAME[weak_bucket]}"
+        )
+
+    print(f"   pattern: strong={strong_bucket} weak={weak_bucket}")
+    print(f"   evidence: {evidence}")
+
+    skill = BUCKET_NAME[weak_bucket]
+
+    def fallback():
+        """Deterministic phrasing. Same shape, no model involved."""
+        if weak_bucket == "priority":
+            pattern = (
+                "You tend to identify the right clinical problem, but sometimes choose an "
+                "intervention before deciding what has to happen first. That's a reasoning "
+                "pattern, not a gap in what you know."
+            )
+        else:
+            pattern = (
+                "You know the material, but these are graded option by option, and one wrong "
+                "pick loses the whole question. That's a technique pattern, not a gap in what "
+                "you know."
+            )
+        return {
+            "hasPattern": True,
+            "noticed": "You're stronger on this content than your score suggests.",
+            "evidence": evidence,
+            "pattern": pattern,
+            "skill": skill,
+            "stillLooking": "",
+            "generated": False,
+        }
+
+    try:
+        llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.5)
+        prompt_language = _language_for_prompt(request.language)
+
+        def render(items, cap):
+            out = []
+            for i in items[:cap]:
+                label = BUCKET_NAME.get(BUCKET_OF.get(i.question_type), "other")
+                out.append(f"  - [{label}] {i.question[:200]}")
+            return NEWLINE.join(out) if out else "  (none)"
+
+        exam_note = ""
+        if request.days_until_exam is not None and 0 <= request.days_until_exam <= 14:
+            when = "today" if request.days_until_exam == 0 else (
+                "tomorrow" if request.days_until_exam == 1
+                else f"in {request.days_until_exam} days"
+            )
+            exam_note = NEWLINE + f"Her exam is {when}."
+
+        insight_prompt = f"""You are a nursing tutor sitting next to a student who has just finished a
+{request.node_type} on "{request.topic}". You have spotted something about HOW she answers.
+
+WHAT SHE GOT RIGHT:
+{render(correct_items, 6)}
+
+WHAT SHE MISSED:
+{render(missed_items, 6)}
+
+THE PATTERN, ALREADY CONFIRMED FROM HER DATA. Do not question it, do not compute your
+own, do not invent any other statistic:
+  Strong at: {BUCKET_NAME[strong_bucket]} - {s['correct']} of {s['total']}
+  Weak at:   {BUCKET_NAME[weak_bucket]} - {w['correct']} of {w['total']}{exam_note}
+
+Write the moment she realises this about herself, in {prompt_language}. Two fields.
+
+VOICE: a tutor who has just noticed something interesting, talking to her directly as
+"you". Warm, curious, on her side. Use contractions. Sound like a person, never a report.
+Never use the words "detected", "analysis", "performance" or "weakness", and no
+exclamation marks. Do not congratulate her generically. She is preparing for a real exam
+and being patronised will lose her.
+
+- "noticed": ONE sentence, at most 20 words. What you noticed about her, leading with the
+  STRENGTH - she is better than her score suggests. No numbers; the evidence is shown
+  separately underneath.
+- "pattern": 2 to 3 sentences, at most 55 words. Explain the DISTINCTION: what she does
+  right, then the specific move that trips her up. End by naming it as a reasoning or
+  technique pattern rather than a knowledge gap. This is the sentence that should make her
+  think "that is exactly what I do".
+
+Return ONLY valid JSON:
+{{"noticed": "...", "pattern": "..."}}"""
+
+        response = await llm.ainvoke([{"role": "user", "content": insight_prompt}])
+        raw = response.content.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
+
+        result = json.loads(raw)
+        if not result.get("noticed") or not result.get("pattern"):
+            print("Insight missing fields - using fallback")
+            return fallback()
+
+        print(f"Insight: {result['noticed'][:70]}")
+        return {
+            "hasPattern": True,
+            "noticed": result["noticed"],
+            "evidence": evidence,
+            "pattern": result["pattern"],
+            "skill": skill,
+            "stillLooking": "",
+            "generated": True,
+        }
+
+    except Exception as e:
+        print(f"Insight generation failed, serving fallback: {e}")
+        return fallback()
 
 
 @app.post("/study/generate-exam")
@@ -5441,6 +5707,87 @@ class QuizRationaleRequest(_GlossaryBaseModel):
     options: _RationaleList[str]
     correct_index: int
     language: _ExplainOptional[str] = "en"
+
+class QuizExtendRequest(_GlossaryBaseModel):
+    """Ask for more questions on a quiz the student is already working through."""
+    chat_id: str
+    topic: str
+    count: int = 5
+    difficulty: _ExplainOptional[str] = "medium"
+    question_types: _ExplainOptional[_RationaleList[str]] = None
+    quiz_mode: _ExplainOptional[str] = "knowledge"
+    learning_objective: _ExplainOptional[str] = "general"
+    language: _ExplainOptional[str] = "en"
+    # Question text already on screen. Drives both concept-avoidance and the
+    # index the new questions are numbered from.
+    existing_questions: _ExplainOptional[_RationaleList[str]] = None
+
+
+@app.post("/quiz/extend-stream")
+async def extend_quiz_stream(request: QuizExtendRequest):
+    """
+    Generate the NEXT batch of questions for an in-progress chat quiz.
+
+    WHY THIS EXISTS
+
+    stream_quiz_questions fires one LLM call per question, all in parallel, the
+    moment a quiz is requested. A 15-question quiz therefore costs 15 questions
+    the instant it is asked for — and measured over 776 real 15-question
+    quizzes, 21.5% were never answered at all and only 40.3% were finished. The
+    in-loop cancellation check cannot recover any of that, because the calls are
+    already in flight before it runs.
+
+    So the quiz now starts short and grows on demand: the client asks for more
+    as the student approaches the end of what it has. Questions nobody reaches
+    are never generated, and because the client prefetches a batch ahead, the
+    student never waits for one.
+
+    Streams NDJSON, matching the existing quiz stream so the frontend's chunk
+    handling is reused as-is.
+    """
+    async def stream_generator():
+        try:
+            quota = usage_guard.check_quota(request.chat_id)
+            if not quota["allowed"]:
+                yield json.dumps({
+                    "status": "error",
+                    "code": "quota_exceeded",
+                    "message": usage_guard.QUOTA_MESSAGE
+                }) + "\n"
+                return
+
+            session = await _setup_study_session(request.chat_id, request.language)
+            source = "documents" if session.documents and session.vectorstore else "scratch"
+
+            existing = request.existing_questions or []
+            # Clamped: this runs unattended from a client timer, so a bad or
+            # hostile count must not translate into an unbounded fan-out of
+            # parallel LLM calls.
+            count = max(1, min(10, request.count or 5))
+
+            async for chunk in stream_quiz_with_bank(
+                topic=request.topic,
+                difficulty=request.difficulty or "medium",
+                num_questions=count,
+                source=source,
+                session=session,
+                chat_id=request.chat_id,
+                question_types=request.question_types or ["mcq"],
+                quiz_mode=request.quiz_mode or "knowledge",
+                learning_objective=request.learning_objective or "general",
+                existing_questions=existing,
+                index_offset=len(existing),
+            ):
+                yield json.dumps(chunk) + "\n"
+
+        except Exception as e:
+            print(f"❌ Quiz extend failed: {e}")
+            # Same error shape the chat stream uses, so the client's existing
+            # error handling covers this without a special case.
+            yield json.dumps({"status": "error", "message": str(e)}) + "\n"
+
+    return StreamingResponse(stream_generator(), media_type="application/x-ndjson")
+
 
 @app.post("/quiz_rationale")
 async def quiz_rationale(request: QuizRationaleRequest):

@@ -202,7 +202,8 @@ TOOL_ARGS_OVERRIDES
     learning_objective: "exam_prep" | "weak_areas" | "first_review" |
                         "deep_dive" | "quick_check" | "general"
     source_preference: "documents" | "scratch" | "auto"
-    num_questions: integer 1-15
+    num_questions: integer 1-15 (DEFAULT 5 — only exceed it when the user names
+                   a number or asks for a long set; the quiz extends on demand)
     question_types: array, one or more of ["mcq", "sata", "casestudy"]
 - Quality_standard of "clinical_judgment" or "exam_board_specific" should
   generally map to quiz_mode="nclex", difficulty="hard".

@@ -20,26 +20,112 @@ class NursingTutor:
     # These patterns enable instant tool selection without an LLM call,
     # reducing first-byte latency by 1-2 seconds for common requests.
     # ============================================================================
+    # NOTE ON PLURALS: every alternative below ends in an explicit `s?`/`(?:es)?`
+    # where a plural is natural. The trailing `\b` makes "flashcard" fail to
+    # match "flashcards" — which is how students actually phrase it — so the
+    # plural fell through to QUIZ_PATTERNS and produced the long-standing
+    # "asked for flashcards, got a quiz" bug. Keep the `s?` when editing.
+    #
+    # Bare "question(s)" is deliberately NOT a quiz trigger: it appears in
+    # teaching requests like "i need a review before questions".
     QUIZ_PATTERNS = re.compile(
-        r'\b(quiz|test|exam|practice\s+question|nclex|give\s+me\s+question|'
-        r'make\s+me\s+question|create\s+question|generate\s+question|'
-        r'quiz\s+me|test\s+me|pratique|questionnaire)\b',
+        r'\b(quiz(?:zes)?|tests?|exams?|practice\s+questions?|nclex|'
+        r'give\s+me\s+questions?|make\s+me\s+questions?|create\s+questions?|'
+        r'generate\s+questions?|quiz\s+me|test\s+me|pratique|questionnaires?)\b',
         re.IGNORECASE
     )
     FLASHCARD_PATTERNS = re.compile(
-        r'\b(flashcard|flash\s+card|carte|cartes)\b',
+        r'\b(flashcards?|flash\s+cards?|cartes?)\b',
         re.IGNORECASE
     )
     STUDYSHEET_PATTERNS = re.compile(
-        r'\b(study\s+sheet|study\s+guide|fiche|résumé|cheat\s+sheet)\b',
+        r'\b(study\s+sheets?|study\s+guides?|fiches?|résumés?|cheat\s+sheets?)\b',
         re.IGNORECASE
     )
     SUMMARIZE_PATTERNS = re.compile(
-        r'\b(summarize|summary|résume|résumer)\b',
+        r'\b(summarize|summar(?:y|ies)|résume|résumer)\b',
         re.IGNORECASE
     )
     SEARCH_PATTERNS = re.compile(
         r'\b(search|find|look\s+for|cherche|trouve)\b',
+        re.IGNORECASE
+    )
+    # Explicit "teach me, don't test me" intent. Routed to a direct written
+    # answer (NO_TOOL), which is the same path that already serves "explain X".
+    #
+    # Deliberately checked AFTER the artifact patterns above, so an explicit
+    # artifact request still wins ("quiz me to review cardio" -> quiz). This
+    # only claims messages that would otherwise fall through to LLM routing.
+    #
+    # Unanchored and length-independent on purpose: the conversational
+    # fast-path below is `^`-anchored and gated at <50 chars, which is why
+    # "i need a review like tutoring/lecture before questions" (53 chars,
+    # verb not at the start) fell through and went unanswered.
+    # "in my own words" / "dans mes propres mots" are emitted by the
+    # "Check my understanding" chip (postUpload.checkmePrompt). They must stay
+    # in sync with the frontend i18n strings — they are what keeps that chip
+    # from being answered with a generated quiz.
+    TEACH_PATTERNS = re.compile(
+        r'\b(teach\s+me|tutor(?:\s+me|ing)?|lecture|'
+        r'walk\s+me\s+through|go\s+over|help\s+me\s+learn|'
+        r'break\s+(?:it|this|that)\s+down|'
+        r'(?:a|the|some|any)\s+review|review\s+(?:of|on|before)|'
+        r'in\s+my\s+own\s+words|check\s+my\s+understanding|correct\s+me|'
+        r'dans\s+mes\s+propres\s+mots|'
+        r'apprends|expliqu(?:e|er|ez)|enseigne)\b',
+        re.IGNORECASE
+    )
+
+    # ========================================================================
+    # ANSWER DISCIPLINE
+    # ========================================================================
+    # The failure these exist for, from chat m3xpjm9XlPpQgCWdHGWB: a student
+    # pasted an assessment question, then spent seven turns correcting the
+    # answer. Every correction was read as a NEW topic, so the model restarted
+    # from the framework each time instead of re-answering the same question.
+    # She restated it four times, never got the answer, and left. A day earlier
+    # she had burned a whole session on the identical question.
+    #
+    # TASK_MARKERS: what a real question looks like when a student pastes one.
+    TASK_MARKERS = re.compile(
+        r'(\b[a-d]\)\s|\bpart\s+\d\b|\bdescribe\b|\bdiscuss\b|\bidentify\b|'
+        r'\boutline\b|\bbe\s+specific\b|\bscenario\b|\bcase\s+study\b|'
+        r'\bassessment\s+question\b|\bmy\s+question\s+is\b|\bwhat\s+i.{0,3}m\s+asking\b|'
+        r'\bwhich\s+level\b|\bhow\s+would\s+you\b|\bwhat\s+would\s+you\b)',
+        re.IGNORECASE
+    )
+
+    # Short pushback on the ANSWER, not a new subject. Anchored at the start
+    # because that is where students put the negation when they are correcting.
+    CORRECTION_MARKERS = re.compile(
+        r'^\s*(no+\b|nope\b|nah\b|not\b|but\b|wait\b|actually\b|again\b|'
+        r'i.{0,3}m\s+just\s+asking\b|what\s+i.{0,3}m?\s+asking\b|that.{0,3}s\s+not\b|'
+        r'i\s+said\b|you\s+didn.{0,3}t\b|non\b|je\s+demande\b)',
+        re.IGNORECASE
+    )
+
+    # "Stop writing essays." Sticky for the session: this student asked three
+    # times and got a longer answer each time, because nothing carried it
+    # forward. Negation-scoped so "explain elaborately" is not read as its
+    # opposite.
+    # Tightened after firing it at all 4,623 real user messages: the first
+    # version was ~20% precise and, worse, INVERTED on two real messages —
+    # "dont be afraid to make it long" and "SECTION B: SHORT ANSWER QUESTIONS"
+    # both read as requests for brevity. Sticky brevity on a student who asked
+    # for long is worse than the bug this fixes, so every alternative below is
+    # now an explicit construction:
+    #   - "the answer" only behind just/only/simply (never "do NOT give me the
+    #     answers", a real message that the loose version matched)
+    #   - length complaints require "too <adj>" or "not as long", so "make it
+    #     long" and "SHORT ANSWER QUESTIONS" cannot match
+    #   - the gap before "too" cannot cross sentence punctuation
+    BREVITY_MARKERS = re.compile(
+        r'((?:just|only|simply)\s+(?:to\s+)?(?:give\s+me\s+)?the\s+answer|'
+        r'\bbriefly\b|\bbe\s+brief\b|\bconcise\b|keep\s+it\s+short|\bshorter\b|'
+        r'\bin\s+short\b|straight\s+to\s+the\s+point|'
+        r'(?:not?|don.{0,3}t)\b[^.?!]{0,35}\btoo\s+(?:long|much|detailed|elaborate)|'
+        r'don.{0,3}t\s+elaborate|not\s+as\s+long|less\s+detail|'
+        r'sois\s+bref|plus\s+court|moins\s+de\s+d[ée]tail)',
         re.IGNORECASE
     )
 
@@ -185,6 +271,13 @@ class NursingTutor:
         if self.QUIZ_PATTERNS.search(user_input):
             print(f"⚡ FAST ROUTE: Detected quiz pattern in '{user_input[:50]}...'")
             return "generate_quiz_stream"
+
+        # Explicit teaching request ("teach me X", "i need a review"). No
+        # artifact pattern matched above, so the student wants to be taught,
+        # not handed a generated artifact. Answer directly.
+        if self.TEACH_PATTERNS.search(user_input):
+            print(f"⚡ FAST ROUTE: Detected teaching intent in '{user_input[:50]}...'")
+            return "NO_TOOL"
 
         # Check for conversational patterns (no tool needed)
         # Short messages are usually conversational
@@ -343,8 +436,10 @@ class NursingTutor:
                 yield json.dumps({"status": "complete"}) + "\n"
                 return
 
-            # Create nursing-specific system prompt
-            system_prompt = self._create_system_prompt()
+            # Create nursing-specific system prompt. user_input is passed so the
+            # prompt can pin the question being asked and carry a brevity request
+            # forward (see _format_task_anchor / _wants_it_short).
+            system_prompt = self._create_system_prompt(user_input)
 
             print("SYSTEM PROMPT", system_prompt)
 
@@ -532,6 +627,13 @@ class NursingTutor:
 
             fast_route_tool = self._fast_route_check(user_input)
 
+            # Did the student explicitly ask to be TAUGHT? Used below to stop
+            # the analyzer from answering "teach me X" with a generated test.
+            explicit_teach_request = (
+                fast_route_tool == "NO_TOOL"
+                and bool(self.TEACH_PATTERNS.search(user_input))
+            )
+
             # ─────────────────────────────────────────────────────────────────
             # If the analyzer picked an explicit content-generating tool, use
             # its pick instead of the regex-based fast-route. The analyzer
@@ -546,7 +648,20 @@ class NursingTutor:
                 "search_documents",
                 "summarize_document",
             }
-            if analyzer_recommended_tool in ANALYZER_DISPATCHABLE:
+            # A student who asked to be taught must not be handed an
+            # assessment. The analyzer is an LLM and can misfire; informational
+            # tools (search/summarize/study sheet) still pass, since
+            # "walk me through my notes" is legitimately a document lookup.
+            ASSESSMENT_TOOLS = {
+                "generate_quiz_stream",
+                "generate_flashcards_stream",
+                "extract_questions_from_doc",
+            }
+            if (explicit_teach_request
+                    and analyzer_recommended_tool in ASSESSMENT_TOOLS):
+                print("🛑 TEACH GUARD: student asked to be taught — refusing "
+                      f"analyzer's {analyzer_recommended_tool}, answering directly.")
+            elif analyzer_recommended_tool in ANALYZER_DISPATCHABLE:
                 fast_route_tool = analyzer_recommended_tool
                 print(f"🧠 ANALYZER OVERRIDE: routing to {fast_route_tool}")
             elif analyzer_recommended_tool == "respond_directly":
@@ -662,6 +777,33 @@ class NursingTutor:
                     "content": response_content,
                     "timestamp": datetime.now().isoformat()
                 })
+
+                # ─────────────────────────────────────────────────────────
+                # TEACH → THEN TEST. A student who asked to be taught has
+                # just been taught; the natural next step is the quiz, so
+                # offer it rather than making them ask. Ordering matters —
+                # leading with the quiz is the complaint this addresses.
+                # Each suggestion is phrased to hit its own fast-route
+                # pattern, so clicking one never falls through to LLM
+                # routing.
+                # ─────────────────────────────────────────────────────────
+                if explicit_teach_request:
+                    is_fr = str(language).lower().startswith("fr")
+                    yield json.dumps({
+                        "status": "suggested_prompts",
+                        "suggestions": (
+                            [
+                                "Fais-moi un quiz là-dessus",
+                                "Explique plus en détail",
+                                "Fais-moi des flashcards",
+                            ] if is_fr else [
+                                "Now quiz me on this",
+                                "Explain this in more depth",
+                                "Make flashcards from this",
+                            ]
+                        )
+                    }) + "\n"
+
                 yield json.dumps({"status": "complete"}) + "\n"
                 return  # Exit early, skip the tool routing path
 
@@ -1365,6 +1507,82 @@ class NursingTutor:
 
         return merged
 
+    def _student_messages(self, user_input: str = "") -> list:
+        """
+        The student's own messages, oldest first, with the current one last.
+
+        message_history is rebuilt from Firestore and the frontend persists the
+        user's message BEFORE calling us, so the current message may already be
+        the last entry — don't count it twice or every turn looks like a repeat.
+        """
+        said = [
+            str(m.get("content") or "").strip()
+            for m in (self.session.message_history or [])
+            if isinstance(m, dict)
+            and m.get("role") == "user"
+            and isinstance(m.get("content"), str)
+        ]
+        said = [s for s in said if s]
+        current = (user_input or "").strip()
+        if current and (not said or said[-1] != current):
+            said.append(current)
+        return said
+
+    def _format_task_anchor(self, user_input: str = "") -> str:
+        """
+        Pin the question the student is actually waiting on.
+
+        DERIVED, never stored. Sessions are recycled after 2-15 minutes of idle
+        (SESSION_IDLE_TIMEOUT / SESSION_MAX_AGE in main.py) while message_history
+        is rebuilt from Firestore on every reconnect — a pinned_task field on the
+        session would evaporate mid-conversation. The student this was written
+        for left a 75-minute gap between two turns of the same question.
+        """
+        said = self._student_messages(user_input)
+        if not said:
+            return "- Nothing asked yet. Respond to the student's message normally."
+
+        # The most RECENT task-bearing message wins: students restate more
+        # precisely as they get frustrated, so the latest phrasing is the best
+        # statement of what they want.
+        anchor = None
+        for msg in reversed(said):
+            if len(msg) >= 200 or self.TASK_MARKERS.search(msg):
+                anchor = msg
+                break
+
+        if not anchor:
+            return "- No specific question pending. Answer the student's message directly."
+
+        # How hard have they been pushing back lately? Counted over the recent
+        # window rather than "since the anchor", because the final exasperated
+        # restatement usually becomes the anchor itself.
+        pushback = sum(1 for m in said[-8:] if self.CORRECTION_MARKERS.match(m))
+
+        quoted = anchor if len(anchor) <= 600 else anchor[:600].rsplit(" ", 1)[0] + "..."
+        lines = [f'- The question on the table: "{quoted}"']
+
+        if pushback >= 2:
+            lines.append(
+                f"- They have pushed back {pushback} times. That means your earlier answers "
+                "did NOT land. Do not restate the framework again — give the answer itself, "
+                "differently and shorter than last time."
+            )
+        elif pushback == 1:
+            lines.append(
+                "- Their last message corrects your previous answer. Apply the correction to "
+                "the SAME question; it is not a new topic."
+            )
+        return "\n".join(lines)
+
+    def _wants_it_short(self, user_input: str = "") -> bool:
+        """
+        True once the student has asked for less. Sticky for the whole session —
+        asking once should not have to be repeated, which is exactly what went
+        wrong in the transcript this was built from.
+        """
+        return any(self.BREVITY_MARKERS.search(m) for m in self._student_messages(user_input))
+
     def _format_urgency_context(self) -> str:
         """Render the detected situation for the system prompt."""
         ctx = getattr(self.session, "urgency_context", None) or {}
@@ -1469,7 +1687,7 @@ The student's message: {user_input}"""
             if hasattr(chunk, 'content') and chunk.content:
                 yield chunk.content
 
-    def _create_system_prompt(self) -> str:
+    def _create_system_prompt(self, user_input: str = "") -> str:
         """
         Create nursing-specific system prompt.
 
@@ -1483,10 +1701,28 @@ The student's message: {user_input}"""
         # Only include quiz data if user might be asking about practice/weak areas
         quiz_context = self._get_quiz_context_if_needed()
 
+        if self._wants_it_short(user_input):
+            brevity_rule = (
+                "• THE STUDENT HAS ASKED FOR SHORT ANSWERS, and that holds for the REST of\n"
+                "  this conversation — not just the next reply. No section headers, no emoji,\n"
+                "  no bold labels. Under 120 words: the answer, then at most 3 short bullets."
+            )
+        else:
+            brevity_rule = (
+                "• Give the shortest answer that fully answers the question. Headings are for\n"
+                "  answers with 3+ genuinely distinct sections, not for decorating short ones."
+            )
+
         return f"""You are an AI nursing tutor helping students with clinical skills, quizzes, flashcards, and study materials.
 
 CORE TOOLS (use these, never write content manually):
-• generate_quiz_stream: For ANY quiz/question request (max 15 questions)
+• generate_quiz_stream: For ANY quiz/question request
+  - num_questions: DEFAULT 5. Only go higher when the user names a number
+    ("give me 20") or clearly asks for a long set ("full practice exam").
+    The quiz extends itself on demand as the student works through it, so a
+    short first batch costs them nothing — it is not a shorter quiz, just a
+    smaller first delivery. Asking for 15 up front generates all 15 immediately,
+    and most students never reach the end of them.
   - ALWAYS pass user_prompt=<exact user message verbatim> — used for accurate mode detection
   - quiz_mode="knowledge" (DEFAULT) for factual questions
   - quiz_mode="nclex" ONLY when user explicitly asks for NCLEX/clinical scenarios/judgment
@@ -1552,6 +1788,21 @@ SESSION CONTEXT:
 • Documents: {"YES - " + str(len(self.session.documents)) + " files" if self.session.documents else "none"}
 • Last file: {self.session.documents[-1]["filename"] if self.session.documents else "none"}
 • Language: {self.session.user_language or "auto-detect"}
+
+ANSWERING THE QUESTION IN FRONT OF YOU (the most expensive failure we have — read twice):
+{self._format_task_anchor(user_input)}
+• Lead with the ANSWER in the first sentence. No preamble, no restating their question
+  back, no framework recap before it. They can read the reasoning after the answer.
+• A short message following a question is a CORRECTION, not a new subject. Re-answer the
+  SAME question with the correction folded in. "no, the BP is below 90" means answer the
+  original question again given a BP below 90 — it does not mean explain blood pressure.
+• NEVER quote the student's message back to them. NEVER write "Your question:", "It sounds
+  like you are asking", or any paraphrase of what they just said. If you truly cannot tell
+  what they mean, answer the pinned question with your best reading and put the assumption
+  in ONE short line at the end.
+• If the block above says they pushed back more than once, your previous answers failed.
+  Produce something DIFFERENT — shorter and more direct — not the same content re-headed.
+{brevity_rule}
 
 STUDENT SITUATION (detected from their message — trust this over your own guess):
 {self._format_urgency_context()}
