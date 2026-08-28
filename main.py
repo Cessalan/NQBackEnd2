@@ -2907,6 +2907,53 @@ STUDY_QUIZ_QUESTIONS = 5
 STUDY_FLASHCARD_CARDS = 5
 STUDY_DIAGNOSTIC_QUESTIONS = 3   # auto-launched first node — calibration only
 
+# Question formats a study-plan QUIZ node may emit (2026-08-26).
+# Was ["mcq"] — which meant a student's first quiz was always the one format
+# they are already good at. Measured on the paying cohort: 33/33 correct on
+# plain MCQ against 9/28 on SATA + case study + prioritisation. That gap is
+# what makes a student realise they are not ready, and every subscriber we can
+# trace a reason for converted after meeting it.
+# It used to arrive only at node 2 (or via an adaptive branch), but ~39% of
+# study sessions stop at or before node 1 — so 4 in 10 students only ever saw
+# multiple choice, aced it, and left believing they were fine.
+# distribute_question_types keeps the mix MCQ-weighted (gentle on-ramp) while
+# guaranteeing at least one SATA per node, so nobody finishes a quiz node
+# without meeting the format they actually struggle with.
+STUDY_QUIZ_TYPES = ["mcq", "sata"]
+
+
+def _format_study_question(q: dict, fallback_topic: str) -> dict:
+    """Shape one generated question for the study-mode cards.
+
+    Mirrors the dispatch in /study/generate-exam so a quiz node can carry the
+    same mixed formats an exam node already does. MCQ keeps its historical
+    shape — the letter answer flattened to `correctIndex` — because
+    StudyQuizCard grades on that field; SATA and case study pass through whole,
+    since those components read the generator's native fields directly.
+
+    `questionType` is now always set. It was absent before, when quiz nodes
+    were MCQ-only and the frontend could safely assume the format.
+    """
+    q_type = q.get("questionType", "mcq")
+
+    if q_type in ("sata", "casestudy", "unfoldingCase"):
+        return {**q, "questionType": q_type, "topic": q.get("topic", fallback_topic)}
+
+    answer = q.get("answer", "A)")
+    answer_letter = answer[0] if answer else "A"
+    return {
+        "questionType": "mcq",
+        "question": q.get("question", ""),
+        "options": q.get("options", []),
+        "correctIndex": ord(answer_letter) - ord("A"),
+        # Legacy full rationale (empty on new generations).
+        "rationale": q.get("justification", ""),
+        # New one-sentence summary; full rationale fetched on demand.
+        "correctBlurb": q.get("correct_blurb", ""),
+        "topic": q.get("topic", fallback_topic),
+    }
+
+
 @app.post("/study/plan")
 async def generate_study_plan(request: StudyPlanRequest):
     """
@@ -3630,25 +3677,12 @@ async def start_study_journey(request: StudyPlanRequest):
                         source=source,
                         session=study_session,
                         chat_id=study_session.chat_id,
-                        question_types=["mcq"],
+                        question_types=STUDY_QUIZ_TYPES,
                         quiz_mode="knowledge"
                     ):
                         if chunk.get("status") == "question_ready":
                             q = chunk.get("question") or {}
-                            answer = q.get("answer", "A)")
-                            answer_letter = answer[0] if answer else "A"
-                            correct_index = ord(answer_letter) - ord("A")
-                            formatted = {
-                                "question": q.get("question", ""),
-                                "options": q.get("options", []),
-                                "correctIndex": correct_index,
-                                # Legacy full rationale (empty on new generations).
-                                "rationale": q.get("justification", ""),
-                                # New one-sentence summary; full rationale is fetched
-                                # on demand via /quiz_rationale.
-                                "correctBlurb": q.get("correct_blurb", ""),
-                                "topic": q.get("topic", node_label)
-                            }
+                            formatted = _format_study_question(q, node_label)
                             questions.append(formatted)
                             yield f"data: {json.dumps({'status': 'question_ready', 'question': formatted, 'node_id': node_id})}\n\n"
                     content = {"questions": questions}
@@ -4591,7 +4625,7 @@ async def generate_study_item_stream(request: StudyItemRequest):
                     source=source,
                     session=session,
                     chat_id=session.chat_id,
-                    question_types=["mcq"],
+                    question_types=STUDY_QUIZ_TYPES,
                     quiz_mode="knowledge"
                 ):
                     # Forward status updates to frontend
@@ -4601,19 +4635,9 @@ async def generate_study_item_stream(request: StudyItemRequest):
                     if chunk.get("status") == "question_ready":
                         question = chunk.get("question")
                         if question:
-                            answer = question.get('answer', 'A)')
-                            answer_letter = answer[0] if answer else 'A'
-                            correct_index = ord(answer_letter) - ord('A')
-                            questions.append({
-                                "question": question.get('question', ''),
-                                "options": question.get('options', []),
-                                "correctIndex": correct_index,
-                                # Legacy field kept for back-compat with old saved quizzes.
-                                "rationale": question.get('justification', ''),
-                                # New one-sentence summary; full rationale on demand.
-                                "correctBlurb": question.get('correct_blurb', ''),
-                                "topic": question.get('topic', request.node_label)
-                            })
+                            questions.append(
+                                _format_study_question(question, request.node_label)
+                            )
 
                 # Send final content
                 content = {"questions": questions}
@@ -5155,27 +5179,13 @@ async def _generate_quiz_via_stream(
         source=source,
         session=session,
         chat_id=session.chat_id,
-        question_types=["mcq"],  # Study mode uses MCQ
+        question_types=STUDY_QUIZ_TYPES,  # MCQ-weighted, one SATA guaranteed
         quiz_mode="knowledge"    # Study mode uses knowledge mode (factual questions)
     ):
         if chunk.get("status") == "question_ready":
             question = chunk.get("question")
             if question:
-                # Convert format for frontend compatibility
-                answer = question.get('answer', 'A)')
-                answer_letter = answer[0] if answer else 'A'
-                correct_index = ord(answer_letter) - ord('A')
-
-                formatted_question = {
-                    "question": question.get('question', ''),
-                    "options": question.get('options', []),
-                    "correctIndex": correct_index,
-                    # Legacy field kept for back-compat with old saved quizzes.
-                    "rationale": question.get('justification', ''),
-                    # New one-sentence summary; full rationale on demand.
-                    "correctBlurb": question.get('correct_blurb', ''),
-                    "topic": question.get('topic', topic)
-                }
+                formatted_question = _format_study_question(question, topic)
                 questions.append(formatted_question)
                 print(f"✅ Quiz question {len(questions)}/{num_questions} collected")
 
