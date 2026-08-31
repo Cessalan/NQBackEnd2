@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 
 import asyncio
 import json
+import re
 import re as _lang_re
 # Load environment variables. `.env.local` (if present) OVERRIDES `.env` —
 # it holds local sandbox credentials (e.g. Stripe test keys) and is excluded
@@ -2890,7 +2891,7 @@ async def generate_section(request: SectionRequest):
 # Duolingo-style learning path generation (NOT USED FOR CHATINTERFACE, IT IS FOR STUDY PLAN VERY SEPARATE)
 # ============================================================================
 
-from models.requests import StudyPlanRequest, StudyItemRequest, StudyAudioRequest, StudyReviewPlanRequest, DiagnosticQuizRequest, StudyMindmapRequest, StudyInterpretRequest, StudyExamRequest, NodeDebriefRequest
+from models.requests import StudyPlanRequest, StudyItemRequest, StudyAudioRequest, StudyReviewPlanRequest, DiagnosticQuizRequest, StudyMindmapRequest, StudyInterpretRequest, StudyExamRequest, NodeDebriefRequest, NarrationRequest
 import hashlib
 
 # ── Study node sizes ────────────────────────────────────────────────────────
@@ -2905,7 +2906,19 @@ import hashlib
 # Keep STUDY_QUIZ_QUESTIONS in mind alongside FREE_LIMIT in usage_guard.py.
 STUDY_QUIZ_QUESTIONS = 5
 STUDY_FLASHCARD_CARDS = 5
-STUDY_DIAGNOSTIC_QUESTIONS = 3   # auto-launched first node — calibration only
+STUDY_DIAGNOSTIC_QUESTIONS = 3   # legacy in-plan calibration node (pre-diagnostic flow)
+
+# Pre-plan diagnostic. Six, not five: two questions each on the three topics
+# most likely to be moved to the refresh tail, plus singles on the rest.
+#
+# Two is the minimum evidence for deciding a student is solid on something.
+# One question is a coin flip on four options, and the cost of that coin
+# landing wrong is not a wasted node — it is telling her she is strong on a
+# topic she will meet again on the exam. The extra question costs about
+# fifteen seconds against the "quick questions" promise.
+DIAGNOSTIC_QUESTION_COUNT = 6
+DIAGNOSTIC_DEEP_TOPICS = 3       # topics that get two questions
+DIAGNOSTIC_TOPIC_LIMIT = 4       # topics covered at all
 
 # Question formats a study-plan QUIZ node may emit (2026-08-26).
 # Was ["mcq"] — which meant a student's first quiz was always the one format
@@ -3109,77 +3122,20 @@ Return ONLY valid JSON (all strings must be in {prompt_language}):
         nodes = json.loads(path_json)
 
         # ------------------------------------------
-        # STEP 5: Add status and validate structure
+        # STEP 5: Weight by the diagnostic, then attach status + exam nodes
         # ------------------------------------------
-        for i, node in enumerate(nodes):
-            # First node is available, rest are locked
-            node["status"] = "available" if i == 0 else "locked"
-
-            # Ensure required fields exist
-            if "id" not in node:
-                node["id"] = f"node_{i+1}"
-            if "difficulty" not in node:
-                node["difficulty"] = 1 + (i // 4)  # Gradually increase
-            if "tags" not in node:
-                node["tags"] = []
-
-        print(f"✅ Generated study path with {len(nodes)} nodes")
-        for node in nodes:
-            print(f"   - {node['type']}: {node['label']}")
-
-        # ------------------------------------------
-        # STEP 5b: Insert exam nodes at the end of each topic section
-        # Detect topic boundaries by checking node tags/labels,
-        # then insert an "exam" node after each group.
-        # ------------------------------------------
-        nodes_with_exams = []
-        current_topic = None
-        exam_counter = 0
-
-        for i, node in enumerate(nodes):
-            # Determine this node's topic from the label (strip suffixes like " - Quiz", " - Listen")
-            node_topic = node.get("label", "")
-            for t in unique_topics:
-                if t.lower() in node_topic.lower():
-                    node_topic = t
-                    break
-
-            # Check if the NEXT node belongs to a different topic (or this is the last node)
-            next_topic = None
-            if i + 1 < len(nodes):
-                next_label = nodes[i + 1].get("label", "")
-                for t in unique_topics:
-                    if t.lower() in next_label.lower():
-                        next_topic = t
-                        break
-
-            nodes_with_exams.append(node)
-
-            # If topic changes or this is the last node → insert exam
-            is_last = (i == len(nodes) - 1)
-            topic_changes = (next_topic and node_topic and next_topic != node_topic)
-
-            if is_last or topic_changes:
-                exam_counter += 1
-                exam_label = node_topic if node_topic in unique_topics else (current_topic or "Review")
-                exam_node = {
-                    "id": f"exam_{exam_counter}",
-                    "type": "exam",
-                    "label": exam_label,
-                    "tags": ["exam", "mixed_types"],
-                    "difficulty": 2,
-                    "status": "locked"
-                }
-                nodes_with_exams.append(exam_node)
-                print(f"   📝 Inserted exam node after topic: {exam_label}")
-
-            current_topic = node_topic
-
-        nodes = nodes_with_exams
-
-        # Re-apply status after insertion (first node active, rest locked)
-        for i, node in enumerate(nodes):
-            node["status"] = "available" if i == 0 else "locked"
+        # Both steps used to be inlined here as a byte-for-byte copy of
+        # _attach_status_and_exam_nodes. Two copies meant every change had to
+        # be made twice, or /study/plan — the StartStudyModal fallback path —
+        # quietly handed the student a differently shaped plan than
+        # /study/start did.
+        nodes = _weight_path_by_diagnostic(
+            nodes,
+            request.diagnostic,
+            unique_topics,
+            _days_to_exam(user_prefs),
+        )
+        nodes = _attach_status_and_exam_nodes(nodes, unique_topics)
 
         print(f"✅ Final study path with {len(nodes)} nodes (including exams)")
 
@@ -3190,7 +3146,9 @@ Return ONLY valid JSON (all strings must be in {prompt_language}):
             "nodes": nodes,
             "topics": unique_topics,
             "total_nodes": len(nodes),
-            "estimated_time_minutes": len(nodes) * 3  # ~3 min per node
+            "estimated_time_minutes": len(nodes) * 3,  # ~3 min per node
+            "archetype": _plan_archetype(_days_to_exam(user_prefs)),
+            "tiers": _summarize_tiers(nodes, unique_topics),
         }
 
     except Exception as e:
@@ -3454,6 +3412,286 @@ IMPORTANT:
 - Keep labels concise and meaningful"""
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# PLAN WEIGHTING — time sets the budget, the diagnostic sets the order.
+#
+# Neither input is enough on its own. The diagnostic knows what MATTERS; only
+# the calendar knows how much FITS. A plan built from the diagnostic alone
+# hands a two-day crammer eighteen nodes; a plan built from the calendar alone
+# is what we ship today — the same uniform path whether she knows everything
+# or nothing.
+#
+# Order is: gaps first, then shaky, then the topics she is already solid on as
+# a closing refresh. That tail is not padding. It does three things:
+#
+#   1. The plan does not visibly collapse when she happens to know a lot, so a
+#      personalised plan never reads as a cheaper one.
+#   2. Nothing is REMOVED on the strength of one or two diagnostic questions —
+#      only deferred. A bad read costs her ordering, not coverage. Being
+#      wrongly told she is strong is the one failure here that costs an exam.
+#   3. It ends the plan on material she is good at, a day or two before the
+#      exam — which is exactly what getExamPhase() on the frontend already
+#      asks for ("final: consolidate, stop starting new material") and has
+#      never had content designed for.
+#
+# The property worth protecting: FRONT-LOAD BY NEED, BACK-LOAD BY CONFIDENCE.
+# Most plans are abandoned. Under this ordering whoever falls off has lost
+# only the review of material she already knew.
+# ══════════════════════════════════════════════════════════════════════════
+
+# Node budget per archetype, before exam nodes are attached. Sprint cannot
+# teach new material, so it triages; master has the calendar room to cover
+# everything properly.
+PLAN_BUDGETS = {"sprint": 8, "focus": 14, "master": 20}
+
+GAP_MAX_PCT = 40    # below this she has not got it
+SOLID_MIN_PCT = 80  # at or above this it goes to the tail
+
+# The unit shape each tier earns. Gap keeps the full default unit — the one
+# production data settled on (lesson opens, quiz carries momentum, flashcards
+# late and short, quiz closes).
+TIER_UNITS = {
+    "gap":      ["lesson", "quiz", "audio", "flashcard", "quiz"],
+    "shaky":    ["lesson", "quiz"],
+    "untested": ["lesson", "quiz"],
+    "solid":    ["flashcard", "quiz"],
+}
+
+# Worst first inside the plan; solid always last.
+TIER_ORDER = {"gap": 0, "shaky": 1, "untested": 2, "solid": 3}
+
+
+def _tier_for_score(pct):
+    """Bucket a diagnostic percentage. None means we never asked."""
+    if pct is None:
+        return "untested"
+    if pct < GAP_MAX_PCT:
+        return "gap"
+    if pct >= SOLID_MIN_PCT:
+        return "solid"
+    return "shaky"
+
+
+def _match_topic(name, candidates):
+    """Loose topic match. Diagnostic topic names and plan topic names are both
+    model-generated in the same session, so they usually agree — but "usually"
+    is not "always", and an unmatched topic silently becomes untested and gets
+    taught from scratch to someone who already knows it."""
+    if not name:
+        return None
+    low = str(name).strip().lower()
+    for c in candidates:
+        if str(c).strip().lower() == low:
+            return c
+    for c in candidates:
+        cl = str(c).strip().lower()
+        if cl and (cl in low or low in cl):
+            return c
+    return None
+
+
+def _topic_of_node(node, unique_topics):
+    """Which curriculum topic a generated node belongs to."""
+    label = str(node.get("label", ""))
+    match = _match_topic(label, unique_topics)
+    if match:
+        return match
+    # Labels are built as "<topic> - <kind>"; try the part before the dash.
+    head = label.split(" - ")[0].strip()
+    return _match_topic(head, unique_topics) or (head or None)
+
+
+def _synth_node(topic_label, node_type, seq):
+    """Build a missing node for a unit.
+
+    The label is the BARE topic name, never a decorated one like
+    "<topic> - Quiz". Plans are generated in the student's language and this
+    function has no idea what that language is — appending an English suffix
+    would drop "Quiz" into the middle of a French path. The node type already
+    has its own icon, so the suffix carries nothing she cannot see.
+    """
+    return {
+        "id": "synth_%s_%d" % (node_type, seq),
+        "type": node_type,
+        "label": topic_label,
+        "tags": [node_type],
+        "difficulty": 1,
+    }
+
+
+def _shape_unit(topic_label, pool, wanted_types, seq_start):
+    """Fit this topic's generated nodes to the shape its tier earns.
+
+    Reuses generated nodes wherever the type lines up — they carry real labels
+    and tags from the document — and synthesises only what is missing.
+    """
+    remaining = list(pool)
+    out = []
+    seq = seq_start
+    for t in wanted_types:
+        match = next((n for n in remaining if n.get("type") == t), None)
+        if match:
+            remaining.remove(match)
+            out.append(match)
+        else:
+            out.append(_synth_node(topic_label, t, seq))
+            seq += 1
+    return out
+
+
+def _ensure_lesson_first(units):
+    """The first node of a plan is always a lesson.
+
+    Measured: lesson-first plans complete their first node 89.0% of the time,
+    quiz-first 66.6% — with content successfully delivered in both cases. The
+    opening node is the highest-leverage position in the path, and this is the
+    cheapest thing we know that moves it.
+
+    Every tier's unit already opens on a lesson except `solid`, so this only
+    bites when a student is solid on absolutely everything.
+    """
+    if not units:
+        return units
+    first = units[0]
+    nodes = first["nodes"]
+    idx = next((i for i, n in enumerate(nodes) if n.get("type") == "lesson"), None)
+    if idx is None:
+        nodes.insert(0, _synth_node(first["topic"], "lesson", 900))
+    elif idx > 0:
+        nodes.insert(0, nodes.pop(idx))
+    return units
+
+
+def _apply_budget(units, budget, archetype):
+    """Fit the plan to the calendar.
+
+    Trim order is deliberate: the tail goes first, then shaky topics, and gap
+    units are never truncated — a whole gap unit is dropped before a partial
+    one is kept. Truncating loses the closing quiz, the node that carries
+    momentum into the next topic, so half a unit is worth less than no unit.
+    """
+    if archetype == "sprint":
+        # Two days out, five separate refresh units is not a plan, it is a
+        # list. Collapse the whole tail into one review node.
+        solid = [u for u in units if u["tier"] == "solid"]
+        units = [u for u in units if u["tier"] != "solid"]
+        if solid:
+            labels = ", ".join(u["topic"] for u in solid if u["topic"])[:120]
+            units.append({
+                "topic": labels or "Review",
+                "tier": "solid",
+                "nodes": [_synth_node(labels or "Review", "quiz", 950)],
+            })
+
+    def total():
+        return sum(len(u["nodes"]) for u in units)
+
+    # 1. Drop tail units from the back.
+    while total() > budget and any(u["tier"] == "solid" for u in units):
+        last_solid = max(i for i, u in enumerate(units) if u["tier"] == "solid")
+        units.pop(last_solid)
+
+    # 2. Drop shaky units from the back.
+    while total() > budget and any(u["tier"] in ("shaky", "untested") for u in units):
+        last = max(i for i, u in enumerate(units) if u["tier"] in ("shaky", "untested"))
+        units.pop(last)
+
+    # 3. Still over: drop whole gap units from the back. Never truncate one.
+    while total() > budget and len(units) > 1:
+        units.pop()
+
+    return units
+
+
+def _summarize_tiers(nodes, unique_topics):
+    """Topics grouped by tier, for the plan preview.
+
+    The frontend needs this to say two things, and both are load-bearing:
+
+      "3 topics you've got, 2 that need work — I built your path around
+       those two."
+      "You're solid on these 5 — they move to the end as a quick refresh."
+
+    Without them the reshaping is invisible, and a plan that quietly reorders
+    itself just looks like a plan. This is the only place the diagnostic's
+    work becomes legible as work — and a student cannot perceive intelligence
+    in a decision she cannot see.
+    """
+    out = {"gap": [], "shaky": [], "solid": [], "untested": []}
+    for n in nodes:
+        tier = n.get("_tier")
+        if tier not in out:
+            continue
+        topic = _topic_of_node(n, unique_topics)
+        if topic and topic not in out[tier]:
+            out[tier].append(topic)
+    return out
+
+
+def _weight_path_by_diagnostic(nodes, diagnostic, unique_topics, days_to_exam=None):
+    """Reshape a generated path using what the diagnostic learned.
+
+    Pure and deterministic — no LLM call, no network, sub-millisecond. That is
+    the point: this rule decides plan length, the number the whole activation
+    thesis rests on, so it should be assertable in a test rather than
+    re-negotiated by a model on every generation.
+
+    `diagnostic` is {topic_name: percent}. A falsy diagnostic returns the nodes
+    untouched, which is what a skipped diagnostic or an older client gets.
+    """
+    if not diagnostic or not nodes:
+        return nodes
+
+    archetype = _plan_archetype(days_to_exam)
+    budget = PLAN_BUDGETS.get(archetype, PLAN_BUDGETS["master"])
+
+    # Score every curriculum topic, matching loosely against diagnostic keys.
+    diag_keys = list(diagnostic.keys())
+    scores = {}
+    for topic in unique_topics:
+        key = _match_topic(topic, diag_keys)
+        raw = diagnostic.get(key) if key else None
+        try:
+            scores[topic] = None if raw is None else float(raw)
+        except (TypeError, ValueError):
+            scores[topic] = None
+
+    # Group generated nodes by topic, preserving order.
+    grouped = {}
+    order = []
+    for n in nodes:
+        t = _topic_of_node(n, unique_topics) or "General"
+        if t not in grouped:
+            grouped[t] = []
+            order.append(t)
+        grouped[t].append(n)
+
+    units = []
+    seq = 0
+    for topic in order:
+        tier = _tier_for_score(scores.get(topic))
+        wanted = TIER_UNITS[tier]
+        unit_nodes = _shape_unit(topic, grouped[topic], wanted, seq)
+        seq += len(wanted)
+        units.append({"topic": topic, "tier": tier, "nodes": unit_nodes})
+
+    # Worst first, solid last. Ties break on score so the weakest gap opens.
+    units.sort(key=lambda u: (
+        TIER_ORDER[u["tier"]],
+        scores.get(u["topic"]) if scores.get(u["topic"]) is not None else 999,
+    ))
+
+    units = _apply_budget(units, budget, archetype)
+    units = _ensure_lesson_first(units)
+
+    out = []
+    for u in units:
+        for n in u["nodes"]:
+            n["_tier"] = u["tier"]
+            out.append(n)
+    return out
+
+
 def _attach_status_and_exam_nodes(nodes: list, unique_topics: list) -> list:
     """Mirror /study/plan steps 5 + 5b: assign status, then insert exam nodes
     at topic boundaries. Returns the augmented list."""
@@ -3489,7 +3727,16 @@ def _attach_status_and_exam_nodes(nodes: list, unique_topics: list) -> list:
         is_last = (i == len(nodes) - 1)
         topic_changes = (next_topic and node_topic and next_topic != node_topic)
 
-        if is_last or topic_changes:
+        # A topic in the closing refresh tail gets no exam node. An exam costs
+        # 10 question-units — more than the entire shaky unit it would follow —
+        # and its job is to PROVE IMPROVEMENT on something that was weak. There
+        # is nothing to prove on a topic the diagnostic says she already has and
+        # which we deliberately chose not to teach. Untagged nodes (no
+        # diagnostic, older clients) keep the old behaviour of an exam at every
+        # boundary.
+        is_tail = node.get("_tier") == "solid"
+
+        if (is_last or topic_changes) and not is_tail:
             exam_counter += 1
             exam_label = node_topic if node_topic in unique_topics else (current_topic or "Review")
             nodes_with_exams.append({
@@ -3615,6 +3862,9 @@ async def start_study_journey(request: StudyPlanRequest):
                 yield f"data: {json.dumps({'status': 'error', 'message': f'Plan JSON parse failed: {e}'})}\n\n"
                 return
 
+            nodes = _weight_path_by_diagnostic(
+                nodes, request.diagnostic, unique_topics, days_to_exam
+            )
             nodes = _attach_status_and_exam_nodes(nodes, unique_topics)
             print(f"✅ /study/start built path with {len(nodes)} nodes")
 
@@ -3628,6 +3878,7 @@ async def start_study_journey(request: StudyPlanRequest):
                 # feature never teaches anyone to set an exam date.
                 "archetype": _plan_archetype(days_to_exam),
                 "days_to_exam": days_to_exam,
+                "tiers": _summarize_tiers(nodes, unique_topics),
             }
             yield f"data: {json.dumps({'status': 'plan_ready', 'plan': plan_payload})}\n\n"
 
@@ -3786,17 +4037,43 @@ async def generate_diagnostic_quiz(request: DiagnosticQuizRequest):
         if not context_str:
             raise HTTPException(status_code=400, detail="No document content found for this session.")
 
+        # Topics she TOLD us were hardest, in onboarding Q2. They are asked
+        # first, because the most valuable thing this can produce is a
+        # contradiction: "you said pharmacology, but you're solid there — it's
+        # fluid balance." A self-report confirmed is worth little; a
+        # self-report corrected is the moment the product stops feeling like a
+        # quiz generator.
+        hardest = [t for t in (request.hardestTopics or []) if t][:3]
+        ordered_topics = hardest + [t for t in unique_topics if t not in hardest]
+        focus_topics = ordered_topics[:DIAGNOSTIC_TOPIC_LIMIT] or unique_topics[:3]
+
         llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.3)
 
-        prompt = f"""You are a diagnostic test generator. Generate exactly 5 multiple-choice questions to assess a student's baseline knowledge before they start studying.
+        focus_block = "\n".join("- %s" % t for t in focus_topics) or "- (infer from the document)"
+
+        prompt = f"""You are calibrating a study plan. Generate exactly {DIAGNOSTIC_QUESTION_COUNT} multiple-choice questions that reveal what this student already knows.
+
+This is NOT a test. It is never scored or shown as a grade. Its only job is to
+decide what she should spend her time on, so a question that is impossible to
+get right teaches us nothing and just makes her feel behind.
+
+PRIORITY TOPICS (ask about these first):
+{focus_block}
 
 RULES:
-- Each question must cover a DIFFERENT main topic or concept from the document
-- Vary difficulty: questions 1-2 easy, questions 3-4 medium, question 5 harder
+- Cover the priority topics above. Give the FIRST {DIAGNOSTIC_DEEP_TOPICS} topics TWO questions each
+  (one easier, one harder); give any remaining topic ONE question.
+- Two questions on a topic is the minimum evidence for deciding she is solid on
+  it — one question is a coin flip, and being wrongly told she is strong is the
+  one mistake here that costs her the exam.
 - Each question must have exactly 4 options
-- Questions reveal what the student already knows vs. what they need to learn
+- Keep difficulty fair: test understanding, not recall of a footnote
 - Use exact terminology from the document — do NOT invent topics
 - Keep questions concise (1-2 sentences max)
+- "concept" must be a SHORT human label for what the question tests
+  (e.g. "preload vs afterload"), 2-6 words. It is shown to the student later
+  in sentences like "you were confusing X", so write it as a thing, not a
+  sentence.
 
 DOCUMENT CONTENT:
 {context_str}
@@ -3807,11 +4084,12 @@ Return ONLY a valid JSON array (no markdown, no explanation):
     "question": "Question text?",
     "options": ["Option A", "Option B", "Option C", "Option D"],
     "correctIndex": 0,
-    "rationale": "Brief explanation of the correct answer",
-    "topic": "Topic name from the document"
+    "rationale": "One sentence on why the correct answer is right",
+    "topic": "Topic name from the document",
+    "concept": "short concept label"
   }}
 ]
-(exactly 5 objects, no more, no less)"""
+(exactly {DIAGNOSTIC_QUESTION_COUNT} objects, no more, no less)"""
 
         response = await llm.ainvoke(prompt)
         content = response.content.strip()
@@ -3828,14 +4106,29 @@ Return ONLY a valid JSON array (no markdown, no explanation):
                     break
 
         questions = json.loads(content)
-        # Safety: clamp to 5 and validate structure
+        # Safety: clamp and validate structure
         questions = [
-            q for q in questions[:5]
+            q for q in questions[:DIAGNOSTIC_QUESTION_COUNT]
             if isinstance(q.get("options"), list) and len(q["options"]) == 4
         ]
 
-        print(f"✅ Generated {len(questions)} diagnostic questions")
-        return {"questions": questions}
+        # Topics as WE grouped them, so the knowledge map renders the same
+        # names the plan was built from. Letting the frontend re-derive topic
+        # names with its own fuzzy matcher would give two sources of truth that
+        # drift, and the student would see one topic appear twice under
+        # near-identical spellings.
+        asked_topics = []
+        for q in questions:
+            t = (q.get("topic") or "").strip()
+            if t and t not in asked_topics:
+                asked_topics.append(t)
+
+        print(f"✅ Generated {len(questions)} diagnostic questions over {len(asked_topics)} topics")
+        return {
+            "questions": questions,
+            "topics": asked_topics,
+            "focusTopics": focus_topics,
+        }
 
     except json.JSONDecodeError as e:
         print(f"❌ JSON parse error in diagnostic quiz: {e}")
@@ -3846,6 +4139,142 @@ Return ONLY a valid JSON array (no markdown, no explanation):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# NARRATION VOICE PASS
+#
+# The knowledge map's sentences are hand-written templates. That is what
+# makes them safe — they cannot hallucinate a claim about a student's
+# performance, and their behaviour is unit-tested. It is also what makes
+# them feel templated on the second and third plan, which is the slow
+# version of "this feels robotic".
+#
+# So: the LOGIC still decides what is true and which claims get made. This
+# endpoint only rewrites the WORDING. If it fails, is slow, or returns
+# anything that fails validation, the caller keeps the templates and the
+# student never knows there was a second path.
+# ══════════════════════════════════════════════════════════════════════════
+
+# Register per countdown phase. The map and the dashboard already agree on
+# these phases; this keeps the VOICE agreeing with them too.
+NARRATION_REGISTER = {
+    "steady": "relaxed and encouraging — there is genuinely plenty of time",
+    "focus": "focused and businesslike, still warm",
+    "final": "calm and direct, no false comfort, no panic",
+    "examDay": "steady and reassuring; nothing that sounds like there is time to learn more",
+    "past": "matter-of-fact and kind",
+    "undated": "easy-going",
+}
+
+MAX_NARRATION_LINES = 12
+MAX_NARRATION_CHARS = 260
+
+
+def _digits_in(text: str) -> set:
+    """Digit runs in a string. Used to prove the rewrite invented no numbers."""
+    return set(re.findall(r"\d+", text or ""))
+
+
+def validate_narration(originals: list, rewritten, protected_terms=None) -> bool:
+    """Reject a rewrite that changed anything that matters.
+
+    All-or-nothing on purpose. Mixing rewritten and template lines produces a
+    message that changes voice halfway through, which reads worse than either
+    version on its own.
+    """
+    if not isinstance(rewritten, list) or len(rewritten) != len(originals):
+        return False
+
+    terms = [t for t in (protected_terms or []) if t]
+
+    for original, new in zip(originals, rewritten):
+        if not isinstance(new, str):
+            return False
+        new = new.strip()
+        if not new or len(new) > MAX_NARRATION_CHARS:
+            return False
+
+        # No invented numbers. This is the one that stops "you're 80% ready"
+        # appearing under a screen that deliberately shows no percentages.
+        if not _digits_in(new).issubset(_digits_in(original)):
+            return False
+
+        # A topic named in the original must still be named. Otherwise the
+        # model can quietly generalise "Fluid Balance" into "your weak area"
+        # and the map stops being about her.
+        for term in terms:
+            if term.lower() in original.lower() and term.lower() not in new.lower():
+                return False
+
+    return True
+
+
+@app.post("/study/narrate")
+async def narrate_study_map(request: NarrationRequest):
+    """Voice pass over the knowledge-map narration. Never quota-gated: it is
+    a few hundred nano-model tokens, and it runs before the student has been
+    shown anything she could be charged for."""
+    lines = [l for l in (request.lines or []) if isinstance(l, str) and l.strip()]
+    if not lines or len(lines) > MAX_NARRATION_LINES:
+        return {"lines": None, "reason": "nothing_to_do"}
+
+    try:
+        language = _language_for_prompt(request.language)
+        register = NARRATION_REGISTER.get(request.phase or "", "warm and natural")
+
+        numbered = "\n".join("%d. %s" % (i + 1, l) for i, l in enumerate(lines))
+
+        prompt = f"""Rewrite each line so it sounds like a real tutor talking, not a template.
+
+ABSOLUTE RULES:
+- Return EXACTLY {len(lines)} lines, in the same order, one rewrite per line.
+- Keep the MEANING and every FACT identical. Add nothing: no new advice, no
+  praise, no numbers, no claims that are not already in the line.
+- NEVER introduce a number that is not already in that line.
+- Keep every proper noun exactly as written (topic names, exam names).
+- Keep each line roughly the same length. Short. Spoken, not written.
+- Contractions are good. Sentence fragments are fine.
+- No greetings, no emoji, no sign-offs, no bullet points.
+- Write in {language}.
+
+TONE: {register}
+
+LINES:
+{numbered}
+
+Return ONLY a JSON array of {len(lines)} strings."""
+
+        # Cheapest model in the stack. This is a paraphrase of text that is
+        # already correct, which is about the easiest job an LLM can be given.
+        llm = ChatOpenAI(model="gpt-4.1-nano", temperature=0.85)
+        response = await llm.ainvoke(prompt)
+        content = (response.content or "").strip()
+
+        if "```" in content:
+            for part in content.split("```"):
+                stripped = part.strip()
+                if stripped.startswith("json"):
+                    stripped = stripped[4:].strip()
+                if stripped.startswith("["):
+                    content = stripped
+                    break
+
+        rewritten = json.loads(content)
+        rewritten = [str(x).strip() for x in rewritten] if isinstance(rewritten, list) else None
+
+        if not validate_narration(lines, rewritten, request.protected_terms):
+            print("🗣️ Narration rejected by validation — falling back to templates")
+            return {"lines": None, "reason": "failed_validation"}
+
+        print(f"🗣️ Narration voiced ({len(rewritten)} lines)")
+        return {"lines": rewritten}
+
+    except Exception as e:
+        # Never fatal. The templates are a complete, shipped experience.
+        print(f"⚠️ Narration voice pass failed ({e}) — falling back to templates")
+        return {"lines": None, "reason": "error"}
 
 @app.post("/study/plan-review")
 async def generate_review_plan(request: StudyReviewPlanRequest):
@@ -4105,6 +4534,391 @@ If the request is out of scope, return:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# STUDY NOTE — what the tutor wrote down about this quiz.
+#
+# The format-pattern debrief below is strict on purpose, and it says nothing
+# on most nodes: a standard quiz is MCQ-only, and you cannot find a pattern
+# ACROSS formats in a set that only has one. So the common case fell through
+# to a placeholder — "I'm learning how you think, 2 more of these and I
+# should have something specific" — which is a promise to observe her rather
+# than an observation, shown after she has just answered five questions we
+# could have read.
+#
+# This reads them. The same discipline applies as everywhere else here:
+#
+#   PYTHON decides which honest thing there is to say, from the actual
+#   right/wrong pattern. The MODEL only writes the sentence.
+#
+# Three cases, because they are genuinely different and a model left to pick
+# would blur them:
+#   · 2+ misses  — look for what the missed questions have in common
+#   · 1 miss     — name that one plainly; a single miss is not a theme
+#   · 0 misses   — say what she demonstrated, not "well done"
+# ══════════════════════════════════════════════════════════════════════════
+
+STUDY_NOTE_MAX_CHARS = 260      # reflection notes (lesson / audio / map)
+STUDY_TAKEAWAY_MAX_CHARS = 130  # the one-line takeaway on a scored node
+
+
+def _trim_note(note, max_sentences=2):
+    """
+    Hold a note to its sentence budget.
+
+    The prompt states the limit and the model mostly complies, but "mostly" is
+    not a limit — and the extra sentence is reliably the one that restates the
+    first, on a card the student reads in about four seconds. Trimmed rather
+    than rejected: a good sentence plus a redundant one is still worth showing
+    once the redundant one is gone.
+    """
+    parts = re.findall(r"[^.!?]+[.!?]+", note or "")
+    if len(parts) <= max_sentences:
+        return (note or "").strip()
+    return "".join(parts[:max_sentences]).strip()
+
+
+async def _build_study_note(request, language_label):
+    """One or two sentences about the node just finished, or None."""
+    items = [i for i in (request.items or []) if getattr(i, "question", "")]
+    if not items:
+        return None
+
+    missed = [i for i in items if not i.correct]
+    got = [i for i in items if i.correct]
+
+    # Flashcards are recall, not reasoning: there is no distractor to fall for
+    # and no format to pattern-match, so a note that talks about "questions"
+    # and "how you answered" describes work she did not do. Naming the unit
+    # correctly is the whole difference between a note that sounds like it
+    # watched her and one that was clearly written for something else.
+    is_cards = request.node_type == "flashcard"
+    unit = "cards" if is_cards else "questions"
+    one_unit = "card" if is_cards else "question"
+    verb = "could not recall" if is_cards else "missed"
+
+    def brief(entries, limit=4):
+        return chr(10).join(
+            "- %s%s" % (
+                (e.question or "")[:180],
+                (" [why: %s]" % (e.rationale or "")[:120]) if e.rationale else "",
+            )
+            for e in entries[:limit]
+        )
+
+    # A clean sweep has to come first, because "what do the misses have in
+    # common" is only answerable when something was NOT missed. Run through
+    # the theme branch, a 0-of-5 produced the topic title back in longer
+    # words — the emptiest thing on a screen whose whole claim is that it
+    # watched her. At zero recall the valuable sentence is not a diagnosis,
+    # it is the first fact she can carry into the re-teach.
+    if missed and not got:
+        mode = "blank"
+        task = (
+            "She missed EVERY one. There is no contrast to draw and no theme to "
+            "find, so do not look for one — and do not tell her what the topic "
+            "was, she has just spent ten minutes on it. Give her ONE thing to "
+            "hold onto instead: the single most useful fact from the answers "
+            "below, stated plainly enough that she could repeat it back. This is "
+            "the last thing she reads before being taught this again, so make it "
+            "the foothold."
+        )
+        body = "SHE MISSED ALL OF THESE. THE CORRECT ANSWERS:" + chr(10) + brief(missed, 5)
+    elif len(missed) >= 2:
+        mode = "theme"
+        task = (
+            f"She {verb} these. Say what TRIPPED HER UP — what the ones she got "
+            "wrong have in common, the kind of thinking they share, not the topic "
+            "name. Make it unmistakable that you are describing the misses: a "
+            "sentence that could be read as praise for a thing she failed at is "
+            "worse than saying nothing. If they genuinely have nothing in common, "
+            "say that instead; do not invent a theme."
+        )
+        body = "MISSED:" + chr(10) + brief(missed) + chr(10) + chr(10) + "GOT RIGHT:" + chr(10) + brief(got, 3)
+    elif len(missed) == 1:
+        mode = "single"
+        task = (
+            f"She {verb} exactly one. Name what that single {one_unit} turned on, in "
+            "plain words. Do NOT describe it as a pattern or a weakness - it is one "
+            f"{one_unit}."
+        )
+        body = "MISSED:" + chr(10) + brief(missed) + chr(10) + chr(10) + "GOT RIGHT:" + chr(10) + brief(got, 3)
+    else:
+        mode = "clean"
+        task = (
+            "She got everything right. Name in ONE short sentence the kind of "
+            f"{'recall' if is_cards else 'reasoning'} this took — the skill, not the "
+            f"content. Do NOT list or summarise what the {unit} were about: she just "
+            "answered them and reading them back to her is the least interesting "
+            "thing you could do. It should land as an observation about her, not as "
+            "congratulation. No exclamation marks."
+        )
+        body = "ALL CORRECT:" + chr(10) + brief(got)
+
+    prompt = f"""You are a tutor naming the ONE thing a student should take away from
+the {unit} she has just finished.
+
+{task}
+
+THIS IS A TAKEAWAY, NOT A SENTENCE ABOUT HER. It is displayed on its own as a
+single line she can carry away, so name the THING — never narrate what happened.
+
+  BAD:  "You missed the question about why oxygen at 15 L/min and bag-mask
+         ventilation are used in respiratory distress; it turned on what the
+         high flow actually does."
+  GOOD: "Why high-flow oxygen and bag-mask ventilation are used."
+
+  BAD:  "You couldn't recall what the first step in airway management is."
+  GOOD: "Jaw-thrust first, not head-tilt — the neck may be injured."
+
+RULES:
+- ONE line. Under 14 words. No second sentence.
+- No preamble. Never open with "You missed", "You couldn't recall", "You
+  struggled with", "The question about" or "This card was about".
+- Plain, everyday words. Say "hard to tell apart" and not "difficult to
+  differentiate", "what to do first" and not "prioritisation of interventions".
+  Keep the clinical terms she is actually studying; simplify everything around
+  them. If it needs reading twice, rewrite it.
+- Concrete and specific to the {unit} below. No generic study advice.
+- NEVER just restate the topic in longer words. She has just spent ten minutes
+  on it, so a line she could have written before starting is worth nothing.
+- No score, no percentages, no numbers you were not given.
+- No praise words ("great", "excellent", "well done"). Observe, do not cheer.
+- Write in {language_label}.
+
+TOPIC: {request.topic}
+
+{body}
+
+Return ONLY the note text."""
+
+    try:
+        llm = ChatOpenAI(model="gpt-4.1-nano", temperature=0.7)
+        response = await llm.ainvoke(prompt)
+        note = _trim_note((response.content or "").strip().strip('"'), max_sentences=1)
+
+        # Cheap guards. The takeaway asserts something about her work, so a
+        # runaway or empty response is dropped rather than shown. The cap is
+        # tight because this renders as ONE line under a "Focus on" label —
+        # a paragraph there is the thing the whole screen was redesigned away
+        # from, and truncating mid-thought would be worse than showing nothing.
+        if not note or len(note) > STUDY_TAKEAWAY_MAX_CHARS:
+            return None
+        if re.search(r"\d+\s*%", note):     # never smuggle a score back in
+            return None
+        # A preamble survived the instruction; the line is about the event
+        # rather than the content, which is exactly what it must not be.
+        if re.match(r"^\s*(you|she)\b", note, re.I):
+            return None
+
+        print(f"   study note ({mode}): {note[:70]}")
+        return {"text": note, "mode": mode}
+    except Exception as e:
+        print(f"   study note failed ({e})")
+        return None
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# REFLECTION NOTE — the tutor's note on a node with no right or wrong.
+#
+# Lessons, audio and concept maps are most of a plan and produced nothing:
+# a green tick, "You finished the lesson on X", "Up next: quiz on Y". True,
+# and written before she arrived. A student paying for insight into her own
+# performance got insight on roughly half her nodes and inventory on the rest.
+#
+# There is no score to diagnose here, so the temptation is to praise — and
+# praise for reading a page is exactly the flattery this codebase refuses
+# everywhere else. What actually makes a note on a lesson worth reading is
+# CONNECTION: what she just studied, set against what her record says she
+# keeps getting wrong.
+#
+#     "This one wasn't filler for you. Afterload has cost you three
+#      questions in this plan — it's the thing you keep half-remembering."
+#
+# That is a claim about HER, and every part of it is computed here:
+#
+#   PYTHON decides whether the node genuinely touched a live struggle, by
+#   token overlap against the concept ledger. The MODEL only writes the
+#   sentence, and is told explicitly when it may NOT claim a link.
+#
+# Four modes, because they are different situations and a model left to
+# choose would flatten them into the same warm paragraph:
+#   · addressed  — the node covered something she is currently missing
+#   · groundwork — she has a record, but this node did not touch it
+#   · fresh      — no record yet; say what this sets up, claim nothing
+#   · skipped    — she skipped it. Do not narrate studying that didn't happen.
+# ══════════════════════════════════════════════════════════════════════════
+
+# Words that overlap between any two nursing topics and so prove nothing.
+_LINK_STOPWORDS = {
+    "the", "and", "for", "with", "from", "that", "this", "your", "you",
+    "nursing", "patient", "patients", "care", "management", "assessment",
+    "review", "intro", "introduction", "overview", "basics", "concepts",
+    "understanding", "clinical", "practice", "study", "part", "key",
+}
+
+
+def _link_tokens(text):
+    """Significant lowercase tokens of a label, for overlap matching."""
+    return {
+        w for w in re.findall(r"[a-z]{4,}", (text or "").lower())
+        if w not in _LINK_STOPWORDS
+    }
+
+
+def _matched_struggles(topic, covered, struggles, limit=2):
+    """
+    Which of her live struggles this node actually touched.
+
+    Deliberately conservative: a shared significant token, nothing cleverer.
+    A false positive here produces the single worst sentence this product can
+    say — "this covered the thing you keep missing" about a lesson that did
+    not — so the bar is a word she can see in both places, and the fallback
+    when nothing matches is to claim no link at all.
+    """
+    haystack = _link_tokens(topic)
+    for c in covered or []:
+        haystack |= _link_tokens(c)
+    if not haystack:
+        return []
+
+    hits = []
+    for label in struggles or []:
+        if _link_tokens(label) & haystack:
+            hits.append(label)
+    return hits[:limit]
+
+
+async def _build_reflection_note(request, language_label):
+    """
+    One or two sentences about an unscored node, plus the evidence behind it.
+
+    Returns {"text", "mode", "linked"} or None. `linked` is the struggle
+    labels that were actually matched — the UI shows those itself, so the
+    number of times something has cost her is never phrased by the model.
+    """
+    topic = request.topic or ""
+    covered = [c for c in (request.covered or []) if c][:6]
+    linked = _matched_struggles(topic, covered, request.struggles)
+    # Something she used to miss and has since answered right twice running.
+    # Only consulted when nothing is still live, so a note never celebrates a
+    # fix while quietly sitting on a gap that is still open.
+    fixed = [] if linked else _matched_struggles(topic, covered, request.resolved)
+
+    if request.skipped:
+        mode = "skipped"
+        task = (
+            "She SKIPPED this one — she did not study it. Do not describe it as "
+            "finished, do not praise her, and do not scold her. Acknowledge the "
+            "skip in a single neutral clause and say plainly what it means for "
+            "what comes next. Skipping is allowed here."
+        )
+    elif linked:
+        mode = "addressed"
+        task = (
+            "This is the important case. What she just studied covers something "
+            "she has been GETTING WRONG, listed below under STILL MISSING. Tell "
+            "her that connection directly — that this one was not filler for "
+            "her specifically, and name the thing. Do not give a count or any "
+            "number; the evidence is shown separately underneath your note."
+        )
+    elif fixed:
+        mode = "reinforced"
+        task = (
+            "What she just studied covers something she USED TO get wrong and "
+            "has since answered correctly, listed below under ALREADY TURNED "
+            "AROUND. Say that — she fixed this, and this was another pass over "
+            "it. State it as something she did, not as a compliment, and give "
+            "no count; the evidence is shown separately underneath your note."
+        )
+    elif request.struggles:
+        mode = "groundwork"
+        task = (
+            "She has a record of things she is getting wrong, but this node did "
+            "NOT cover any of them. You therefore may NOT claim it addressed a "
+            "weakness — saying so would be false. Instead say what this one "
+            "builds toward, concretely, based on what it covered."
+        )
+    else:
+        mode = "fresh"
+        task = (
+            "This is early — there is no record of her missing anything yet, so "
+            "you know nothing about her performance and must not imply that you "
+            "do. Say what she now has in hand from this, and what it sets up. "
+            "Forward-looking, not evaluative."
+        )
+
+    NL = chr(10)
+    covered_block = NL.join("- %s" % c[:120] for c in covered) if covered else "  (not itemised)"
+    # The heading has to match the mode: handing the model a list headed
+    # "STILL MISSING" when the point is that she fixed those would produce a
+    # note that contradicts the evidence chips rendered right beneath it.
+    if fixed:
+        evidence_labels = fixed
+        evidence_heading = "ALREADY TURNED AROUND (she used to miss these, now she doesn't)"
+    else:
+        evidence_labels = (linked or request.struggles or [])[:4]
+        evidence_heading = "STILL MISSING (things she has answered wrong in this study plan)"
+    struggle_block = NL.join("- %s" % s[:80] for s in evidence_labels) or "  (nothing yet)"
+    next_block = (
+        f"{request.next_type or 'step'} on \"{request.next_label}\""
+        if request.next_label else "(end of her plan for now)"
+    )
+
+    node_word = {
+        "lesson": "lesson", "audio": "audio explanation", "mindmap": "concept map",
+    }.get(request.node_type, request.node_type or "step")
+
+    prompt = f"""You are a tutor writing a short private note to a nursing student who has
+just worked through a {node_word} on "{topic}".
+
+{task}
+
+WHAT IT COVERED:
+{covered_block}
+
+{evidence_heading}:
+{struggle_block}
+
+UP NEXT: {next_block}
+
+RULES:
+- ONE sentence. Two only if the second earns its place. Under 35 words total.
+- Plain, everyday words. Short sentences. Keep the clinical terms she is
+  actually studying; simplify everything around them. If a sentence needs
+  reading twice, rewrite it.
+- Address her as "you". Use contractions. Sound like a person.
+- NEVER just restate what the node was about in longer words — she has just
+  worked through it, so a sentence she could have written before starting is
+  worth nothing.
+- No numbers, no percentages, no counts.
+- No praise words ("great", "excellent", "well done", "nice work"), no
+  exclamation marks, and never congratulate her for reading something.
+- Never use the words "analysis", "performance", "detected" or "weakness".
+- Do not claim anything about how she answers that is not stated above.
+- Write in {language_label}.
+
+Return ONLY the note text."""
+
+    try:
+        llm = ChatOpenAI(model="gpt-4.1-nano", temperature=0.7)
+        response = await llm.ainvoke(prompt)
+        note = _trim_note((response.content or "").strip().strip('"'))
+
+        # Same guards as the scored note: this asserts something about her, so
+        # a runaway, empty or number-smuggling response is dropped rather than
+        # shown. A missing note degrades to the plain acknowledgement.
+        if not note or len(note) > STUDY_NOTE_MAX_CHARS:
+            return None
+        if re.search(r"\d+\s*%", note):
+            return None
+
+        print(f"   reflection note ({mode}): {note[:70]}")
+        return {"text": note, "mode": mode, "linked": fixed or linked}
+    except Exception as e:
+        print(f"   reflection note failed ({e})")
+        return None
+
+
 @app.post("/study/node-debrief")
 async def node_debrief(request: NodeDebriefRequest):
     """
@@ -4134,6 +4948,49 @@ async def node_debrief(request: NodeDebriefRequest):
     print(f"NODE INSIGHT - chat: {request.chat_id} | topic: {request.topic}")
     print(f"   {request.score_percent}% over {len(request.items)} items")
     print("=" * 60)
+
+    # ── Unscored nodes: there is no pattern to find ──────────────────────
+    # A lesson, an audio explanation or a concept map produce no right/wrong,
+    # so every one of the format buckets below is empty and the whole pattern
+    # apparatus would return "no pattern yet" — a true statement dressed as a
+    # finding. These get the reflection note instead, which is built from her
+    # record rather than from answers she never gave.
+    UNSCORED = ("lesson", "audio", "mindmap")
+    if request.node_type in UNSCORED:
+        note = await _build_reflection_note(request, _language_for_prompt(request.language))
+        return {
+            "hasPattern": False,
+            "noticed": "",
+            "evidence": [],
+            "pattern": "",
+            "skill": "",
+            "toPattern": 0,
+            "note": (note or {}).get("text", ""),
+            "noteMode": (note or {}).get("mode", ""),
+            "linked": (note or {}).get("linked", []),
+            "stillLooking": "",
+            "generated": bool(note),
+        }
+
+    # ── Flashcards: scored, but not across formats ───────────────────────
+    # Every card is the same shape, so the strong-bucket/weak-bucket split
+    # below can never fire and would spend a round trip proving it. The note
+    # reads the cards directly, which is the only real finding available.
+    if request.node_type == "flashcard":
+        note = await _build_study_note(request, _language_for_prompt(request.language))
+        return {
+            "hasPattern": False,
+            "noticed": "",
+            "evidence": [],
+            "pattern": "",
+            "skill": "",
+            "toPattern": 0,
+            "note": (note or {}).get("text", ""),
+            "noteMode": (note or {}).get("mode", ""),
+            "linked": [],
+            "stillLooking": "",
+            "generated": bool(note),
+        }
 
     # ── Buckets ──────────────────────────────────────────────────────────
     # Three ways a nursing question can be hard, each needing a different fix:
@@ -4190,16 +5047,34 @@ async def node_debrief(request: NodeDebriefRequest):
     MIN_WEAK = 3
     MIN_STRONG = 3
 
+    # Every accuracy test below is written `is not None` rather than leaning on
+    # truthiness, and that is not style — it is the bug this replaces.
+    #
+    # acc() returns None for an unsampled bucket and a float otherwise, so the
+    # guards used to read `(acc(...) or 1) < 0.55` to mean "unsampled buckets
+    # can't be the weak one". But 0.0 is falsy too. A bucket she got ENTIRELY
+    # wrong scored as 1.0 and was dropped from the candidates — so the student
+    # who missed every single select-all, the clearest weakness this endpoint
+    # can ever observe, was the one student it had nothing to say to. She got
+    # "I'm still figuring out your pattern" instead of the pattern.
+    #
+    # The totals are already checked on the same line, so acc() cannot be None
+    # by the time it is compared; the explicit test is kept anyway so nobody
+    # reintroduces a fallback to make it read shorter.
     strong_bucket = None
     k = combined["knowledge"]
-    if k["total"] >= MIN_STRONG and (acc(k) or 0) >= 0.75:
+    k_acc = acc(k)
+    if k["total"] >= MIN_STRONG and k_acc is not None and k_acc >= 0.75:
         strong_bucket = "knowledge"
 
-    weak_candidates = [
-        (b, combined[b]) for b in ("priority", "multi")
-        if combined[b]["total"] >= MIN_WEAK and (acc(combined[b]) or 1) < 0.55
-    ]
-    weak_candidates.sort(key=lambda kv: acc(kv[1]) or 0)
+    weak_candidates = []
+    for b in ("priority", "multi"):
+        b_acc = acc(combined[b])
+        if combined[b]["total"] >= MIN_WEAK and b_acc is not None and b_acc < 0.55:
+            weak_candidates.append((b, b_acc))
+    # Weakest first — sorting on the accuracy already computed, rather than
+    # recomputing it through another falsiness fallback.
+    weak_candidates.sort(key=lambda kv: kv[1])
     weak_bucket = weak_candidates[0][0] if weak_candidates else None
 
     if not (strong_bucket and weak_bucket):
@@ -4223,6 +5098,12 @@ async def node_debrief(request: NodeDebriefRequest):
         to_pattern = max(shortfalls) if shortfalls else 0
 
         print(f"   no pattern yet - insufficient evidence (needs {to_pattern} more)")
+
+        # No format pattern does not mean nothing to say. Read the actual
+        # questions and write a note about THIS quiz, which is what the
+        # student just spent her time on.
+        note = await _build_study_note(request, _language_for_prompt(request.language))
+
         return {
             "hasPattern": False,
             "noticed": "",
@@ -4230,6 +5111,8 @@ async def node_debrief(request: NodeDebriefRequest):
             "pattern": "",
             "skill": "",
             "toPattern": to_pattern,
+            "note": (note or {}).get("text", ""),
+            "noteMode": (note or {}).get("mode", ""),
             "stillLooking": "I'm still figuring out your pattern. Keep going and I'll look for one.",
             "generated": False,
         }

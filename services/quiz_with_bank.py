@@ -537,6 +537,15 @@ async def stream_quiz_questions(
                     if question_data and 'questionType' not in question_data:
                         question_data['questionType'] = 'mcq'
 
+                # Misconception-ledger key. _generate_single_question keeps a
+                # short label from its own reasoning; SATA / case-study
+                # generators do not, so fall back to the concept seed this
+                # question was grown from. Either way every question leaves
+                # here carrying a `concept`, because a question with no key is
+                # invisible to progress tracking.
+                if question_data and not question_data.get('concept'):
+                    question_data['concept'] = str(concept)[:120]
+
                 return (concept_idx, current_question_type, question_data)
 
             except Exception as e:

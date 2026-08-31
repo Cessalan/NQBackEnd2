@@ -78,6 +78,14 @@ class StudyPlanRequest(BaseModel):
     upload_ids: Optional[List[str]] = []  # Optional: specific upload IDs to focus on
     language: str = "en"                  # Language for content generation
     userPreferences: Optional[dict] = {}  # Onboarding preferences (reviewFormat, userStage, etc)
+    # What the pre-plan diagnostic learned: {topic_name: percent_correct}.
+    #
+    # OPTIONAL ON PURPOSE. Absent — a skipped diagnostic, or a client built
+    # before this existed — must reproduce the old uniform plan exactly.
+    # _weight_path_by_diagnostic returns its input untouched on a falsy value,
+    # so the skip path is the same code path rather than a second one to keep
+    # working.
+    diagnostic: Optional[dict] = None
 
 
 class StudyItemRequest(BaseModel):
@@ -158,15 +166,55 @@ class StudyMindmapRequest(BaseModel):
     language: str = "en"
 
 
+class NarrationRequest(BaseModel):
+    """
+    Rephrase already-written tutor lines so they sound spoken rather than
+    templated.
+
+    This is a PARAPHRASE job, never a generation job. Every claim in `lines`
+    was decided by deterministic code that knows what the student actually
+    got right — the model is only allowed to change the wording. That
+    distinction is the entire safety model here: these sentences assert
+    things about her performance ("you've got that one"), and a model free
+    to invent them would eventually tell someone she is strong at something
+    she just failed.
+
+    `protected_terms` are the topic names that must survive the rewrite
+    intact, so validation can reject a response that renamed her subject.
+    """
+    chat_id: str
+    lines: List[str]
+    language: str = "en"
+    phase: Optional[str] = None          # steady|focus|final|examDay|past|undated
+    days_to_exam: Optional[int] = None
+    protected_terms: Optional[List[str]] = []
+
+
 class DiagnosticQuizRequest(BaseModel):
     """
-    Request to generate 5 breadth-first diagnostic questions.
-    Called before showing the study plan to establish baseline proficiency.
-    One question per major topic, varying difficulty easy→medium.
+    Request to generate the pre-plan diagnostic.
+
+    Establishes the baseline the whole experience is measured against: which
+    topics get taught, in what order, and — later — what "you got stronger"
+    is compared to.
+
+    Note this endpoint is deliberately NOT quota-gated. Metering a student
+    before she has been shown anything of value is the worst possible first
+    experience, and it would be invisible to us in testing because we are all
+    on Pro accounts.
     """
     chat_id: str
     upload_ids: Optional[List[str]] = []
     language: str = "en"
+    # Was being sent by the frontend wrapper and silently dropped, because the
+    # model never declared it.
+    userPreferences: Optional[dict] = {}
+    # Topics she told us were hardest, in onboarding Q2. Guaranteed at least
+    # one question each, which turns a self-report into a measurement — and
+    # when the map contradicts her ("you said pharmacology, but you're solid
+    # there — it's fluid balance"), that contradiction is the moment the
+    # product stops feeling like a quiz generator.
+    hardestTopics: Optional[List[str]] = []
 
 
 # ============================================================================
@@ -218,7 +266,11 @@ class NodeDebriefRequest(BaseModel):
     """
     chat_id: str
     topic: str = ""
-    node_type: str = "quiz"                       # quiz | exam | flashcard
+    # quiz | exam | flashcard | lesson | audio | mindmap.
+    # The last three are UNSCORED — they carry no items, so the debrief drops
+    # the format-pattern machinery and writes from `covered` / `struggles`
+    # instead. See node_debrief's scored/unscored split.
+    node_type: str = "quiz"
     score_percent: int = 0
     items: List[NodeDebriefItem] = []
     days_until_exam: Optional[int] = None         # Sharpens the "work on" line
@@ -228,3 +280,16 @@ class NodeDebriefRequest(BaseModel):
     # "this keeps happening" instead of judging a single node in isolation —
     # the difference between feedback about a quiz and feedback about her.
     plan_formats: List[dict] = []
+
+    # ── Unscored nodes (lesson, audio, mindmap) ──────────────────────────
+    # A lesson produces no right/wrong, so there is nothing to diagnose. What
+    # makes a note about one worth reading is CONNECTION: tying what she just
+    # studied to what her record says she has been getting wrong. All three
+    # of these come from data the client already holds, so none of it is the
+    # model's invention — it only writes the sentence around them.
+    covered: List[str] = []       # key points / concepts the node actually covered
+    struggles: List[str] = []     # concept labels she is currently missing (ledger)
+    resolved: List[str] = []      # concept labels she has demonstrably fixed
+    skipped: bool = False         # she tapped Skip (audio) or left the map early
+    next_label: str = ""          # the planned next node, so the note can point forward
+    next_type: str = ""

@@ -2103,6 +2103,21 @@ async def _generate_single_question(
             for k, v in reasoning.items():
                 print(f"   {k}: {v}")
 
+        # ...except `concept`, which we keep. It is the short human label for
+        # what this question tests ("preload vs afterload"), and it is the KEY
+        # of the misconception ledger in StudySessionService.updateStudyPerformance.
+        #
+        # Why the label and not the question text: the ledger has to recognise
+        # that a VARIANT question is testing the same misconception, so that
+        # "you were confusing preload and afterload, and now you aren't" can be
+        # computed rather than asserted. Question text differs per variant; the
+        # label does not. Keeping it here costs nothing — the model was already
+        # producing it and we were dropping it on the floor.
+        if isinstance(reasoning, dict):
+            concept_label = str(reasoning.get("concept") or "").strip()
+            if concept_label:
+                parsed_question["concept"] = concept_label[:120]
+
         answer = parsed_question.get('answer', '')
         if answer:
             answer_letter = answer[0]

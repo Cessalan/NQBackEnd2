@@ -1,330 +1,51 @@
-INFO:     Started server process [27620]
+INFO:     Started server process [50192]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
 WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
-E0000 00:00:1785283726.161442   21496 alts_credentials.cc:93] ALTS creds ignored. Not running on GCP and untrusted ALTS is not enabled.
-INFO:stripe:message='Request to Stripe api' method=post url=https://api.stripe.com/v1/billing_portal/sessions
-INFO:stripe:message='Stripe API response' path=https://api.stripe.com/v1/billing_portal/sessions response_code=200
-INFO:stripe:message='Request to Stripe api' method=post url=https://api.stripe.com/v1/billing_portal/sessions
-INFO:stripe:message='Stripe API response' path=https://api.stripe.com/v1/billing_portal/sessions response_code=200
-INFO:stripe:message='Request to Stripe api' method=post url=https://api.stripe.com/v1/billing_portal/sessions
-INFO:stripe:message='Stripe API response' path=https://api.stripe.com/v1/billing_portal/sessions response_code=200
-INFO:services.quiz_with_bank:Question types requested: ['mcq', 'sata', 'casestudy']
-INFO:services.quiz_with_bank:Quiz mode: knowledge
-INFO:services.quiz_with_bank:Generating all 1 questions fresh via LLM (bank bypassed)
-INFO:services.quiz_with_bank:Question Bank result: 0 from bank, 1 to generate
-INFO:services.quiz_with_bank:Generating 1 questions via LLM (concept-first approach)...
-INFO:services.quiz_with_bank:🧠 Step 1: Extracting 1 unique concepts...
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
-INFO:services.quiz_with_bank:✅ Extracted 1 concepts for quiz generation
-INFO:services.quiz_with_bank:   Concept 1: The normal range for serum ammonia levels in patients with l...
-INFO:services.quiz_with_bank:✅ Got 1 concepts, generating one question per concept...
-INFO:services.quiz_with_bank:Question type distribution: ['mcq', 'sata', 'casestudy']
-INFO:services.quiz_with_bank:⚡ PARALLEL GENERATION: Starting 1 questions in parallel...
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
-INFO:services.quiz_with_bank:✅ Q1/1 (mcq): What is the normal range for serum ammonia levels ...
-INFO:services.quiz_with_bank:⚡ PARALLEL GENERATION COMPLETE: 1 questions generated
-INFO:services.quiz_with_bank:Quiz complete: 1 questions total (0 from bank, 1 generated)
-C:\Users\Billion\Desktop\NQBackEnd\NQBackEnd2\venv\Lib\site-packages\google\cloud\firestore_v1\base_collection.py:304: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
-  return query.where(field_path, op_string, value)
-INFO:services.quiz_with_bank:Question types requested: ['mcq', 'sata', 'casestudy']
-INFO:services.quiz_with_bank:Quiz mode: knowledge
-INFO:services.quiz_with_bank:Generating all 1 questions fresh via LLM (bank bypassed)
-INFO:services.quiz_with_bank:Question Bank result: 0 from bank, 1 to generate
-INFO:services.quiz_with_bank:Generating 1 questions via LLM (concept-first approach)...
-INFO:services.quiz_with_bank:🧠 Step 1: Extracting 1 unique concepts...
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
-INFO:services.quiz_with_bank:✅ Extracted 1 concepts for quiz generation
-INFO:services.quiz_with_bank:   Concept 1: The primary nursing intervention for preventing pressure ulc...
-INFO:services.quiz_with_bank:✅ Got 1 concepts, generating one question per concept...
-INFO:services.quiz_with_bank:Question type distribution: ['mcq', 'sata', 'casestudy']
-INFO:services.quiz_with_bank:⚡ PARALLEL GENERATION: Starting 1 questions in parallel...
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
-INFO:services.quiz_with_bank:✅ Q1/1 (mcq): What is the primary nursing intervention to preven...
-INFO:services.quiz_with_bank:⚡ PARALLEL GENERATION COMPLETE: 1 questions generated
-INFO:services.quiz_with_bank:Quiz complete: 1 questions total (0 from bank, 1 generated)
-INFO:     ('127.0.0.1', 55228) - "WebSocket /ws/claude-ws-quota-test-chat" [accepted]
-INFO:     connection open
-INFO:     connection closed
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
-INFO:     ('127.0.0.1', 59745) - "WebSocket /ws/RxotHtq7BHT9MAxNjB8X" [accepted]
-INFO:     connection open
-C:\Users\Billion\Desktop\NQBackEnd\NQBackEnd2\venv\Lib\site-packages\google\cloud\firestore_v1\base_collection.py:304: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
-  return query.where(field_path, op_string, value)
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
-INFO:     connection closed
-WARNING:pypdf._reader:Ignoring wrong pointing object 6 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 9 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 12 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 27 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 37 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 46 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 72 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 83 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 98 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 105 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 214 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 222 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 226 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 251 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 254 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 270 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 277 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 284 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 291 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 298 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 305 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 313 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 314 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 322 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 329 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 336 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 343 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 345 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 361 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 363 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 373 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 380 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 383 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 393 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 400 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 408 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 415 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 423 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 430 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 433 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 442 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 444 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 469 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 478 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 485 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 492 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 499 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 501 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 520 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 522 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 539 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 541 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 542 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 552 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 554 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 565 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 573 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 575 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 587 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 589 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 600 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 602 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 615 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 617 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 625 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 627 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 638 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 640 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 650 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 652 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 664 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 666 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 676 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 678 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 687 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 689 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 698 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 700 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 709 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 711 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 720 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 722 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 731 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 733 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 742 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 744 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 755 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 757 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 767 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 769 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 778 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 780 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 789 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 791 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 800 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 802 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 811 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 813 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 822 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 824 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 855 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 857 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 872 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 880 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 887 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 894 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 896 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 907 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 909 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 918 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 920 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 929 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 943 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 950 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 960 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 967 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 975 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 977 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 986 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 988 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 998 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1000 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1027 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1034 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1036 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1046 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1048 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1058 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1065 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1067 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1076 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1085 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1094 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1101 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1109 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1116 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1118 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1128 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1130 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1139 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1141 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1150 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1152 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1161 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1163 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1178 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1179 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1181 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1189 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1197 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1208 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1216 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1223 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1230 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1238 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1245 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1252 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1259 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1261 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1274 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1276 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1278 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1290 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1300 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1302 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1313 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1315 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1327 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1329 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1341 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1343 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1353 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1361 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1370 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1372 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1383 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1385 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1386 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1396 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1404 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1406 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1415 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1422 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1429 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1431 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1432 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1434 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1445 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1447 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1449 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1458 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1465 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1473 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1480 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1482 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1493 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1495 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1522 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1530 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1532 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1541 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1543 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1553 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1560 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1567 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1574 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1577 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1581 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1584 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1601 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1608 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1617 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1624 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1632 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1641 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1648 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1649 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1657 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1664 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1666 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1675 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1683 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1690 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1706 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1713 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1720 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1722 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1737 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1744 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1754 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1756 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1765 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1772 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1780 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1782 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1791 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1798 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1805 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1812 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1819 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1826 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1841 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1849 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1858 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1865 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1872 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1879 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1886 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1894 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1901 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1903 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1913 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1920 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1928 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1935 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1937 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1944 0 (offset 0)
-WARNING:pypdf._reader:Ignoring wrong pointing object 1945 0 (offset 0)
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
-INFO:faiss.loader:Loading faiss with AVX2 support.
-INFO:faiss.loader:Successfully loaded faiss with AVX2 support.
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+E0000 00:00:1788138314.367810   21132 alts_credentials.cc:93] ALTS creds ignored. Not running on GCP and untrusted ALTS is not enabled.
 C:\Users\Billion\Desktop\NQBackEnd\NQBackEnd2\venv\Lib\site-packages\google_crc32c\__init__.py:29: RuntimeWarning: As the c extension couldn't be imported, `google-crc32c` is using a pure python implementation that is significantly slower. If possible, please configure a c build environment and compile the extension
   warnings.warn(_SLOW_CRC32C_WARNING, RuntimeWarning)
+INFO:faiss.loader:Loading faiss with AVX2 support.
+INFO:faiss.loader:Successfully loaded faiss with AVX2 support.
+INFO:services.quiz_with_bank:Question types requested: ['mcq', 'sata', 'casestudy']
+INFO:services.quiz_with_bank:Quiz mode: knowledge
+INFO:services.quiz_with_bank:Generating all 5 questions fresh via LLM (bank bypassed)
+INFO:services.quiz_with_bank:Question Bank result: 0 from bank, 5 to generate
+INFO:services.quiz_with_bank:Generating 5 questions via LLM (concept-first approach)...
 INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:services.quiz_with_bank:🧠 Step 1: Extracting 5 unique concepts...
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:services.quiz_with_bank:✅ Extracted 5 concepts for quiz generation
+INFO:services.quiz_with_bank:   Concept 1: Immobilization of the cervical spine must be ensured first d...
+INFO:services.quiz_with_bank:   Concept 2: Use of a rigid suction catheter is indicated to aspirate liq...
+INFO:services.quiz_with_bank:   Concept 3: Clinical signs of inhalation injury in trauma include facial...
+INFO:services.quiz_with_bank:   Concept 4: Administer oxygen at 15 L/min and assist ventilation with a ...
+INFO:services.quiz_with_bank:   Concept 5: Reevaluate airway, breathing, and circulation (ABCDE) and vi...
+INFO:services.quiz_with_bank:✅ Got 5 concepts, generating one question per concept...
+INFO:services.quiz_with_bank:Question type distribution: ['mcq', 'casestudy', 'mcq', 'mcq', 'sata']
+INFO:services.quiz_with_bank:⚡ PARALLEL GENERATION: Starting 5 questions in parallel...
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:services.quiz_with_bank:✅ Q1/5 (sata): Which of the following actions are essential when ...
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:services.quiz_with_bank:✅ Q2/5 (casestudy): Place the following nursing actions in order of pr...
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:services.quiz_with_bank:✅ Q3/5 (mcq): What must be ensured first during the airway asses...
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:services.quiz_with_bank:✅ Q4/5 (mcq): Which of the following clinical signs indicates an...
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:services.quiz_with_bank:✅ Q5/5 (mcq): What is the recommended oxygen flow rate and venti...
+INFO:services.quiz_with_bank:⚡ PARALLEL GENERATION COMPLETE: 5 questions generated
+INFO:services.quiz_with_bank:Quiz complete: 5 questions total (0 from bank, 5 generated)
 INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
 INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
 INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
@@ -332,40 +53,33 @@ INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1
 INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
 INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
 INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:services.quiz_with_bank:Question types requested: ['mcq', 'sata', 'casestudy']
+INFO:services.quiz_with_bank:Quiz mode: knowledge
+INFO:services.quiz_with_bank:Generating all 5 questions fresh via LLM (bank bypassed)
+INFO:services.quiz_with_bank:Question Bank result: 0 from bank, 5 to generate
+INFO:services.quiz_with_bank:Generating 5 questions via LLM (concept-first approach)...
 INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:services.quiz_with_bank:🧠 Step 1: Extracting 5 unique concepts...
 INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:services.quiz_with_bank:✅ Extracted 5 concepts for quiz generation
+INFO:services.quiz_with_bank:   Concept 1: Immobilization of the cervical spine must be ensured before ...
+INFO:services.quiz_with_bank:   Concept 2: Signs of airway obstruction include tongue collapse, presenc...
+INFO:services.quiz_with_bank:   Concept 3: Administration of oxygen at 15 liters per minute is indicate...
+INFO:services.quiz_with_bank:   Concept 4: Use of oropharyngeal or nasopharyngeal airways depends on th...
+INFO:services.quiz_with_bank:   Concept 5: Monitoring end-tidal CO2 (ETCO2) between 35 to 45 mmHg helps...
+INFO:services.quiz_with_bank:✅ Got 5 concepts, generating one question per concept...
+INFO:services.quiz_with_bank:Question type distribution: ['casestudy', 'mcq', 'mcq', 'mcq', 'sata']
+INFO:services.quiz_with_bank:⚡ PARALLEL GENERATION: Starting 5 questions in parallel...
 INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:services.quiz_with_bank:✅ Q1/5 (sata): Which of the following are TRUE regarding monitori...
 INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:services.quiz_with_bank:✅ Q2/5 (casestudy): Place the following nursing actions in order of pr...
 INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:services.quiz_with_bank:✅ Q3/5 (mcq): What is the indicated oxygen flow rate to support ...
 INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:services.quiz_with_bank:✅ Q4/5 (mcq): Which of the following is a recognized sign of air...
 INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:services.quiz_with_bank:✅ Q5/5 (mcq): Which statement correctly describes the use of oro...
+INFO:services.quiz_with_bank:⚡ PARALLEL GENERATION COMPLETE: 5 questions generated
+INFO:services.quiz_with_bank:Quiz complete: 5 questions total (0 from bank, 5 generated)
 INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
