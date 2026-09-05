@@ -89,7 +89,6 @@ def cached_language_conflicts(cached_language: str, text: str) -> bool:
 # Import your models
 from models.requests import (
     StatelessChatRequest, DocumentsEmbedRequest, SummaryRequest, SectionRequest, PlanRequest,
-    RecordingStartRequest, RecordingFinalizeRequest, RecordingCancelRequest,
 )
 
 # Import your orchestrator
@@ -144,6 +143,7 @@ from firebase_admin import credentials,storage
 from core.language import LanguageDetector
 
 from services.vectorstore_manager import vectorstore_manager
+from constants.nursing_frameworks import detect_frameworks
 
 # Study mode imports - reuse existing streaming generators
 from models.session import PersistentSessionContext
@@ -2223,6 +2223,23 @@ async def extract_file_insights_from_text(
             "filename": filename
         })
         
+        # ========================================
+        # FRAMEWORK DETECTION — on the FULL text
+        # ========================================
+        # Deliberately BEFORE the sampling below. That sampling reads three
+        # random 1,000-char windows, and a framework (the nursing process,
+        # Maslow, ABCDE...) is typically defined once, in one place — random
+        # windows miss it. This pass is pure keyword matching: no model call,
+        # no added latency, and it can afford to read everything.
+        #
+        # Frameworks are the closed set in constants/nursing_frameworks.py.
+        # An empty list is the normal result and means "this document teaches
+        # no framework we can test" — never a reason to loosen the thresholds.
+        detected_frameworks = detect_frameworks(text)
+        if detected_frameworks:
+            print(f"🧭 Frameworks in {filename}: " + ", ".join(
+                f'{f["id"]}({f["confidence"]})' for f in detected_frameworks))
+
         # Sample random sections for fast analysis
         text_length = len(text)
         
@@ -2258,8 +2275,13 @@ async def extract_file_insights_from_text(
 
         Example of what we want:
         - Document about sleep and testosterone → Topic: "Sleep deprivation reduces testosterone levels"
-        - Document about ABCDE assessment → Topic: "Emergency patient assessment protocol"
+        - Document about pressure injuries → Topic: "Staging pressure injuries and preventing them"
         - NOT: "Demographics, education levels, sample characteristics" (these are details, not the core topic)
+
+        Keep a named framework NAMED. If the document teaches the nursing process,
+        Maslow's hierarchy, ABCDE, SBAR or similar, say so by name rather than
+        paraphrasing it into a description — those names are how the student's
+        course and exam refer to it.
 
         Identify:
         1. Core topic (1-3 MAIN subjects this document is fundamentally about - the central thesis)
@@ -2310,6 +2332,10 @@ async def extract_file_insights_from_text(
                 "insights": []
             }
         
+        # Attached after the parse so the fallback path keeps them too: detection
+        # is deterministic and independent of whether the model returned valid JSON.
+        insights["frameworks"] = detected_frameworks
+
         print(f"✅ Extracted insights from {filename}:")
         print(f"   Topics: {insights.get('topics', [])}")
         print(f"   Concepts: {insights.get('concepts', [])[:3]}...")
@@ -2323,7 +2349,13 @@ async def extract_file_insights_from_text(
             "topics": insights.get("topics", []),
             "concepts": insights.get("concepts", [])[:5],  # Limit to 5 for UX
             "document_type": insights.get("document_type", ""),
-            "insights": insights.get("insights", [])[:3]  # Limit to 3 educational insights
+            "insights": insights.get("insights", [])[:3],  # Limit to 3 educational insights
+            # Only what a consumer needs to act: which framework, and how sure we
+            # are. The matched vocabulary stays server-side for debugging.
+            "frameworks": [
+                {"id": f["id"], "name": f["name"], "confidence": f["confidence"]}
+                for f in detected_frameworks
+            ]
         })
         
         return insights
@@ -2892,6 +2924,8 @@ async def generate_section(request: SectionRequest):
 # ============================================================================
 
 from models.requests import StudyPlanRequest, StudyItemRequest, StudyAudioRequest, StudyReviewPlanRequest, DiagnosticQuizRequest, StudyMindmapRequest, StudyInterpretRequest, StudyExamRequest, NodeDebriefRequest, NarrationRequest
+from models.requests import ExamDebriefTurnRequest
+from services.exam_debrief import run_debrief_turn as run_exam_debrief_turn
 import hashlib
 
 # ── Study node sizes ────────────────────────────────────────────────────────
@@ -4424,6 +4458,42 @@ Return ONLY valid JSON array in {prompt_language}:
 
     except Exception as e:
         print(f"❌ Review path generation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/exam-debrief/turn")
+async def exam_debrief_turn(request: ExamDebriefTurnRequest):
+    """
+    One turn of the conversation we have with a student after her exam.
+
+    Thin on purpose: everything that decides what to say lives in
+    services/exam_debrief.py. This endpoint exists to keep the ANTHROPIC_API_KEY
+    server-side and to give the frontend one shape to call.
+    """
+    student_turns = sum(1 for m in request.messages if m.role == "user")
+    print(f"\n🎓 EXAM DEBRIEF TURN — exam: {request.exam_name or '(unnamed)'} "
+          f"| student messages: {student_turns} | lang: {request.language}")
+
+    try:
+        result = await run_exam_debrief_turn(
+            messages=[m.dict() for m in request.messages],
+            exam_name=request.exam_name,
+            exam_date=request.exam_date,
+            days_after=request.days_after,
+            study_context=request.study_context,
+            language=_language_for_prompt(request.language),
+        )
+        print(f"   ↳ done={result['done']} | prepared={result['insights']['preparedness']} "
+              f"| tags={','.join(result['insights']['gap_tags']) or '-'}")
+        return result
+
+    except Exception as e:
+        # The frontend closes the conversation warmly on a failure rather than
+        # leaving her typing into something that never answers, and keeps
+        # whatever she already said. Nothing here is worth a retry loop.
+        print(f"❌ Exam debrief turn failed: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -6989,186 +7059,6 @@ async def files_proxy(chat_id: str, filename: str):
     except Exception as e:
         print(f"❌ [Files] Proxy failed for chats/{chat_id}/uploads/{filename}: {e}")
         raise HTTPException(status_code=500, detail=f"Proxy failed: {e}")
-
-
-# ============================================================================
-# CLASS RECORDING (chunked Whisper transcription)
-# ============================================================================
-from services import recording_service
-
-
-@app.post("/recordings/start")
-async def recording_start(req: RecordingStartRequest):
-    """Create a recording session. Returns {recording_id}."""
-    try:
-        return recording_service.start_recording(
-            user_id=req.user_id,
-            topic=req.topic or "",
-            chat_id=req.chat_id,
-            language=req.language or "en",
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        print(f"❌ [Recording] start failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to start recording: {e}")
-
-
-@app.post("/recordings/{recording_id}/chunk")
-async def recording_chunk(
-    recording_id: str,
-    audio: UploadFile = File(...),
-    chunk_index: int = Form(...),
-    duration_ms: int = Form(0),
-):
-    """
-    Upload a single audio chunk (≤25MB). Returns the transcribed text
-    for this chunk plus the cumulative total_chunks count.
-    """
-    try:
-        audio_bytes = await audio.read()
-        if len(audio_bytes) == 0:
-            raise HTTPException(status_code=400, detail="Empty audio chunk")
-        if len(audio_bytes) > 25 * 1024 * 1024:
-            raise HTTPException(
-                status_code=413,
-                detail="Chunk exceeds 25MB Whisper limit. Rotate MediaRecorder more frequently.",
-            )
-
-        result = recording_service.transcribe_chunk(
-            recording_id=recording_id,
-            audio_bytes=audio_bytes,
-            chunk_index=chunk_index,
-            duration_ms=duration_ms,
-            filename=audio.filename or f"chunk_{chunk_index}.webm",
-        )
-        return {"success": True, **result}
-
-    except LookupError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"❌ [Recording] chunk {chunk_index} failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Chunk transcription failed: {e}")
-
-
-@app.post("/recordings/{recording_id}/finalize")
-async def recording_finalize(recording_id: str, req: RecordingFinalizeRequest):
-    """
-    Stitch chunks, save transcript, optionally create a chat seeded with
-    the transcript file, embed the transcript into that chat's vectorstore
-    so the tutor can answer questions about it, and mark the recording complete.
-    """
-    try:
-        events_list = [e.dict() for e in req.events] if req.events else None
-        result = recording_service.finalize_recording(
-            recording_id=recording_id,
-            topic=req.topic,
-            action=req.action or "save",
-            language=req.language,
-            events=events_list,
-        )
-
-        # Embed the transcript into the new chat's vectorstore so the AI tutor
-        # can answer questions about the lecture. Only when we attached it to
-        # a chat (action="chat"|"study") and we actually got a transcript.
-        rec = recording_service.get_recording(recording_id)
-        transcript_text = rec.get("final_transcript") or ""
-        chat_id = result.get("chat_id")
-
-        if chat_id and transcript_text:
-            filename = f"recording_{recording_id}.txt"
-            file_id = uuid4().hex
-            tmp_path = None
-            try:
-                with tempfile.NamedTemporaryFile(suffix=".txt", delete=False, mode="w", encoding="utf-8") as tmp:
-                    tmp.write(transcript_text)
-                    tmp_path = tmp.name
-
-                updates: list = []
-                embedding_result = await embed_document_task(
-                    tmp_path,
-                    filename,
-                    chat_id,
-                    file_id,
-                    updates,
-                    language=(req.language or rec.get("language") or "english"),
-                )
-
-                # Persist the chat's vectorstore so it survives session restarts.
-                # Build directly from the just-embedded documents instead of pulling
-                # from ACTIVE_SESSIONS — the chat may have no active session entry
-                # yet (the user hasn't connected), so gating on it silently skipped
-                # the upload. When the chat already has a combined vectorstore from
-                # prior uploads/recordings, merge into it so we don't overwrite.
-                try:
-                    documents = embedding_result.get("documents", []) if embedding_result else []
-                    if documents:
-                        new_vs = FAISS.from_documents(documents, OpenAIEmbeddings())
-                        existing_combined = await vectorstore_manager.load_combined_vectorstore_from_firebase(chat_id)
-                        if existing_combined is not None:
-                            existing_combined.merge_from(new_vs)
-                            combined_vs = existing_combined
-                        else:
-                            combined_vs = new_vs
-                        await vectorstore_manager.upload_all_vectorstores(
-                            chat_id=chat_id,
-                            combined_vectorstore=combined_vs,
-                            file_documents={filename: documents},
-                        )
-                except Exception as up_err:
-                    print(f"⚠️ [Recording] Vectorstore persist failed for {chat_id}: {up_err}")
-
-                result["embedded"] = True
-                print(f"🧠 [Recording] Embedded transcript into chat {chat_id}")
-            except Exception as embed_err:
-                print(f"⚠️ [Recording] Embedding failed (chat still created): {embed_err}")
-                result["embedded"] = False
-                result["embed_error"] = str(embed_err)
-            finally:
-                if tmp_path and os.path.exists(tmp_path):
-                    try:
-                        os.unlink(tmp_path)
-                    except Exception:
-                        pass
-
-        return result
-    except LookupError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        print(f"❌ [Recording] finalize failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Finalize failed: {e}")
-
-
-@app.post("/recordings/{recording_id}/cancel")
-async def recording_cancel(recording_id: str, req: RecordingCancelRequest = RecordingCancelRequest()):
-    """Cancel a recording session and (optionally) delete uploaded chunks."""
-    try:
-        return await recording_service.cancel_recording(
-            recording_id=recording_id,
-            delete_chunks=req.delete_chunks,
-        )
-    except LookupError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        print(f"❌ [Recording] cancel failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Cancel failed: {e}")
-
-
-@app.get("/recordings/{recording_id}")
-async def recording_get(recording_id: str):
-    """Fetch a recording document (for clients not using Firestore listeners)."""
-    try:
-        return recording_service.get_recording(recording_id)
-    except LookupError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch recording: {e}")
 
 
 # ============================================================================

@@ -143,6 +143,29 @@ class StudyExamRequest(BaseModel):
     language: str = "en"
 
 
+class ExamDebriefMessage(BaseModel):
+    """One line of the post-exam conversation. `role` is 'user' or 'assistant'."""
+    role: str
+    content: str
+
+
+class ExamDebriefTurnRequest(BaseModel):
+    """
+    One turn of the post-exam debrief.
+
+    The whole conversation is resent every turn — there is no server-side
+    session. It is at most a handful of short messages, and a student who
+    reloads mid-conversation would otherwise be talking to something with
+    amnesia.
+    """
+    messages: List[ExamDebriefMessage]
+    exam_name: Optional[str] = None
+    exam_date: Optional[str] = None          # ISO date, display only
+    days_after: Optional[int] = None          # How fresh the memory is
+    study_context: Optional[dict] = None      # Topics / completion / avg score
+    language: str = "en"
+
+
 class StudyInterpretRequest(BaseModel):
     """
     Interpret a student's free-text request during a study session.
@@ -215,35 +238,6 @@ class DiagnosticQuizRequest(BaseModel):
     # there — it's fluid balance"), that contradiction is the moment the
     # product stops feeling like a quiz generator.
     hardestTopics: Optional[List[str]] = []
-
-
-# ============================================================================
-# RECORDING REQUESTS
-# Class recording with chunked Whisper transcription.
-# ============================================================================
-
-class RecordingStartRequest(BaseModel):
-    user_id: str
-    topic: Optional[str] = ""
-    chat_id: Optional[str] = None
-    language: str = "en"
-
-
-class RecordingEvent(BaseModel):
-    timestamp_ms: int
-    type: str  # "important" | "confusion"
-    note: Optional[str] = None
-
-
-class RecordingFinalizeRequest(BaseModel):
-    topic: Optional[str] = None
-    action: str = "save"          # "save" | "chat" | "study"
-    language: Optional[str] = None
-    events: Optional[List[RecordingEvent]] = None
-
-
-class RecordingCancelRequest(BaseModel):
-    delete_chunks: bool = True
 
 
 class NodeDebriefItem(BaseModel):

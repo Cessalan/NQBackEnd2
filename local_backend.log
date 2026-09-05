@@ -361,3 +361,203 @@ NODE INSIGHT - chat: lhq0uFfuv1Or7u1ifNed | topic: Airway and Breathing Manageme
    no pattern yet - insufficient evidence (needs 2 more)
    study note (blank): Ensure manual stabilization before airway maneuvers.
 INFO:     127.0.0.1:53815 - "POST /study/node-debrief HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56598 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56598 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60577 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49884 - "OPTIONS /study/node-debrief HTTP/1.1" 200 OK
+
+============================================================
+NODE INSIGHT - chat: u2GW2djThFrQ1dEYBLhg | topic: Sleep Duration and Testosterone Levels
+   0% over 0 items
+============================================================
+INFO:     127.0.0.1:49884 - "POST /study/node-debrief HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49884 - "OPTIONS /study/generate-item-stream HTTP/1.1" 200 OK
+
+============================================================
+🌊 STUDY ITEM STREAMING - quiz: Sleep Duration and Testosterone Levels - Quick Check
+============================================================
+INFO:     127.0.0.1:49884 - "POST /study/generate-item-stream HTTP/1.1" 200 OK
+files in chat according to storage [{'filename': 'Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf', 'path': 'chats/u2GW2djThFrQ1dEYBLhg/uploads/Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf'}]
+🔒 Session context set for chat_id: u2GW2djThFrQ1dEYBLhg (coroutine-safe)
+✅ set_session_context: Using cached documents list (1 files)
+✅ set_session_context: Using cached vectorstore for u2GW2djThFrQ1dEYBLhg
+📚 Study session setup: 1 documents, vectorstore: True
+🎮 [QUIZ_WITH_BANK] Quiz mode received: knowledge
+
+============================================================
+🧠 [CONCEPT-FIRST] Extracting 5 concepts from content...
+============================================================
+
+📊 distribute_question_types called: total=5, types=['mcq', 'sata']
+📊 MCQ+SATA distribution: 4 MCQ, 1 SATA = ['mcq', 'sata', 'mcq', 'mcq', 'mcq']
+
+============================================================
+⚡ [PARALLEL] Generating 5 questions concurrently...
+============================================================
+
+
+============================================================
+Generating Question 1
+Target answer position: C
+Quiz mode: knowledge
+Learning objective: general
+Existing topics available: 0
+============================================================
+
+
+============================================================
+🎯 Generating SATA Question 2
+📚 Topic: The American Academy of Sleep Medicine recommends 7 to 9 hours of sleep per night for optimal adult health.
+⚡ Difficulty: medium
+✓ Target correct answers: 4
+🌐 Language: en
+🎮 Quiz mode: knowledge
+============================================================
+
+
+============================================================
+Generating Question 3
+Target answer position: D
+Quiz mode: knowledge
+Learning objective: general
+Existing topics available: 0
+============================================================
+
+
+============================================================
+Generating Question 4
+Target answer position: C
+Quiz mode: knowledge
+Learning objective: general
+Existing topics available: 0
+============================================================
+
+
+============================================================
+Generating Question 5
+Target answer position: D
+Quiz mode: knowledge
+Learning objective: general
+Existing topics available: 0
+============================================================
+
+✅ SATA Question 2 generated successfully
+   Options: 6, Correct answers: 4
+   Topic: Adult Sleep Recommendations
+💭 Question 4 reasoning:
+   concept: Nursing interventions for low testosterone should include assessment and promotion of adequate sleep duration and weight management.
+   student_context_adjustment: The question is designed for nursing students to test understanding of key nursing interventions based on the documented association between sleep, BMI, and testosterone levels.
+   question_style: Comparison: What distinguishes effective nursing interventions for low testosterone from ineffective ones, focusing on sleep and weight management.
+   distractors: ['A) Increasing alcohol consumption — a misconception since alcohol intake was associated with elevated testosterone, but nursing intervention does not promote alcohol use.', 'B) Focusing only on age-related testosterone decline — students may think age cannot be modified, so this alone is the intervention, which is incorrect.', 'D) Encouraging reduced sleep duration to improve testosterone — contradicts the documented finding that short sleep decreases testosterone.']
+   validation: Option C is the only correct nursing intervention supported by the evidence linking improved sleep duration and weight management to increased testosterone levels.
+? Topic assigned: Nursing Interventions for Low Testosterone
+💭 Question 3 reasoning:
+   concept: The association between short sleep duration and reduced serum testosterone levels in men aged 16 to 80 years.
+   student_context_adjustment: The question uses clear, straightforward language suitable for nursing students to assess understanding of sleep's impact on testosterone levels.
+   question_style: Cause and effect relationship: How does short sleep duration relate to serum testosterone levels?
+   distractors: ['A) Short sleep duration leads to increased serum testosterone — a common misconception that less sleep could cause hormonal compensation.', 'B) Sleep duration has no effect on serum testosterone levels — plausible if unaware of the documented association.', 'C) Only sleep quality, not duration, affects serum testosterone — confusion between sleep quality and quantity effects.']
+   validation: Option D correctly reflects the documented association from the NHANES data showing that short sleep duration is linked to reduced serum testosterone.
+? Topic assigned: Sleep and Testosterone Levels
+💭 Question 5 reasoning:
+   concept: Patient education on the importance of maintaining regular sleep habits and healthy BMI to support testosterone levels
+   student_context_adjustment: The question uses clear language suitable for nursing students, focusing on facts relevant to patient education about testosterone health.
+   question_style: Comparison, testing understanding of which factor supports testosterone levels correctly based on study findings
+   distractors: ['Wrong A: Increasing alcohol consumption improves testosterone — a misconception since alcohol was associated with increased testosterone but is not advised for health management.', 'Wrong B: Sleep timing rather than sleep duration is the key factor — plausible but the document emphasizes sleep duration and BMI as main factors.', 'Wrong C: Only age affects testosterone levels significantly — a common misconception ignoring modifiable factors like sleep and BMI.']
+   validation: Only option D correctly states that maintaining regular sleep habits and healthy BMI supports testosterone levels as shown by the NHANES study.
+? Topic assigned: Testosterone Patient Education
+💭 Question 1 reasoning:
+   concept: The decrease in serum testosterone levels per hour of sleep lost
+   student_context_adjustment: The question uses clear, direct language suitable for nursing students to test understanding of the quantitative relationship between sleep duration and testosterone levels.
+   question_style: Value/Range: This style was chosen to directly test the factual numeric decrease in testosterone associated with sleep loss as stated in the document.
+   distractors: ['A) 0.49 ng/dL per hour — Confusing the decrease related to age with sleep loss.', 'B) 10-15 ng/dL per hour — Overestimation, possibly from misinterpreting percentages from other studies.', 'D) 2.99 ng/dL per hour — Confusing the increase in testosterone per alcoholic drink with sleep loss.']
+   validation: Only option C correctly states the documented decrease of 5.85 ng/dL in serum testosterone per hour of sleep lost as found in the NHANES 2011-2012 data.
+? Topic assigned: Sleep and Testosterone Levels
+
+============================================================
+NODE INSIGHT - chat: u2GW2djThFrQ1dEYBLhg | topic: Sleep Duration and Testosterone Levels - Quick Check
+   100% over 5 items
+============================================================
+   no pattern yet - insufficient evidence (needs 2 more)
+   study note (clean): Prioritize consistent sleep and healthy weight to support testosterone
+INFO:     127.0.0.1:53153 - "POST /study/node-debrief HTTP/1.1" 200 OK
+
+============================================================
+NODE INSIGHT - chat: u2GW2djThFrQ1dEYBLhg | topic: Sleep Duration and Testosterone Levels - Quick Check
+   100% over 5 items
+============================================================
+   no pattern yet - insufficient evidence (needs 2 more)
+   study note (clean): Prioritize sleep duration and weight management to support testosteron
+INFO:     127.0.0.1:64280 - "POST /study/node-debrief HTTP/1.1" 200 OK
+
+============================================================
+NODE INSIGHT - chat: u2GW2djThFrQ1dEYBLhg | topic: Sleep Duration and Testosterone Levels - Quick Check
+   100% over 5 items
+============================================================
+   no pattern yet - insufficient evidence (needs 2 more)
+   study note (clean): Prioritize sleep duration and healthy weight for testosterone health.
+INFO:     127.0.0.1:51969 - "POST /study/node-debrief HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56796 - "OPTIONS /study/node-debrief HTTP/1.1" 200 OK
+
+============================================================
+NODE INSIGHT - chat: u2GW2djThFrQ1dEYBLhg | topic: Sleep Duration and Testosterone Levels - Quick Check
+   100% over 5 items
+============================================================
+   no pattern yet - insufficient evidence (needs 2 more)
+   study note (clean): Consistent, adequate sleep supports healthy testosterone levels.
+INFO:     127.0.0.1:56796 - "POST /study/node-debrief HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60720 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60720 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56759 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52078 - "OPTIONS /study/interpret-request HTTP/1.1" 200 OK
+
+============================================================
+💬 INTERPRET STUDENT REQUEST - chat_id: u2GW2djThFrQ1dEYBLhg
+   Text: Skip ahead
+   Context: quiz on Sleep Duration and Testosterone Levels - Quick Check
+============================================================
+✅ Interpreted request: understood=True
+   Echo: Got it! Let's move on to the next topic to keep your momentum going.
+   Node: lesson - Circadian Rhythms and Hormonal Regulation
+INFO:     127.0.0.1:52078 - "POST /study/interpret-request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52078 - "OPTIONS /study/generate-item-stream HTTP/1.1" 200 OK
+
+============================================================
+🌊 STUDY ITEM STREAMING - lesson: Circadian Rhythms and Hormonal Regulation
+============================================================
+INFO:     127.0.0.1:52078 - "POST /study/generate-item-stream HTTP/1.1" 200 OK
+files in chat according to storage [{'filename': 'Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf', 'path': 'chats/u2GW2djThFrQ1dEYBLhg/uploads/Patel2019_Article_ImpairedSleepIsAssociatedWithL.pdf'}]
+🔒 Session context set for chat_id: u2GW2djThFrQ1dEYBLhg (coroutine-safe)
+✅ set_session_context: Using cached documents list (1 files)
+✅ set_session_context: Using cached vectorstore for u2GW2djThFrQ1dEYBLhg
+📚 Study session setup: 1 documents, vectorstore: True
+📚 Lesson context (stream): 30 chunks, 12000 chars
+
+============================================================
+NODE INSIGHT - chat: u2GW2djThFrQ1dEYBLhg | topic: Circadian Rhythms and Hormonal Regulation
+   0% over 0 items
+============================================================
+   reflection note (addressed): You need to connect how testosterone is linked to sleep, especially RE
+INFO:     127.0.0.1:65451 - "POST /study/node-debrief HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54927 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54927 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49294 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49294 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62785 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62785 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62631 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62631 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50189 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50189 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64067 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62258 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49677 - "POST /exam-debrief/turn HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:63078 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63078 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52101 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52101 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49265 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49265 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57626 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60530 - "OPTIONS /exam-debrief/turn HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60530 - "POST /exam-debrief/turn HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60269 - "POST /exam-debrief/turn HTTP/1.1" 404 Not Found

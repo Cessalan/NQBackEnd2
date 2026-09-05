@@ -1885,7 +1885,10 @@ Note: For detailed quiz analysis, the full quiz data is available via _format_la
                             self.session.file_insights[filename] = {
                                 'topics': insight.get('topics', []),
                                 'concepts': insight.get('concepts', []),
-                                'document_type': insight.get('documentType', 'unknown')
+                                'document_type': insight.get('documentType', 'unknown'),
+                                # Absent on every document uploaded before framework
+                                # detection shipped, so default rather than assume.
+                                'frameworks': insight.get('frameworks', [])
                             }
                             insights_loaded += 1
             
@@ -2068,13 +2071,21 @@ Note: For detailed quiz analysis, the full quiz data is available via _format_la
             topics = insights.get('topics', [])
             concepts = insights.get('concepts', [])
             doc_type = insights.get('document_type', 'unknown')
-            
+            frameworks = insights.get('frameworks', [])
+
             insight_str = f"• {short_name} ({doc_type})"
             if topics:
                 insight_str += f"\n  Topics: {', '.join(topics[:3])}"
             if concepts:
                 insight_str += f"\n  Key concepts: {', '.join(concepts[:5])}"
-            
+            # Named so the tutor can offer practice on the skill, not just the
+            # subject — "which step of the nursing process is this" is an item
+            # this document supports and a topic-only listing hides.
+            if frameworks:
+                insight_str += f"\n  Teaches framework(s): " + ", ".join(
+                    f.get('name', f.get('id', '')) for f in frameworks[:3])
+
+
             formatted.append(insight_str)
         
         if not formatted:
