@@ -212,6 +212,71 @@ check("a longer diagnostic label still matches its topic",
       tiers["solid"] == ["Cardiac"], tiers)
 
 
+print("\n=== the generator mislabels its nodes (regression) ===")
+
+# What production hands us 17.6% of the time: a path whose node labels name
+# nothing in the curriculum. Real case, chat 17Z4fNVsl3NbuPjNoWrb — the student
+# was quizzed on "Caring in Nursing" and every node came back as an objective.
+OBJECTIVE_PATH = [
+    node(kind, obj)
+    for obj in [
+        "Describe nursing interventions to promote patient safety.",
+        "Identify measures to promote health across the lifespan.",
+    ]
+    for kind in FULL_UNIT
+]
+
+out = weight(OBJECTIVE_PATH, {"Cardiac": 0}, TOPICS, 14)
+tiers = summarize(out, TOPICS)
+check("a mislabelled path still tiers the tested topic as a gap",
+      tiers["gap"] == ["Cardiac"], tiers)
+check("...and the plan opens on it, not on whatever the model listed first",
+      topics_in_order(out)[0] == "Cardiac", topics_in_order(out)[:3])
+check("...and it still opens on a lesson",
+      types_of(out)[0] == "lesson", types_of(out)[:3])
+
+out = weight(OBJECTIVE_PATH, {"Renal": 10}, TOPICS, 20)
+check("every curriculum topic is represented",
+      set(TOPICS).issubset(set(topics_in_order(out))), topics_in_order(out))
+check("the weak topic leads, not the off-curriculum content",
+      topics_in_order(out)[0] == "Renal", topics_in_order(out)[:4])
+
+
+print("\n=== a correctly labelled path is unaffected ===")
+
+out = weight(generated_path(), {"Cardiac": 0, "Renal": 55, "Endocrine": 95}, TOPICS, 14)
+check("gap first, solid last, as before",
+      topics_in_order(out)[0] == "Cardiac" and topics_in_order(out)[-1] == "Endocrine",
+      topics_in_order(out))
+check("generated nodes are reused, not replaced by synthesised ones",
+      any(not n["id"].startswith("synth_") for n in out),
+      [n["id"] for n in out[:4]])
+
+
+print("\n=== the curriculum keeps the diagnostic's vocabulary ===")
+
+# /study/plan re-extracts topics with a second LLM call. If that rename loses
+# the topic the student was just quizzed on, her score tiers as `untested` and
+# never reaches the front of the plan.
+restore = mod._restore_diagnostic_topics
+
+check("no diagnostic leaves the list alone",
+      restore(["A", "B"], None) == ["A", "B"])
+check("an empty diagnostic leaves the list alone",
+      restore(["A", "B"], {}) == ["A", "B"])
+check("a matched key is not duplicated",
+      restore(["Cardiac Care", "Renal"], {"Cardiac": 30}) == ["Cardiac Care", "Renal"])
+check("a renamed-away topic is restored",
+      "Caring in Nursing" in restore(
+          ["Describe nursing interventions to promote patient safety."],
+          {"Caring in Nursing": 20}))
+check("the input list is not mutated",
+      (lambda base: (restore(base, {"X": 1}), base == ["A"])[1])(["A"]))
+check("the curriculum stays bounded",
+      len(restore(["T%d" % i for i in range(6)],
+                  {"New A": 1, "New B": 2})) == mod.MAX_CURRICULUM_TOPICS)
+
+
 print("\n" + "=" * 62)
 if FAILURES:
     print("FAILED (%d): %s" % (len(FAILURES), ", ".join(FAILURES)))

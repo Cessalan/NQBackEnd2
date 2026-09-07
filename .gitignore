@@ -29,3 +29,6 @@ service-account-key.json
 secrets/*.json
 tools/active_users_cache.json
 .env.local
+
+# Rendered email previews (regenerate with tools/email_preview.py)
+tools/email_previews/

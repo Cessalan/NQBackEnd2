@@ -325,6 +325,136 @@ from services import stripe_billing
 # Server-side free-tier quota check (mirrors the client gate in UsageService.js)
 from services import usage_guard
 
+# ══════════════════════════════════════════════════════════════════════════
+# EMAIL
+#
+# The unsubscribe route is the only one of these that is load-bearing on day
+# one: nothing may be mailed to anybody until a recipient can get off the list
+# without logging in. CAN-SPAM requires it, Gmail's One-Click header points at
+# it, and it is the difference between an opt-out and a spam complaint — which
+# on a list that is 78% Gmail is the difference between having a channel and
+# not having one.
+# ══════════════════════════════════════════════════════════════════════════
+from services import email_sender
+from services import email_campaigns
+# firestore is imported per-function elsewhere in this file; the email
+# routes need it at module scope.
+from firebase_admin import firestore as _fs_email
+
+
+@app.get("/api/email/unsubscribe")
+async def email_unsubscribe(token: str = ""):
+    """
+    One-click unsubscribe. PUBLIC and unauthenticated by design — a student
+    reading mail on her phone is not signed in, and an opt-out that demands a
+    login is not an opt-out. The HMAC in the token is what makes that safe:
+    links cannot be forged and uids cannot be enumerated.
+
+    Always returns 200 HTML. A confusing error page here produces a spam
+    complaint, which costs far more than a failed unsubscribe.
+    """
+    uid = email_sender.verify_unsubscribe_token(token)
+    page = (
+        "<html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>Email preferences</title></head>"
+        "<body style=\"font:16px/1.6 -apple-system,Segoe UI,sans-serif;max-width:520px;"
+        "margin:14vh auto;padding:0 22px;color:#3d3d3d\">"
+    )
+    if not uid:
+        page += ("<h2>That link didn't work</h2><p>It may have expired or been altered. "
+                 "You can turn email off in the app under your account settings, or reply "
+                 "to any message from us and we'll remove you.</p>")
+    else:
+        try:
+            email_sender.set_unsubscribed(_fs_email.client(), uid)
+            page += ("<h2>You're unsubscribed</h2><p>You won't get study reminders from us "
+                     "again. Your account and study plans are untouched.</p>")
+        except Exception as e:
+            print(f"❌ unsubscribe failed for {uid}: {e}")
+            page += ("<h2>Something went wrong</h2><p>Reply to any message from us and "
+                     "we'll remove you by hand.</p>")
+    return Response(content=page + "</body></html>", media_type="text/html")
+
+
+@app.post("/api/email/run")
+async def email_run(request: Request):
+    """
+    The cron target. Selects recipients, renders, and sends.
+
+    AUTHENTICATED, and that is not optional: an open endpoint that triggers a
+    mass send is a way for a stranger to burn the sending domain, exhaust the
+    daily cap, and mail your users. The shared secret is compared with
+    compare_digest so a wrong guess leaks no timing information.
+
+    Body: {"campaign": "winback_gap", "limit": 50}
+
+    Safe to call repeatedly. Everything downstream is idempotent per student
+    per campaign, capped per day, and a no-op entirely unless EMAIL_ENABLED is
+    exactly "true" — so a misfiring schedule produces log noise, not a second
+    copy of the same email.
+    """
+    import hmac as _hmac
+    expected = (os.getenv("EMAIL_CRON_SECRET") or "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail="EMAIL_CRON_SECRET not configured")
+    provided = (request.headers.get("x-cron-secret") or "").strip()
+    if not provided or not _hmac.compare_digest(provided, expected):
+        raise HTTPException(status_code=401, detail="bad or missing x-cron-secret")
+
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    campaign = (body or {}).get("campaign", "winback_gap")
+    limit = int((body or {}).get("limit", email_sender.daily_cap()))
+
+    runner = email_campaigns.CAMPAIGN_RUNNERS.get(campaign)
+    if not runner:
+        raise HTTPException(status_code=400, detail=f"unknown campaign: {campaign}")
+
+    print(f"📧 Running campaign {campaign} (limit={limit}, "
+          f"enabled={email_sender.is_enabled()})")
+    result = runner(_fs_email.client(), limit=limit)
+    # Never echo addresses back over HTTP; counts are what a scheduler needs.
+    result.pop("detail", None)
+    return {"campaign": campaign, "enabled": email_sender.is_enabled(), **result}
+
+
+@app.get("/api/email/preflight")
+async def email_preflight():
+    """Config readiness. Safe to call in production: reports only whether each
+    setting is present, never its value."""
+    return email_sender.preflight()
+
+
+@app.post("/api/email/test")
+async def email_test(request: Request):
+    """
+    Send one message to one address, to prove deliverability before any list
+    send. Bypasses the daily cap (it is a single mail to yourself) but NOT the
+    suppression check — if you have unsubscribed yourself, that must still win.
+
+    Body: {"uid": "...", "to": "you@example.com"}
+    """
+    body = await request.json()
+    uid = (body or {}).get("uid")
+    to = (body or {}).get("to")
+    if not uid or not to:
+        raise HTTPException(status_code=400, detail="uid and to are required")
+
+    return email_sender.send_email(
+        _fs_email.client(), uid=uid, to=to,
+        subject="NurseQuizAI — deliverability test",
+        html=("<p>If you're reading this in your inbox rather than spam, "
+              "SPF/DKIM/DMARC are working.</p>"),
+        campaign="deliverability_test",
+        idempotency_key=f"test_{uid}_{int(__import__('time').time())}",
+        transactional=True,
+        ignore_cap=True,
+    )
+
 @app.post("/billing/webhook")
 async def stripe_webhook(request: Request):
     """
@@ -3122,6 +3252,8 @@ Return ONLY valid JSON (all strings must be in {prompt_language}):
         if not unique_topics:
             unique_topics = ["Document Overview"]
 
+        unique_topics = _restore_diagnostic_topics(unique_topics, request.diagnostic)
+
         # ------------------------------------------
         # STEP 4: Generate learning path with LLM
         # ------------------------------------------
@@ -3524,6 +3656,36 @@ def _match_topic(name, candidates):
     return None
 
 
+MAX_CURRICULUM_TOPICS = 6
+
+
+def _restore_diagnostic_topics(unique_topics, diagnostic):
+    """Keep the curriculum and the diagnostic speaking the same language.
+
+    /study/plan re-derives its topics with its OWN LLM call, from a different
+    slice of the document and a different prompt than the one that produced the
+    upload's topic labels. The diagnostic is keyed by those UPLOAD labels, so
+    re-extraction can rename the very topic the student was just quizzed on —
+    and her score then belongs to a topic that no longer exists in the
+    curriculum, tiers as `untested`, and never reaches the front of the plan.
+
+    /study/start does not have this problem (it plans straight off the upload's
+    topics); this is its fallback, and the two must not disagree about what the
+    student is weak on. Any diagnostic key left unmatched is added back so it is
+    guaranteed a unit at its real tier in _weight_path_by_diagnostic.
+
+    Returns a new list; does not mutate the input.
+    """
+    topics = list(unique_topics or [])
+    if not diagnostic:
+        return topics
+    for key in diagnostic.keys():
+        if key and not _match_topic(key, topics):
+            print(f"⚠️  Diagnostic topic '{key}' lost in re-extraction — restoring")
+            topics.append(key)
+    return topics[:MAX_CURRICULUM_TOPICS]
+
+
 def _topic_of_node(node, unique_topics):
     """Which curriculum topic a generated node belongs to."""
     label = str(node.get("label", ""))
@@ -3690,24 +3852,71 @@ def _weight_path_by_diagnostic(nodes, diagnostic, unique_topics, days_to_exam=No
         except (TypeError, ValueError):
             scores[topic] = None
 
-    # Group generated nodes by topic, preserving order.
-    grouped = {}
-    order = []
+    # Group generated nodes by topic.
+    #
+    # ATTRIBUTION IS BY CONSTRUCTION, NOT BY LABEL.
+    #
+    # The path generator is told to name its nodes after these topics, and
+    # frequently does not: it writes learning objectives ("Integrate concepts
+    # of caring to all nursing processes.") or renames the subject outright.
+    # The positional `topicN` tag it is also asked for is present in only
+    # 44.4% of generated plans. Measured across 255 production sessions, the
+    # topic the student had just been quizzed on could not be matched to ANY
+    # node label in 17.6% of plans.
+    #
+    # This used to build its unit list by walking the NODES. An unattributable
+    # label then became its own topic; `scores` — keyed by unique_topics —
+    # missed it; every unit tiered `untested`; and the sort below became a
+    # no-op. The diagnostic was discarded in silence, so a student was shown
+    # "you're weak on X, we'll start there" and handed a plan opening on
+    # whatever the model happened to list first.
+    #
+    # Walking unique_topics instead means every scored topic gets a unit at
+    # its real tier, whatever the generator called things. Generated nodes are
+    # still reused wherever they DO map — they carry richer labels and tags
+    # from the document — and _shape_unit synthesises only what is missing.
+    pools = {t: [] for t in unique_topics}
+    orphans = []
     for n in nodes:
-        t = _topic_of_node(n, unique_topics) or "General"
-        if t not in grouped:
-            grouped[t] = []
-            order.append(t)
-        grouped[t].append(n)
+        t = _topic_of_node(n, unique_topics)
+        if t in pools:
+            pools[t].append(n)
+        else:
+            orphans.append((t or "General", n))
 
     units = []
     seq = 0
-    for topic in order:
+    for topic in unique_topics:
         tier = _tier_for_score(scores.get(topic))
         wanted = TIER_UNITS[tier]
-        unit_nodes = _shape_unit(topic, grouped[topic], wanted, seq)
+        units.append({
+            "topic": topic,
+            "tier": tier,
+            "nodes": _shape_unit(topic, pools[topic], wanted, seq),
+        })
         seq += len(wanted)
-        units.append({"topic": topic, "tier": tier, "nodes": unit_nodes})
+
+    # Nodes about something outside the curriculum list are still taught, but
+    # they queue behind the topics we can actually reason about. They score as
+    # `untested` (scores is keyed by unique_topics), and _apply_budget trims
+    # from the back — so they are the first thing to go when time is short.
+    orphan_groups = {}
+    orphan_order = []
+    for label, n in orphans:
+        if label not in orphan_groups:
+            orphan_groups[label] = []
+            orphan_order.append(label)
+        orphan_groups[label].append(n)
+
+    for label in orphan_order:
+        tier = _tier_for_score(scores.get(label))
+        wanted = TIER_UNITS[tier]
+        units.append({
+            "topic": label,
+            "tier": tier,
+            "nodes": _shape_unit(label, orphan_groups[label], wanted, seq),
+        })
+        seq += len(wanted)
 
     # Worst first, solid last. Ties break on score so the weakest gap opens.
     units.sort(key=lambda u: (
