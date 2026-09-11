@@ -19,10 +19,10 @@ resolved via chats/{chat_id}.userId. An attacker can only ever use a chat_id
 that maps to some real user, whose own quota then applies. Unknown chat_ids
 fail open (see below).
 
-Charging still happens client-side (consumeGeneration). This guard is
-VALIDATION ONLY — it never writes. That keeps a single writer for the usage
-map and avoids double-charging; the residual gap (a scripted caller who never
-runs the client and therefore never increments count) is accepted for now.
+This module performs read-only validation. Chat quizzes, document extraction,
+and focused-practice batches reserve and settle question units atomically in
+practice_api.py. Their completion events tell the client not to charge twice.
+Other legacy generation flows still charge through consumeGeneration.
 
 Fail-open philosophy (matches the client): any lookup error, missing doc, or
 malformed data ALLOWS the request. Never block a paying or working user
@@ -84,7 +84,7 @@ def check_quota(chat_id: str) -> dict:
         usage = ((snap.to_dict() or {}).get("usage") or {}) if snap.exists else {}
 
         if usage.get("tier") == "pro":
-            return {"allowed": True, "reason": None, "tier": "pro"}
+            return {"allowed": True, "reason": None, "tier": "pro", "remaining": None}
 
         now_ms = int(time.time() * 1000)
         window_start = usage.get("windowStart")
@@ -99,8 +99,8 @@ def check_quota(chat_id: str) -> dict:
             count = 0
 
         if count < FREE_LIMIT:
-            return {"allowed": True, "reason": None, "tier": "free"}
-        return {"allowed": False, "reason": "quota_exceeded", "tier": "free"}
+            return {"allowed": True, "reason": None, "tier": "free", "remaining": FREE_LIMIT - count}
+        return {"allowed": False, "reason": "quota_exceeded", "tier": "free", "remaining": 0}
 
     except Exception as e:
         print(f"⚠️ usage_guard: quota check failed for chat {chat_id}: {e} — failing open")

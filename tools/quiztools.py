@@ -391,6 +391,23 @@ def get_study_sheet_messages(chat_id):
         
         for doc in messages:
             message_data = doc.to_dict()
+            # Focused practice keeps progress separate from the initial streaming
+            # message so a late quiz_complete cannot overwrite answers.
+            practice = message_data.get('practice') or {}
+            if practice:
+                combined = list(message_data.get('quizData') or [])
+                seen = {q.get('question', '').strip().lower() for q in combined if isinstance(q, dict)}
+                for question in practice.get('questions', []):
+                    key = question.get('question', '').strip().lower()
+                    if key and key not in seen:
+                        combined.append(question)
+                        seen.add(key)
+                answers = practice.get('answers', {})
+                message_data['quizData'] = [dict(q, userSelection=answers[str(i)]) if str(i) in answers else q for i, q in enumerate(combined)]
+                snapshot = practice.get('snapshot') or {}
+                conversation_history.append({'role': 'assistant', 'content':
+                    f"[Saved practice: {len(answers)} answers recorded, currently question {snapshot.get('queueIndex', 0) + 1}. "
+                    "The student can resume the existing practice card; do not assume a new quiz is needed.]"})
             message_data['id'] = doc.id
             
             # Filter for study sheet, by looking for html object in the messages
@@ -1145,11 +1162,13 @@ async def generate_quiz_stream(
             source = source_preference
 
         # Validate num_questions
-        num_questions = max(1, min(15, num_questions))
+        from services.quiz_tutor import requested_question_total
+        requested_total = requested_question_total(user_prompt, num_questions)
+        num_questions = min(5, requested_total)
 
         # Normalize question_types - default to MCQ if not specified
         if question_types is None or len(question_types) == 0:
-            question_types = ["mcq"]
+            question_types = ["mcq", "sata", "casestudy"]
 
         # Validate question types
         valid_types = ["mcq", "sata", "casestudy", "ordering", "bowtie"]
@@ -1285,6 +1304,7 @@ async def generate_quiz_stream(
                 "topic": topic,
                 "difficulty": normalized_difficulty,
                 "num_questions": num_questions,
+                "requested_total": requested_total,
                 "source": source,
                 "language": session.user_language,
                 "question_types": question_types,

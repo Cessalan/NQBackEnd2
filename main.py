@@ -7613,6 +7613,10 @@ async def warm_up():
 # ============================================================================
 # RUN THE APP
 # ============================================================================
+# Focused chat practice shares the existing session and generation pipeline.
+from services.practice_api import build_router as build_practice_router
+app.include_router(build_practice_router(_setup_study_session))
+
 if __name__ == "__main__":
     import uvicorn
     import os

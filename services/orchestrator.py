@@ -696,7 +696,7 @@ class NursingTutor:
                 if honesty_preamble:
                     yield json.dumps({"answer_chunk": honesty_preamble + "\n\n"}) + "\n"
 
-                from services.doc_extraction import stream_extracted_questions
+                from services.practice_api import metered_extracted_questions as stream_extracted_questions
                 all_questions = []
                 async for chunk in stream_extracted_questions(
                     session=self.session,
@@ -729,6 +729,7 @@ class NursingTutor:
                             "type": "quiz",
                             "quiz_data": all_questions,
                             "total_generated": chunk.get("total_generated", len(all_questions)),
+                            "quota_charged": chunk.get("quota_charged", False),
                         }) + "\n"
                     elif status == "error":
                         yield json.dumps({
@@ -1154,7 +1155,7 @@ class NursingTutor:
                                 # Import streaming function WITH Question Bank integration
                                 # This checks the bank for instant delivery, then generates remaining via LLM
                                 # New questions are saved to the bank in the background for future reuse
-                                from services.quiz_with_bank import stream_quiz_with_bank as stream_quiz_questions
+                                from services.practice_api import metered_chat_quiz_stream as stream_quiz_questions
 
                                 # Track questions for final save
                                 all_questions = []
@@ -1173,6 +1174,7 @@ class NursingTutor:
                                     topic=metadata.get("topic"),
                                     difficulty=metadata.get("difficulty"),
                                     num_questions=metadata.get("num_questions"),
+                                    requested_total=metadata.get("requested_total"),
                                     source=metadata.get("source"),
                                     session=self.session,
                                     empathetic_message=empathetic_message,
@@ -1183,6 +1185,9 @@ class NursingTutor:
                                     user_prompt=metadata.get("user_prompt"),
                                     additional_context=research_context_text,
                                 ):
+                                    if chunk.get("status") == "error":
+                                        yield json.dumps(chunk) + "\n"
+                                        return
                                     # Handle empathetic message streaming
                                     if chunk.get("status") == "empathetic_message_start":
                                         print("💬 Empathetic message streaming started")
@@ -1212,6 +1217,9 @@ class NursingTutor:
                                     elif chunk.get("status") == "generating":
 
                                         value ={ "status": "quiz_generating",
+                                            "requested_total": chunk.get("requested_total"),
+                                            "quiz_settings": {"difficulty": metadata.get("difficulty"), "question_types": metadata.get("question_types"), "scope": metadata.get("user_prompt") or "", "requested_total": chunk.get("requested_total")},
+                                            "quiz_topic": metadata.get("topic"),
                                             "current": chunk.get("current"),
                                             "type":"quiz",
                                             "total": chunk.get("total"),
@@ -1243,6 +1251,10 @@ class NursingTutor:
                                             "status": "quiz_complete",
                                             "type":"quiz",
                                             "quiz_data": all_questions,
+                                            "quota_charged": chunk.get("quota_charged", False),
+                                            "requested_total": chunk.get("requested_total"),
+                                            "quiz_topic": metadata.get("topic"),
+                                            "quiz_settings": {"difficulty": metadata.get("difficulty"), "question_types": metadata.get("question_types"), "scope": metadata.get("user_prompt") or "", "requested_total": chunk.get("requested_total")},
                                             "total_generated": chunk.get("total_generated")
                                         }) + "\n"
 
