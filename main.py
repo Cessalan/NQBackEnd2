@@ -3053,7 +3053,8 @@ async def generate_section(request: SectionRequest):
 # Duolingo-style learning path generation (NOT USED FOR CHATINTERFACE, IT IS FOR STUDY PLAN VERY SEPARATE)
 # ============================================================================
 
-from models.requests import StudyPlanRequest, StudyItemRequest, StudyAudioRequest, StudyReviewPlanRequest, DiagnosticQuizRequest, StudyMindmapRequest, StudyInterpretRequest, StudyExamRequest, NodeDebriefRequest, NarrationRequest
+from models.requests import StudyPlanRequest, StudyItemRequest, StudyAudioRequest, StudyReviewPlanRequest, DiagnosticQuizRequest, StudyMindmapRequest, StudyInterpretRequest, StudyExamRequest, NodeDebriefRequest, NarrationRequest, CourseIntelligenceRequest
+from services import course_intelligence
 from models.requests import ExamDebriefTurnRequest
 from services.exam_debrief import run_debrief_turn as run_exam_debrief_turn
 import hashlib
@@ -3254,6 +3255,17 @@ Return ONLY valid JSON (all strings must be in {prompt_language}):
 
         unique_topics = _restore_diagnostic_topics(unique_topics, request.diagnostic)
 
+        # Course intelligence, when the client ran it. Same call as
+        # /study/start, and it must stay the same call: this endpoint is that
+        # one's fallback, and a fallback that orders topics differently means
+        # the reveal's promised starting point only holds when the fast path
+        # happens to work.
+        ci_report = request.courseIntelligence or None
+        if ci_report:
+            unique_topics = course_intelligence.planner_topics(ci_report, unique_topics)
+        unique_topics = _restore_diagnostic_topics(unique_topics, request.diagnostic)
+        course_brief = course_intelligence.planner_context_block(ci_report)
+
         # ------------------------------------------
         # STEP 4: Generate learning path with LLM
         # ------------------------------------------
@@ -3271,6 +3283,7 @@ Return ONLY valid JSON (all strings must be in {prompt_language}):
             prompt_language,
             days_to_exam=_days_to_exam(user_prefs),
             hardest_topics=user_prefs.get("hardestTopics") or [],
+            course_brief=course_brief,
         )
 
         response = await llm.ainvoke([{"role": "user", "content": path_prompt}])
@@ -3301,6 +3314,8 @@ Return ONLY valid JSON (all strings must be in {prompt_language}):
             unique_topics,
             _days_to_exam(user_prefs),
         )
+        if not request.diagnostic:
+            nodes = _order_units_by_priority(nodes, unique_topics, unique_topics)
         nodes = _attach_status_and_exam_nodes(nodes, unique_topics)
 
         print(f"✅ Final study path with {len(nodes)} nodes (including exams)")
@@ -3315,6 +3330,8 @@ Return ONLY valid JSON (all strings must be in {prompt_language}):
             "estimated_time_minutes": len(nodes) * 3,  # ~3 min per node
             "archetype": _plan_archetype(_days_to_exam(user_prefs)),
             "tiers": _summarize_tiers(nodes, unique_topics),
+            "recommended_start": _actual_recommended_start(nodes, unique_topics, request.diagnostic),
+            "course_intelligence": bool(ci_report),
         }
 
     except Exception as e:
@@ -3345,11 +3362,16 @@ Return ONLY valid JSON (all strings must be in {prompt_language}):
 # ============================================================================
 
 def _build_deadline_path_prompt(
-    unique_topics, key_terms, prompt_language, archetype, days_to_exam, hardest_topics
+    unique_topics, key_terms, prompt_language, archetype, days_to_exam, hardest_topics,
+    course_brief: str = "",
 ) -> str:
     """Prompt for the SPRINT and FOCUS shapes — plans built against a deadline."""
+    # Under a deadline the brief matters MORE, not less: with eight nodes to
+    # spend, spending them on what her exam description actually names is the
+    # whole difference between triage and a shortened syllabus.
+    brief_block = (course_brief + chr(10) + chr(10)) if course_brief else ""
     focus_line = (
-        f"\nThe student says these are hardest for them: {hardest_topics}. "
+        f"\nThese focus topics were selected for this study plan: {hardest_topics}. "
         "Cover these FIRST and give them the most nodes.\n"
         if hardest_topics else "\n"
     )
@@ -3362,7 +3384,7 @@ def _build_deadline_path_prompt(
 "flashcard" or "mindmap" nodes. The only job of this path is to find out what
 the student does not know and drill exactly that.
 
-CORE TOPICS from their document:
+{brief_block}CORE TOPICS from their document, IN PRIORITY ORDER:
 {unique_topics}
 
 KEY TERMS: {key_terms}
@@ -3392,7 +3414,7 @@ Return ONLY a valid JSON array:
 There is time to relearn weak areas, but NOT to cover everything from scratch.
 Lead with assessment so the path targets real gaps rather than guessing.
 
-CORE TOPICS from their document:
+{brief_block}CORE TOPICS from their document, IN PRIORITY ORDER:
 {unique_topics}
 
 KEY TERMS: {key_terms}
@@ -3474,6 +3496,7 @@ def _build_study_path_prompt(
     prompt_language: str,
     days_to_exam=None,
     hardest_topics=None,
+    course_brief: str = "",
 ) -> str:
     """Build the study-path planning prompt.
 
@@ -3488,6 +3511,7 @@ def _build_study_path_prompt(
         return _build_deadline_path_prompt(
             unique_topics, key_terms, prompt_language,
             archetype, days_to_exam, hardest_topics,
+            course_brief=course_brief,
         )
 
     if review_format == "Flashcards":
@@ -3545,9 +3569,11 @@ def _build_study_path_prompt(
   {{"id": "node_4", "type": "flashcard", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Vocabulaire", "tags": ["topic1", "terms"], "difficulty": 1}},
   {{"id": "node_5", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Final Test", "tags": ["topic1", "assessment"], "difficulty": 2}}"""
 
+    brief_block = (course_brief + chr(10) + chr(10)) if course_brief else ""
+
     return f"""Create a Duolingo-style study path for this document.
 
-🚨 CRITICAL: The study path MUST be structured around these CORE TOPICS from the student's document:
+{brief_block}🚨 CRITICAL: The study path MUST be structured around these CORE TOPICS from the student's document, IN THIS ORDER (highest priority first):
 {unique_topics}
 
 KEY TERMS to include: {key_terms}
@@ -3824,6 +3850,65 @@ def _summarize_tiers(nodes, unique_topics):
     return out
 
 
+def _order_units_by_priority(nodes, ordered_topics, unique_topics):
+    """Put the generated path into course-intelligence priority order.
+
+    WHY THIS EXISTS SEPARATELY FROM _weight_path_by_diagnostic
+    ─────────────────────────────────────────────────────────
+    The diagnostic reorders by what she got WRONG. This reorders by what her
+    EXAM ASKS FOR. They answer different questions and only one of them is
+    usually available: the quick check is gone from the pre-plan flow, so most
+    plans now arrive here with diagnostic=None and nothing but the generator's
+    own ordering — which is, in practice, the order of her PowerPoint.
+
+    So this runs only when there is no diagnostic. When both exist the
+    diagnostic wins, because a measured gap outranks a predicted one, and two
+    reorderings fighting over the same list produces neither.
+
+    Whole units move together. Splitting a unit puts a topic's quiz three
+    topics away from its lesson, which is how a plan stops reading as a plan.
+    Topics the priority list never mentions keep their relative order and go
+    last — never dropped, because a topic in her material that nothing scored
+    is still a topic in her material.
+    """
+    if not nodes or not ordered_topics:
+        return nodes
+
+    rank = {}
+    for i, topic in enumerate(ordered_topics):
+        match = _match_topic(topic, unique_topics) or topic
+        rank.setdefault(match, i)
+        rank.setdefault(topic, i)
+
+    units = []
+    for node in nodes:
+        topic = _topic_of_node(node, unique_topics)
+        if units and units[-1]["topic"] == topic:
+            units[-1]["nodes"].append(node)
+        else:
+            units.append({"topic": topic, "nodes": [node]})
+
+    # Stable sort: unranked units keep their generated order behind the ranked
+    # ones, which is what `len(rank)` as the default achieves.
+    units.sort(key=lambda u: rank.get(u["topic"], len(rank)))
+
+    out = []
+    for unit in units:
+        out.extend(unit["nodes"])
+    return out
+
+
+def _actual_recommended_start(nodes, unique_topics, diagnostic=None):
+    """The final path, including calibration, is the authority on where to start."""
+    first = next((node for node in nodes if node.get("type") != "section_banner"), None)
+    if not first:
+        return None
+    return {
+        "topic": _topic_of_node(first, unique_topics),
+        "basis": "diagnostic" if diagnostic else "course",
+    }
+
+
 def _weight_path_by_diagnostic(nodes, diagnostic, unique_topics, days_to_exam=None):
     """Reshape a generated path using what the diagnostic learned.
 
@@ -3999,6 +4084,148 @@ def _attach_status_and_exam_nodes(nodes: list, unique_topics: list) -> list:
     return nodes_with_exams
 
 
+# ══════════════════════════════════════════════════════════════════════
+# COURSE INTELLIGENCE
+# ══════════════════════════════════════════════════════════════════════
+# Runs BEFORE /study/start. The student has named her school, course,
+# professor and exam; this investigates that specific academic environment
+# and streams the investigation as it happens.
+#
+# HEARTBEATS. The three web-research passes run concurrently and the slowest
+# can sit for 40s without producing an event. The frontend arms a stall
+# watchdog on this stream exactly like the upload NDJSON stream, so a silent
+# 40s is indistinguishable from a dead backend unless we say something. The
+# 10s interval below is one half of that contract — the other half is
+# CI_STALL_MS in src/Services/CourseIntelligenceService.js. Change them
+# together, and keep the interval well under the frontend's window.
+# ══════════════════════════════════════════════════════════════════════
+
+COURSE_INTELLIGENCE_HEARTBEAT_S = 10
+
+
+@app.post("/study/course-intelligence")
+async def run_course_intelligence_endpoint(request: CourseIntelligenceRequest):
+    """
+    SSE stream of the investigation, ending in one structured report.
+
+    Events:
+      - {"status": "course_intelligence_progress", "step", "state", "progress", "message", "detail"}
+      - {"status": "heartbeat"}                          — keep-alive only
+      - {"status": "course_intelligence_ready", "report": {...}}
+      - {"status": "complete"}
+      - {"status": "error", "message": "..."}
+
+    No usage gate here on purpose. This runs before the plan and is what the
+    plan gate is later asked to sell; charging a plan for the pitch would put
+    the wall back in front of the value, which is the thing this flow exists
+    to stop. /study/start still gates.
+    """
+    print(f"\n{'='*60}")
+    print(f"🔎 COURSE INTELLIGENCE - chat_id: {request.chat_id}")
+    print(f"   context: {course_intelligence_module_context(request.courseContext)}")
+    print(f"{'='*60}")
+
+    async def stream_generator():
+        queue: asyncio.Queue = asyncio.Queue()
+        DONE = object()
+
+        async def produce():
+            preview_task = None
+            try:
+                # Her uploaded material is the primary source, so the session's
+                # insights are loaded before anything is searched for. A session
+                # that exists but never loaded them (created by an earlier chat
+                # turn) is refilled rather than trusted empty — an empty
+                # materials block would quietly turn the whole report into
+                # public research, which is the wrong way round.
+                if request.chat_id not in ACTIVE_SESSIONS:
+                    ACTIVE_SESSIONS[request.chat_id] = NursingTutor(request.chat_id)
+                    await ACTIVE_SESSIONS[request.chat_id].load_file_insights_from_firebase()
+
+                session_wrapper = ACTIVE_SESSIONS[request.chat_id]
+                file_insights = getattr(session_wrapper.session, "file_insights", {}) or {}
+                if not file_insights:
+                    await session_wrapper.load_file_insights_from_firebase()
+                    file_insights = getattr(session_wrapper.session, "file_insights", {}) or {}
+
+                prompt_language = _language_for_prompt(request.language)
+
+                async def prepare_question():
+                    from services.course_question_preview import stream_question_preview
+                    try:
+                        async def forward():
+                            if getattr(session_wrapper.session, "vectorstore", None) is None:
+                                restored = await vectorstore_manager.load_combined_vectorstore_from_firebase(request.chat_id)
+                                if session_wrapper.session.vectorstore is None:
+                                    session_wrapper.session.vectorstore = restored
+                            async for preview_event in stream_question_preview(
+                                getattr(session_wrapper.session, "vectorstore", None), file_insights,
+                                request.courseContext, prompt_language, course_intelligence,
+                            ):
+                                await queue.put(preview_event)
+                        await asyncio.wait_for(forward(), timeout=30)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        # A missing citation or slow generation must not lose the course plan.
+                        await queue.put({"status": "course_question_unavailable"})
+
+                preview_task = asyncio.create_task(prepare_question())
+
+                if getattr(request, 'materials_only', False):
+                    from services.course_question_preview import material_report
+                    await preview_task
+                    await queue.put({'status': 'course_intelligence_ready', 'report': material_report(
+                        course_intelligence, file_insights, request.courseContext,
+                    )})
+                    return
+
+                async for event in course_intelligence.stream_course_intelligence(
+                    request.courseContext, file_insights, prompt_language
+                ):
+                    await queue.put(event)
+                await preview_task
+            except Exception as e:
+                print(f"❌ /study/course-intelligence failed: {e}")
+                import traceback
+                traceback.print_exc()
+                await queue.put({"status": "error", "message": str(e)})
+            finally:
+                if preview_task is not None and not preview_task.done():
+                    preview_task.cancel()
+                    await asyncio.gather(preview_task, return_exceptions=True)
+                await queue.put(DONE)
+
+        producer = asyncio.create_task(produce())
+        try:
+            while True:
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=COURSE_INTELLIGENCE_HEARTBEAT_S)
+                except asyncio.TimeoutError:
+                    yield f"data: {json.dumps({'status': 'heartbeat'})}\n\n"
+                    continue
+                if item is DONE:
+                    break
+                yield f"data: {json.dumps(item)}\n\n"
+            yield f"data: {json.dumps({'status': 'complete'})}\n\n"
+        finally:
+            if not producer.done():
+                producer.cancel()
+            await asyncio.gather(producer, return_exceptions=True)
+
+    return StreamingResponse(stream_generator(), media_type="text/event-stream")
+
+
+def course_intelligence_module_context(ctx) -> str:
+    """One-line log summary. Never logs the exam description verbatim — it is
+    the student's own words about her own assessment and belongs in the
+    request, not in a shared log stream."""
+    ctx = ctx or {}
+    parts = [ctx.get("school"), ctx.get("courseCode") or ctx.get("courseName"), ctx.get("professor")]
+    named = ", ".join(p for p in parts if p) or "none"
+    return f"{named} (exam described: {bool(ctx.get('examDescription'))})"
+
+
 @app.post("/study/start")
 async def start_study_journey(request: StudyPlanRequest):
     """
@@ -4047,10 +4274,22 @@ async def start_study_journey(request: StudyPlanRequest):
                     all_topics.extend(insights.get("topics", []))
                     all_concepts.extend(insights.get("concepts", []))
 
-            unique_topics = list(set(all_topics))[:5] or ["Document Overview"]
+            fallback_topics = list(set(all_topics))[:5] or ["Document Overview"]
             key_terms = list(set(all_concepts))[:10]
 
-            print(f"📊 /study/start using insights topics: {unique_topics}")
+            # ── Course intelligence, if she ran it ────────────────────────
+            # The report's ordering replaces the arbitrary `set()` ordering
+            # above, which was insertion-hash order — i.e. no order at all.
+            # This is the single change that stops a plan following the
+            # sequence of her PowerPoint.
+            ci_report = request.courseIntelligence or None
+            unique_topics = course_intelligence.planner_topics(ci_report, fallback_topics)
+            unique_topics = _restore_diagnostic_topics(unique_topics, request.diagnostic)
+            course_brief = course_intelligence.planner_context_block(ci_report)
+
+            print(f"📊 /study/start using topics: {unique_topics}")
+            if ci_report:
+                print(f"🔎 Course intelligence attached — brief {len(course_brief)} chars")
             yield f"data: {json.dumps({'status': 'session_ready'})}\n\n"
 
             # ---------- STEP 2: plan generation (one LLM call, no redundant topic extraction) ----------
@@ -4078,7 +4317,15 @@ async def start_study_journey(request: StudyPlanRequest):
 
             hardest = [t for t in (user_prefs.get("hardestTopics") or []) if t]
             if hardest:
-                yield f"data: {json.dumps({'status': 'plan_thinking', 'step': 'focus', 'hardest': hardest})}\n\n"
+                yield f"data: {json.dumps({'status': 'plan_thinking', 'step': 'focus', 'hardest': hardest, 'source': user_prefs.get('focusSource', 'self_report')})}\n\n"
+
+            # Narrate the intelligence BEFORE 'building' so the last line the
+            # student reads before the plan appears is about her own exam.
+            if ci_report:
+                strategy = (ci_report.get('study_strategy') or {})
+                start_topic = None if request.diagnostic else (strategy.get('recommended_start') or {}).get('topic')
+                exam_block = ci_report.get('exam_analysis') or {}
+                yield f"data: {json.dumps({'status': 'plan_thinking', 'step': 'intelligence', 'start_topic': start_topic, 'exam_type': exam_block.get('exam_type'), 'coverage': (exam_block.get('coverage') or [])[:3]})}\n\n"
 
             yield f"data: {json.dumps({'status': 'plan_thinking', 'step': 'building'})}\n\n"
             path_prompt = _build_study_path_prompt(
@@ -4088,6 +4335,7 @@ async def start_study_journey(request: StudyPlanRequest):
                 prompt_language,
                 days_to_exam=days_to_exam,
                 hardest_topics=user_prefs.get("hardestTopics") or [],
+                course_brief=course_brief,
             )
             response = await llm.ainvoke([{"role": "user", "content": path_prompt}])
 
@@ -4108,6 +4356,8 @@ async def start_study_journey(request: StudyPlanRequest):
             nodes = _weight_path_by_diagnostic(
                 nodes, request.diagnostic, unique_topics, days_to_exam
             )
+            if not request.diagnostic:
+                nodes = _order_units_by_priority(nodes, unique_topics, unique_topics)
             nodes = _attach_status_and_exam_nodes(nodes, unique_topics)
             print(f"✅ /study/start built path with {len(nodes)} nodes")
 
@@ -4122,6 +4372,12 @@ async def start_study_journey(request: StudyPlanRequest):
                 "archetype": _plan_archetype(days_to_exam),
                 "days_to_exam": days_to_exam,
                 "tiers": _summarize_tiers(nodes, unique_topics),
+                # Lets the plan surface say WHY it opens where it opens, using
+                # the same recommendation the reveal already showed her. A plan
+                # that starts somewhere other than the promised topic is the
+                # one bug this whole feature cannot survive.
+                "recommended_start": _actual_recommended_start(nodes, unique_topics, request.diagnostic),
+                "course_intelligence": bool(request.courseIntelligence),
             }
             yield f"data: {json.dumps({'status': 'plan_ready', 'plan': plan_payload})}\n\n"
 
@@ -4235,7 +4491,7 @@ async def start_study_journey(request: StudyPlanRequest):
 @app.post("/study/diagnostic-quiz")
 async def generate_diagnostic_quiz(request: DiagnosticQuizRequest):
     """
-    Generate 5 breadth-first diagnostic questions spanning all major topics.
+    Generate six diagnostic questions across the course's priority topics.
     Called BEFORE showing the study plan to establish a baseline proficiency score.
 
     Uses a single LLM call to produce one question per major topic, varying
@@ -4263,7 +4519,7 @@ async def generate_diagnostic_quiz(request: DiagnosticQuizRequest):
             if insights:
                 all_topics.extend(insights.get("topics", []))
                 all_concepts.extend(insights.get("concepts", []))
-        unique_topics = list(set(all_topics))[:10]
+        unique_topics = list(dict.fromkeys(t for t in all_topics if isinstance(t, str) and t.strip()))[:10]
         unique_concepts = list(set(all_concepts))[:20]
 
         # Get document content from vectorstore (same as /study/plan, no hard fail)
@@ -4286,9 +4542,13 @@ async def generate_diagnostic_quiz(request: DiagnosticQuizRequest):
         # fluid balance." A self-report confirmed is worth little; a
         # self-report corrected is the moment the product stops feeling like a
         # quiz generator.
+        priority = [t.strip() for t in (request.priorityTopics or []) if isinstance(t, str) and t.strip()][:3]
         hardest = [t for t in (request.hardestTopics or []) if t][:3]
-        ordered_topics = hardest + [t for t in unique_topics if t not in hardest]
-        focus_topics = ordered_topics[:DIAGNOSTIC_TOPIC_LIMIT] or unique_topics[:3]
+        first_topics = priority or hardest
+        ordered_topics = list(dict.fromkeys(first_topics + unique_topics))
+        # Six questions can sample three topics twice. A fourth topic made the
+        # previous prompt request seven questions while insisting on six.
+        focus_topics = ordered_topics[:DIAGNOSTIC_DEEP_TOPICS]
 
         llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.3)
 
@@ -4304,8 +4564,11 @@ PRIORITY TOPICS (ask about these first):
 {focus_block}
 
 RULES:
-- Cover the priority topics above. Give the FIRST {DIAGNOSTIC_DEEP_TOPICS} topics TWO questions each
-  (one easier, one harder); give any remaining topic ONE question.
+- Write all questions, options, rationales and concepts in {_language_for_prompt(request.language)}.
+- Use the EXACT priority-topic labels above in each question's "topic" field.
+- Cover the priority topics above with exactly {DIAGNOSTIC_QUESTION_COUNT} questions.
+- With three topics, give each TWO questions (one easier, one harder).
+- With fewer topics, distribute all six questions evenly across those topics.
 - Two questions on a topic is the minimum evidence for deciding she is solid on
   it — one question is a coin flip, and being wrongly told she is strong is the
   one mistake here that costs her the exam.
@@ -4351,8 +4614,14 @@ Return ONLY a valid JSON array (no markdown, no explanation):
         questions = json.loads(content)
         # Safety: clamp and validate structure
         questions = [
-            q for q in questions[:DIAGNOSTIC_QUESTION_COUNT]
-            if isinstance(q.get("options"), list) and len(q["options"]) == 4
+            q for q in (questions if isinstance(questions, list) else [])[:DIAGNOSTIC_QUESTION_COUNT]
+            if isinstance(q, dict)
+            and isinstance(q.get("question"), str) and q["question"].strip()
+            and isinstance(q.get("options"), list) and len(q["options"]) == 4
+            and all(isinstance(option, str) and option.strip() for option in q["options"])
+            and type(q.get("correctIndex")) is int and 0 <= q["correctIndex"] < 4
+            and isinstance(q.get("topic"), str) and q["topic"].strip()
+            and (not focus_topics or q["topic"] in focus_topics)
         ]
 
         # Topics as WE grouped them, so the knowledge map renders the same

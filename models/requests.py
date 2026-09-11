@@ -87,6 +87,33 @@ class StudyPlanRequest(BaseModel):
     # working.
     diagnostic: Optional[dict] = None
 
+    # What the student told us about her class: school, courseCode, courseName,
+    # professor, examDescription, examDate. Collected by the course-context
+    # form during upload.
+    courseContext: Optional[dict] = None
+
+    # The report produced by /study/course-intelligence. Optional for the same
+    # reason `diagnostic` is: a client that never ran the intelligence pass, or
+    # a run that found nothing, must produce exactly the plan this endpoint
+    # produced before the feature existed. See course_intelligence.planner_topics.
+    courseIntelligence: Optional[dict] = None
+
+
+class CourseIntelligenceRequest(BaseModel):
+    """
+    Request to investigate a student's specific course before her plan is built.
+
+    `courseContext` carries what she typed (school, courseCode, courseName,
+    professor, examDescription, examDate). Every field is optional and the
+    service degrades one section at a time: no professor means no instructor
+    search, no school means no course search, and a run with neither still
+    returns a full report built from her uploaded materials.
+    """
+    chat_id: str
+    courseContext: Optional[dict] = None
+    language: str = "en"
+    materials_only: bool = False
+
 
 class StudyItemRequest(BaseModel):
     """
@@ -238,6 +265,8 @@ class DiagnosticQuizRequest(BaseModel):
     # there — it's fluid balance"), that contradiction is the moment the
     # product stops feeling like a quiz generator.
     hardestTopics: Optional[List[str]] = []
+    # Course priorities are not a student self-report of difficulty.
+    priorityTopics: Optional[List[str]] = []
 
 
 class NodeDebriefItem(BaseModel):

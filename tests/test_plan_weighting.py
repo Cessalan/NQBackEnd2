@@ -277,6 +277,16 @@ check("the curriculum stays bounded",
                   {"New A": 1, "New B": 2})) == mod.MAX_CURRICULUM_TOPICS)
 
 
+print("\n=== course priorities and diagnostic handoff ===")
+course_order = ["Cardiac", "Renal", "Endocrine"]
+calibrated = weight(generated_path(), {"Cardiac": 100, "Renal": 0}, course_order, 14)
+recommendation = mod._actual_recommended_start(calibrated, course_order, {"Cardiac": 100, "Renal": 0})
+check("the recommendation names the calibrated first topic", recommendation["topic"] == "Renal")
+check("the recommendation attributes the diagnostic", recommendation["basis"] == "diagnostic")
+check("an empty path makes no recommendation", mod._actual_recommended_start([], course_order) is None)
+tied = weight(generated_path(), {"Renal": 0, "Cardiac": 0}, course_order, 14)
+check("course priority breaks equal diagnostic results", topics_in_order(tied)[0] == "Cardiac")
+
 print("\n" + "=" * 62)
 if FAILURES:
     print("FAILED (%d): %s" % (len(FAILURES), ", ".join(FAILURES)))
