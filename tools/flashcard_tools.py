@@ -276,6 +276,9 @@ async def _generate_single_flashcard(
         input_variables=["content", "topic", "card_num", "language", "cards_to_avoid", "existing_topics"],
         template="""
 You are creating flashcard {card_num} in {language}.
+Deck subject: {topic}
+Previously used topic labels (context only, never copy this whole list): {existing_topics}
+Choose one short, meaningful subject label for this card. Never use a placeholder or instructions as a topic.
 
 🚨 CRITICAL: USE ONLY DOCUMENT CONTENT - NO HALLUCINATION!
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -308,7 +311,7 @@ BACK: "• **Bradycardie** = FC < 60 bpm
 {{
     "front": "Short question about NEW concept",
     "back": "• **Term** = brief definition",
-    "topic": "{existing_topics}",
+    "topic": "Short subject label for this card",
     "hint": null
 }}"""
     )
@@ -337,7 +340,8 @@ BACK: "• **Bradycardie** = FC < 60 bpm
             return None
 
         # Ensure topic field exists
-        if 'topic' not in parsed_flashcard or not parsed_flashcard['topic']:
+        if (not isinstance(parsed_flashcard.get('topic'), str) or not parsed_flashcard['topic'].strip()
+                or any(marker in parsed_flashcard['topic'].lower() for marker in ('none yet', 'creating the first topic', 'short subject label', 'existing_topics'))):
             parsed_flashcard['topic'] = topic if topic else "General"
             print(f"⚠️ Topic field missing, assigned: {parsed_flashcard['topic']}")
         else:

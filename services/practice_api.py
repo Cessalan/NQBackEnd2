@@ -31,6 +31,19 @@ class PracticeRequest(BaseModel):
     language: str = Field(default="en", max_length=20)
 
 
+class DebriefRequest(BaseModel):
+    chat_id: str = Field(min_length=1, max_length=200)
+    message_id: str = Field(min_length=1, max_length=200, pattern=r'^[^/]+$')
+    language: str = Field(default='en', max_length=20)
+
+
+class FlashcardTutorRequest(DebriefRequest):
+    card_index: int = Field(ge=0, le=199)
+    revealed: bool = False
+    message: str = Field(min_length=1, max_length=4000)
+    history: list[dict] = Field(default_factory=list, max_length=16)
+
+
 def owner(request, chat_id):
     from firebase_admin import auth, firestore
     token = request.headers.get("authorization", "")
@@ -100,6 +113,25 @@ def finish(uid, request_id, questions):
 
 def build_router(setup_session):
     router = APIRouter()
+    @router.post('/flashcards/tutor')
+    async def flashcard_tutor(body: FlashcardTutorRequest, request: Request):
+        await asyncio.to_thread(owner, request, body.chat_id)
+        if len(json.dumps(body.model_dump(), default=str)) > 40000:
+            raise HTTPException(413, 'Card discussion is too large.')
+        from services.flashcard_tutor import respond_to_card
+        try:
+            return await respond_to_card(body)
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(503, 'Your tutor could not respond. Please retry.')
+
+    @router.post('/quiz/debrief')
+    async def debrief(body: DebriefRequest, request: Request):
+        await asyncio.to_thread(owner, request, body.chat_id)
+        from services.practice_debrief import create_debrief
+        return await create_debrief(body.chat_id, body.message_id, body.language)
+
     @router.post("/quiz/tutor")
     async def tutor(body: TutorRequest, request: Request):
         await asyncio.to_thread(owner, request, body.chat_id)
