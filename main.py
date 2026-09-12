@@ -7610,6 +7610,13 @@ async def files_proxy(chat_id: str, filename: str):
 async def warm_up():
     return {"status": "ok", "message": "Server warmed up successfully"}
 
+
+@app.post("/seo/result-note")
+async def seo_result_note(request: Request, body: dict):
+    """A short tutor note after a public landing-page practice set."""
+    from services.seo_result_note import write_note
+    return await write_note(body, request)
+
 # ============================================================================
 # RUN THE APP
 # ============================================================================

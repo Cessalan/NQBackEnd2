@@ -88,6 +88,23 @@ def _log_billing_event(user_ref, event, fields: dict):
     """
     doc = {"type": event.get("type"), "at": _event_time(event)}
     doc.update(fields)
+    # Attribute actual paid checkouts, never checkout-button clicks. The event
+    # document keeps Stripe's idempotent ID and its authoritative amount.
+    if (event.get("type") == "checkout.session.completed"
+            and event.get("data", {}).get("object", {}).get("payment_status") == "paid"
+            and (fields.get("amountTotal") or 0) > 0):
+        try:
+            attribution = user_ref.collection("seoAttribution").document("firstTouch").get()
+            acquisition = attribution.to_dict() if attribution.exists else None
+            if acquisition:
+                doc["seoConversion"] = {
+                    "event": "seo_paid_conversion",
+                    **{key: acquisition.get(key) for key in
+                       ("landingPage", "keywordCluster", "funnelId", "source", "campaign")},
+                }
+        except Exception:
+            # Attribution outages must not block billing fulfillment.
+            pass
     user_ref.collection("billingEvents").document(str(event.get("id"))).set(doc)
 
 
