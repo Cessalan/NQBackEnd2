@@ -88,7 +88,32 @@ def _from_address():
 
 
 def _app_url():
+    """Where the STUDENT goes — the React app. Resume links, CTAs."""
     return _env("APP_URL", "https://docai-efb03.web.app").rstrip("/")
+
+
+def _api_url():
+    """
+    Where OUR OWN routes live — this FastAPI service. The unsubscribe link.
+
+    THIS IS NOT APP_URL, and conflating them silently breaks the one thing that
+    has to work before anything may be mailed at all.
+
+    /api/email/unsubscribe is a route on this Cloud Run service. APP_URL points
+    at Firebase Hosting, whose only rewrite is `** -> /index.html` (checked in
+    firebase.json 2026-09-12) — there is no /api/** proxy to Cloud Run. So an
+    unsubscribe link built on APP_URL returns the React shell: a student
+    clicking "Unsubscribe" would get the app's loading screen, stay subscribed,
+    and have no way to tell us to stop except a spam complaint. The same URL
+    goes in the List-Unsubscribe header that Gmail's one-click control calls,
+    so Gmail would be hitting the SPA too.
+
+    Either add an /api/** rewrite to Firebase Hosting or leave this pointing
+    straight at the service. Pointing straight at it is fewer moving parts and
+    what the default does.
+    """
+    return _env("EMAIL_LINK_BASE",
+                "https://ragfastapi-1075876064685.europe-west1.run.app").rstrip("/")
 
 
 def _postal_address():
@@ -134,7 +159,8 @@ def verify_unsubscribe_token(token: str):
 
 
 def unsubscribe_url(uid: str) -> str:
-    return f"{_app_url()}/api/email/unsubscribe?token={make_unsubscribe_token(uid)}"
+    # _api_url, not _app_url — see the docstring on _api_url.
+    return f"{_api_url()}/api/email/unsubscribe?token={make_unsubscribe_token(uid)}"
 
 
 # ── Consent ───────────────────────────────────────────────────────────────
@@ -213,16 +239,92 @@ def _record(db, key: str, uid: str, campaign: str, to: str, status: str, extra=N
         print(f"⚠️  emailLog write failed ({key}): {e}")
 
 
+# A count we could not read must never read as "plenty of budget left". Any
+# number above every plausible cap makes the cap trip instead.
+_CAP_UNKNOWN = 10 ** 9
+
+
 def sent_today(db, campaign: str = None) -> int:
-    """How many have gone out since UTC midnight — the warm-up budget."""
+    """
+    How many have gone out since UTC midnight — the warm-up budget.
+
+    THE FILTER IS DELIBERATELY ONE FIELD, and that is the whole point of this
+    function's history. It used to range-filter `sentAt` AND equality-filter
+    `status`, which Firestore cannot serve without a composite index that does
+    not exist on this project. The query raised FailedPrecondition every time,
+    and the bare `except: return 0` turned that into "nothing sent today" — so
+    `used >= cap` was `0 >= 50` forever and the daily cap NEVER TRIPPED.
+
+    Measured against production 2026-09-12: two rows written with status "sent"
+    and sentAt=now returned 0. The one guard standing between a cold domain and
+    a 2,000-message first run was inert, on a list we cannot re-acquire.
+
+    So: range-filter on `sentAt` alone, which needs no composite index, and
+    match status/campaign here. Today's log is at most a few hundred rows.
+
+    Fails CLOSED. If we cannot count what has already gone out, we cannot know
+    there is budget left, so this returns a number that exhausts any cap.
+    """
     start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     try:
-        q = db.collection(LOG_COLLECTION).where("sentAt", ">=", start).where("status", "==", "sent")
-        if campaign:
-            q = q.where("campaign", "==", campaign)
-        return sum(1 for _ in q.stream())
-    except Exception:
-        return 0
+        q = db.collection(LOG_COLLECTION).where(
+            filter=firestore.FieldFilter("sentAt", ">=", start))
+        n = 0
+        for snap in q.stream():
+            d = snap.to_dict() or {}
+            if d.get("status") != "sent":
+                continue
+            if campaign and d.get("campaign") != campaign:
+                continue
+            n += 1
+        return n
+    except Exception as e:
+        print(f"⚠️  sent_today failed, treating the daily cap as exhausted: {e}")
+        return _CAP_UNKNOWN
+
+
+def remaining_today(db) -> int:
+    """
+    How many more may go out today.
+
+    Campaign runners check this ONCE before their loop instead of letting
+    send_email reject each candidate in turn: a 2,000-candidate announcement
+    against a 50/day cap would otherwise rescan today's log 2,000 times to
+    refuse 1,950 of them.
+    """
+    return max(0, daily_cap() - sent_today(db))
+
+
+def already_sent_uids(db, campaign: str):
+    """
+    Which uids have already received this campaign. None if we cannot tell.
+
+    A campaign larger than the daily cap needs this BEFORE the limit is
+    applied, not after. With 2,000 recipients and a 50/day cap, a selector that
+    simply takes the first 50 each day hands send_email the same 50 people it
+    already mailed; all 50 are skipped as already_sent and day two delivers
+    nothing. The campaign stalls at 50 recipients forever and looks like it ran.
+
+    Equality on `campaign` alone needs no composite index — verified against
+    production 2026-09-12, where adding `status` to it did.
+
+    Returns None rather than an empty set on failure, because those two mean
+    opposite things: an empty set says "nobody has been mailed yet, send to
+    everyone", which is the one wrong answer that cannot be taken back. Callers
+    must treat None as "abort the run".
+    """
+    try:
+        out = set()
+        q = db.collection(LOG_COLLECTION).where(
+            filter=firestore.FieldFilter("campaign", "==", campaign))
+        for snap in q.stream():
+            d = snap.to_dict() or {}
+            if d.get("status") == "sent" and d.get("uid"):
+                out.add(d["uid"])
+        return out
+    except Exception as e:
+        print(f"⚠️  already_sent_uids({campaign}) failed: {e}")
+        return None
 
 
 def _footer(uid: str) -> str:
@@ -320,6 +422,10 @@ def preflight():
         "api_key_present": bool(_api_key()),
         "from": _from_address(),
         "app_url": _app_url(),
+        # Where unsubscribe links point. If this is the hosting domain rather
+        # than the API service, every opt-out in every message is dead.
+        "link_base": _api_url(),
+        "unsubscribe_example": unsubscribe_url("preflight-check"),
         "postal_address_set": bool(_postal_address()),
         "daily_cap": daily_cap(),
         "token_secret_dedicated": bool(_env("EMAIL_TOKEN_SECRET")),

@@ -337,6 +337,7 @@ from services import usage_guard
 # ══════════════════════════════════════════════════════════════════════════
 from services import email_sender
 from services import email_campaigns
+from services import email_announcements
 # firestore is imported per-function elsewhere in this file; the email
 # routes need it at module scope.
 from firebase_admin import firestore as _fs_email
@@ -409,14 +410,21 @@ async def email_run(request: Request):
 
     campaign = (body or {}).get("campaign", "winback_gap")
     limit = int((body or {}).get("limit", email_sender.daily_cap()))
+    # Only the announcement runner uses this. It names which authored message
+    # to send, and an announcement with no slug sends nothing rather than
+    # picking one for you.
+    slug = (body or {}).get("slug")
 
     runner = email_campaigns.CAMPAIGN_RUNNERS.get(campaign)
     if not runner:
-        raise HTTPException(status_code=400, detail=f"unknown campaign: {campaign}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"unknown campaign: {campaign}. "
+                   f"known: {sorted(email_campaigns.CAMPAIGN_RUNNERS)}")
 
-    print(f"📧 Running campaign {campaign} (limit={limit}, "
+    print(f"📧 Running campaign {campaign} (limit={limit}, slug={slug}, "
           f"enabled={email_sender.is_enabled()})")
-    result = runner(_fs_email.client(), limit=limit)
+    result = runner(_fs_email.client(), limit=limit, slug=slug)
     # Never echo addresses back over HTTP; counts are what a scheduler needs.
     result.pop("detail", None)
     return {"campaign": campaign, "enabled": email_sender.is_enabled(), **result}
@@ -426,7 +434,42 @@ async def email_run(request: Request):
 async def email_preflight():
     """Config readiness. Safe to call in production: reports only whether each
     setting is present, never its value."""
-    return email_sender.preflight()
+    return {
+        **email_sender.preflight(),
+        "campaigns": sorted(email_campaigns.CAMPAIGN_RUNNERS),
+        # Which authored announcements exist and whether each is approved. The
+        # draft gate is the go/no-go for a 2,000-person send, so it belongs in
+        # the readiness check rather than only in the code.
+        "announcements": email_announcements.listing(),
+    }
+
+
+@app.get("/api/email/audience")
+async def email_audience(request: Request, campaigns: bool = False):
+    """
+    How many people each audience holds, sending nothing.
+
+    Read this before flipping EMAIL_ENABLED. A campaign that selects zero
+    recipients is not a campaign, and nothing in this system used to be able to
+    tell you that: exam_countdown's template shipped with no selector at all,
+    and winback_gap reaches 28 of 348 dormant students.
+
+    AUTHENTICATED with the same secret as /run. It returns no addresses, only
+    counts, but those counts describe the size and shape of the user base.
+
+    `?campaigns=true` also runs each real selector. That is minutes of
+    Firestore reads, so it is off by default.
+    """
+    import hmac as _hmac
+    expected = (os.getenv("EMAIL_CRON_SECRET") or "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail="EMAIL_CRON_SECRET not configured")
+    provided = (request.headers.get("x-cron-secret") or "").strip()
+    if not provided or not _hmac.compare_digest(provided, expected):
+        raise HTTPException(status_code=401, detail="bad or missing x-cron-secret")
+
+    return email_campaigns.audience_report(_fs_email.client(),
+                                           include_campaigns=campaigns)
 
 
 @app.post("/api/email/test")

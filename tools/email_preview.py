@@ -36,6 +36,7 @@ import webbrowser
 # has to be importable for `services.*` to resolve.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from services import email_announcements as A
 from services import email_templates as T
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "email_previews")
@@ -50,8 +51,37 @@ SAMPLES = {
     ),
     "exam_countdown": dict(
         days_away=3, weak_topic="Fluid & Electrolytes", steps_left=4,
+        minutes_left=38, measured=True,
         resume_url="https://example.com/c/abc123",
     ),
+    # The same message for a student with no answered questions, where the
+    # "losing the most marks" claim is not available. Both variants are
+    # previewed because the difference between them is the honesty of the
+    # message, and that is exactly the kind of thing a reviewer should see
+    # side by side rather than take on trust.
+    "exam_countdown_unmeasured": dict(
+        days_away=1, weak_topic="Acute Kidney Injury", steps_left=15,
+        measured=False, resume_url="https://example.com/c/abc123",
+    ),
+    # Values taken from a real selection against production on 2026-09-12:
+    # a 12-step plan, untouched for 9 days, opening on a 4-minute quick check.
+    "plan_unstarted": dict(
+        first_name="Maya", first_topic="Electrolyte Disorders",
+        first_kind="quick check", first_minutes=4, steps_total=12,
+        days_since=9, resume_url="https://example.com/c/abc123",
+    ),
+    # And the no-name case: 42% of the addressable list has no display name.
+    "plan_unstarted_noname": dict(
+        first_name=None, first_topic="Hepatitis and Clinical Progression",
+        first_kind="lesson", first_minutes=5, steps_total=18,
+        days_since=1, resume_url="https://example.com/c/abc123",
+    ),
+}
+
+# Which template each preview name renders, where the name is not the template.
+ALIASES = {
+    "exam_countdown_unmeasured": "exam_countdown",
+    "plan_unstarted_noname": "plan_unstarted",
 }
 
 COMMON = dict(
@@ -61,20 +91,64 @@ COMMON = dict(
 
 
 def build(name):
-    fn = T.CAMPAIGNS[name]
+    """
+    Render one preview.
+
+    An `announce_<slug>` name renders the AUTHORED content from
+    email_announcements rather than sample data. That is the point of
+    previewing an announcement: nothing about it is derived per recipient, so
+    the only check available is a human reading the actual words that will
+    ship. Sample copy here would defeat the exercise entirely.
+    """
+    if name.startswith("announce_"):
+        slug = name[len("announce_"):]
+        a = A.get(slug)
+        if not a:
+            raise KeyError(f"unknown announcement: {slug}")
+        return T.announcement(
+            title=a["title"], body=a.get("body") or (),
+            bullets_list=a.get("bullets") or (),
+            cta_label=a.get("cta_label"),
+            cta_url=(a.get("cta_url") or "").replace("/", "https://example.com/", 1)
+                    if (a.get("cta_url") or "").startswith("/") else a.get("cta_url"),
+            preheader=a.get("preheader") or "",
+            first_name="Maya", sign_off=a.get("sign_off"), **COMMON)
+
+    fn = T.CAMPAIGNS[ALIASES.get(name, name)]
     kwargs = dict(SAMPLES.get(name, {}))
     kwargs.update(COMMON)
     return fn(**kwargs)
 
 
+def all_names():
+    """Every derived template, then every authored announcement."""
+    derived = [n for n in T.CAMPAIGNS if n != "announcement"]
+    derived += [n for n in SAMPLES if n in ALIASES]
+    return derived + [f"announce_{slug}" for slug in A.ANNOUNCEMENTS]
+
+
+def _utf8_stdout():
+    """
+    The Windows console here is cp1252, and this tool prints ✓ and ⚠️ — so it
+    died with UnicodeEncodeError partway through the first campaign and had
+    never once rendered a full set. Subject lines carry en dashes and student
+    topics carry accents, so stripping the glyphs would only move the crash.
+    """
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+
 def main():
+    _utf8_stdout()
     ap = argparse.ArgumentParser()
     ap.add_argument("--open", action="store_true", help="open the index in a browser")
     ap.add_argument("--campaign", help="render only this one")
     args = ap.parse_args()
 
     os.makedirs(OUT, exist_ok=True)
-    names = [args.campaign] if args.campaign else list(T.CAMPAIGNS)
+    names = [args.campaign] if args.campaign else all_names()
 
     cards = ""
     for name in names:
@@ -89,6 +163,22 @@ def main():
 
         # Cheap lint for the mistakes that actually bite.
         warn = []
+        gate = ""
+        if name.startswith("announce_"):
+            slug = name[len("announce_"):]
+            ok, why = A.is_sendable(slug)
+            a = A.get(slug) or {}
+            gate = f"{a.get('status', '?')} → audience: {a.get('audience', '?')}"
+            if ok:
+                # Not a defect — but the only difference between copy sitting
+                # in the repo and copy in 2,000 inboxes is this one field, so
+                # it should never be something you scroll past.
+                warn.append("APPROVED — this sends once EMAIL_ENABLED=true")
+            else:
+                gate += f"  ({why})"
+            if not a.get("cta_url"):
+                warn.append("no CTA — an announcement with nothing to click "
+                            "is a notification, not an update")
         if "EMAIL_POSTAL_ADDRESS" in msg["html"]:
             warn.append("postal address missing (CAN-SPAM)")
         if "unsubscribe" not in msg["html"].lower():
@@ -101,6 +191,8 @@ def main():
             warn.append("empty plain-text part (hurts deliverability)")
 
         print(f"\n{name}")
+        if gate:
+            print(f"  gate      : {gate}")
         print(f"  subject   : {msg['subject']}  ({len(msg['subject'])} chars)")
         print(f"  preheader : {msg['preheader']}")
         print(f"  html      : {html_path}")
@@ -115,7 +207,8 @@ def main():
         <section>
           <h2>{name}</h2>
           <p class="meta"><b>Subject:</b> {msg['subject']}<br>
-             <b>Preheader:</b> {msg['preheader']}</p>
+             <b>Preheader:</b> {msg['preheader']}
+             {f"<br><b>Gate:</b> {gate}" if gate else ""}</p>
           <ul class="warn">{warn_html}</ul>
           <div class="panes">
             <div><h3>As rendered</h3><iframe src="{name}.html"></iframe></div>
