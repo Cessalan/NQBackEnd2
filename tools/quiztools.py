@@ -1249,7 +1249,7 @@ async def generate_quiz_stream(
 
         # Normalize quiz_mode
         normalized_quiz_mode = quiz_mode.lower() if quiz_mode else "knowledge"
-        if normalized_quiz_mode not in ["nclex", "knowledge"]:
+        if normalized_quiz_mode not in ["nclex", "knowledge", "applied"]:
             normalized_quiz_mode = "knowledge"
 
         # Check both the topic string AND the original user_prompt for mode keywords.
@@ -1677,6 +1677,21 @@ async def _generate_single_question(
             - But {target_letter} should be the ONLY factually correct answer
             - The other options should be common misconceptions or incorrect facts
             """
+        elif quiz_mode == "applied":
+            # Deliberately NOT the NCLEX wording below: applied questions have one
+            # right answer, not a "best" one. Telling the model to pick the BEST
+            # option is what turns a rung-2 question into a rung-3 ranking question.
+            answer_instruction = f"""
+            CRITICAL REQUIREMENT - CORRECT ANSWER POSITION:
+            You MUST make option **{target_letter})** the correct answer for this question.
+
+            Design your question so that {target_letter} is the ONLY correct answer
+            for this patient's condition.
+            - All 4 options should be real nursing actions or parameters
+            - But only {target_letter} should be correct for THIS condition
+            - The others should be actions that are valid in general nursing practice
+              but wrong here — not "less optimal", actually wrong
+            """
         else:
             answer_instruction = f"""
             CRITICAL REQUIREMENT - CORRECT ANSWER POSITION:
@@ -1922,6 +1937,164 @@ async def _generate_single_question(
     - Keep the question stem and options concise and factual.
     - MUST include the "topic" field at the root level of the JSON.
     - MUST include "quizMode": "knowledge" in the response.
+    """
+    elif quiz_mode == "applied":
+        # APPLIED MODE: the middle rung. A named condition from HER documents,
+        # plus what the nurse monitors or does about it. One correct answer, no
+        # priority ranking — that is NCLEX mode's job.
+        #
+        # This exists because three post-exam debriefs independently described
+        # exactly this shape ("patient with lupus — what should be monitored?")
+        # and neither of the other two templates can produce it: knowledge mode
+        # bans patient scenarios outright, NCLEX mode always ranks.
+        template_str = """
+    You are a {language}-speaking nursing quiz generator creating APPLIED questions.
+
+    Generate **EXACTLY ONE applied multiple choice question** about: {topic}
+
+    Difficulty: {difficulty}
+    Question number: {question_num}
+
+    🎯 STUDENT CONTEXT — adapt the question to match:
+    {learning_objective_instruction}
+
+    {answer_instruction}
+
+    CRITICAL - DO NOT repeat these questions:
+    {questions_to_avoid}
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    STUDENT'S DOCUMENT CONTENT:
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    {content}
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    WHAT "APPLIED" MEANS — read this carefully, it is the whole point:
+
+    There are three rungs of nursing question. You are writing the MIDDLE one.
+      1. KNOWLEDGE  - "Which class of medication is furosemide?"             <- NOT this
+      2. APPLIED    - "A patient is started on furosemide. Which lab value
+                       should the nurse monitor?"                            <- THIS
+      3. NCLEX      - "K+ is 2.8 with cramps. Which action should the
+                       nurse take FIRST?"                                    <- NOT this
+
+    An APPLIED question puts a real patient with a NAMED condition, medication, device
+    or situation in the stem, then asks what the nurse MONITORS, DOES, TEACHES,
+    ASSESSES or DOCUMENTS. There is exactly ONE right answer and the student either
+    knows it or does not — she is not weighing competing correct actions.
+
+    🚨 GROUNDING RULE (non-negotiable):
+    The condition / medication / device / situation named in your stem MUST appear in
+    the document content above. You may use your own nursing knowledge for the clinical
+    REASONING about it — what is monitored, which action applies — but you may NOT
+    invent the subject itself. If the content does not name a condition you can build
+    on, pick a different aspect of the same content rather than inventing one.
+
+    🚨 NO PRIORITY RANKING. These words are BANNED from the question stem:
+    FIRST, PRIORITY, MOST IMPORTANT, IMMEDIATE, INITIAL, BEST.
+    Those belong to rung 3. If two of your options are both defensible actions and the
+    student has to decide which matters more, you have written the wrong rung.
+
+    GOOD question examples (USE THESE STYLES):
+    - "A patient with systemic lupus erythematosus is seen for follow-up. Which specimen should the nurse collect monthly?"
+    - "A patient is discharged with crutches. Which instruction should the nurse give about climbing stairs?"
+    - "A patient is receiving furosemide. Which lab value should the nurse monitor?"
+    - "A patient has a new colostomy. Which finding should the nurse report to the provider?"
+
+    BAD question examples (DO NOT USE):
+    - "What is the primary purpose of furosemide?" (rung 1 — no patient)
+    - "Which action should the nurse take FIRST?" (rung 3 — ranking)
+    - "A patient with sarcoidosis..." when sarcoidosis is nowhere in the content (invented subject)
+
+    DISTRACTOR DESIGN:
+    Each wrong option must be a REAL nursing action or parameter that is simply wrong
+    for THIS condition — something a student who half-knows the topic would pick.
+    Never nonsense, never an option written to be obviously wrong.
+
+    {existing_topics_instruction}
+    TOPIC ASSIGNMENT:
+    - Assign a SPECIFIC topic/subject to this question based on what it tests
+    - The topic should be 2-4 words maximum
+    - Be specific and descriptive (e.g., "Lupus Monitoring" not "Autoimmune")
+    - CRITICAL: Write the topic in {language} (same language as the quiz)
+    - IF EXISTING TOPICS WERE PROVIDED ABOVE, try to match to one of those first!
+
+    ─────────────────────────────────────────────────────────────
+    STEP-BY-STEP ANALYSIS (complete ALL steps before writing the question):
+    ─────────────────────────────────────────────────────────────
+
+    STEP 1 — FIND THE SUBJECT IN THE CONTENT
+    Which condition, medication, device or situation does the content actually name?
+    Quote the phrase. If you cannot quote one, you cannot write this question.
+
+    STEP 2 — PICK THE NURSING RESPONSE
+    For that subject, what does the nurse monitor, do, teach, assess or document?
+    This may come from your own nursing knowledge — it need not be in the content.
+
+    STEP 3 — WRITE THE STEM
+    One or two sentences: the patient, the named subject, and the question.
+    No vital signs to interpret, no competing priorities, no FIRST.
+
+    STEP 4 — DESIGN THE DISTRACTORS
+    Three real nursing actions/parameters that are wrong for THIS condition,
+    each with a reason a student might pick it.
+
+    STEP 5 — VALIDATE
+    ✓ The subject of the stem is quoted from the content
+    ✓ Exactly ONE option is correct — no "best choice" ambiguity
+    ✓ The stem contains none of FIRST/PRIORITY/MOST IMPORTANT/IMMEDIATE/INITIAL/BEST
+    ✓ Difficulty matches: {difficulty}
+
+    ─────────────────────────────────────────────────────────────
+    Now return ONLY valid JSON (no markdown wrapper).
+    The "_reasoning" field MUST come first — fill it out before writing anything else.
+    ─────────────────────────────────────────────────────────────
+    {{
+        "_reasoning": {{
+            "grounding": "The exact phrase from the document content naming the condition, medication or device this question is built on. If you cannot fill this honestly, you have invented the subject — start over with different content.",
+            "nursing_response": "What the nurse monitors/does for that subject, and where that knowledge comes from",
+            "applied_check": "Why this is rung 2 and not rung 1 or rung 3",
+            "no_ranking_check": "Confirm the stem contains none of FIRST/PRIORITY/MOST IMPORTANT/IMMEDIATE/INITIAL/BEST",
+            "distractors": [
+                "Wrong A: [option] — why a student picks this",
+                "Wrong B: [option] — why a student picks this",
+                "Wrong C: [option] — why a student picks this"
+            ]
+        }},
+        "question": "A patient with <subject from the content> ... Which ... should the nurse ...?",
+        "questionType": "mcq",
+        "quizMode": "applied",
+        "options": [
+            "A) First option",
+            "B) Second option",
+            "C) Third option",
+            "D) Fourth option"
+        ],
+        "answer": "X) The correct option",
+        "correct_blurb": "ONE plain-text sentence (≤ 25 words) stating why the correct answer is correct. No HTML, no per-option breakdown — that full rationale is generated on demand by /quiz_rationale when the user clicks Learn more.",
+        "topic": "Specific Topic Name",
+        "metadata": {{
+            "sourceLanguage": "{language}",
+            "topic": "{topic}",
+            "category": "nursing",
+            "difficulty": "{difficulty}",
+            "quizMode": "applied",
+            "correctAnswerIndex": 0,
+            "sourceDocument": "conversational_generation",
+            "keywords": ["relevant", "keywords"]
+        }}
+    }}
+
+    Formatting Rules (CRITICAL):
+    - "correct_blurb" is the ONLY rationale you ship inline with the question.
+      Keep it to ONE sentence, ≤ 25 words, plain text. No HTML, no <b>, no <strong>, no markdown.
+    - Do NOT include any per-option ("Option A is incorrect because…") breakdown — that
+      full rationale is generated on demand by a separate service when the student
+      clicks Learn more, so generating it here would be wasted tokens.
+    - MUST include the "topic" field at the root level of the JSON.
+    - MUST include "quizMode": "applied" in the response.
+    - The stem MUST contain a patient and a subject drawn from the content.
+    - The stem MUST NOT ask the student to rank, order, or pick what comes FIRST.
     """
     else:
         # NCLEX MODE (default): Clinical judgment questions with scenarios

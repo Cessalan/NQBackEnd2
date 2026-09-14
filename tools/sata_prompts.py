@@ -30,6 +30,7 @@ from langchain.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
 from langchain_core.output_parsers import StrOutputParser
 import json
+import math
 import random
 
 # ============================================
@@ -217,6 +218,130 @@ Critical Rules:
 """
 
 
+SATA_APPLIED_PROMPT_TEMPLATE = """
+You are a {language}-speaking nursing quiz generator creating APPLIED SATA (Select All That Apply) questions.
+
+Generate **EXACTLY ONE applied SATA question** about: {topic}
+
+Difficulty: {difficulty}
+Question number: {question_num}
+
+CRITICAL - DO NOT repeat these questions:
+{questions_to_avoid}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STUDENT'S DOCUMENT CONTENT:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{content}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+WHAT "APPLIED" MEANS — read this carefully, it is the whole point:
+
+There are three rungs of nursing question. You are writing the MIDDLE one.
+  1. KNOWLEDGE  - "Which of these are symptoms of hypoglycemia?"        <- NOT this
+  2. APPLIED    - "A patient is started on furosemide. Which should
+                   the nurse monitor? (Select all that apply)"           <- THIS
+  3. NCLEX      - "K+ is 2.8 with cramps. Which action FIRST?"           <- NOT this
+
+An APPLIED question puts a real patient with a NAMED condition, medication, device or
+situation in the stem, then asks what the nurse MONITORS, DOES, TEACHES, ASSESSES or
+DOCUMENTS. Each option is judged on its own merits — true or false for THIS patient.
+
+🚨 GROUNDING RULE (non-negotiable):
+The condition / medication / device / situation named in your stem MUST appear in the
+document content above. You may use your own nursing knowledge for the clinical
+REASONING about it — what is monitored, which actions apply — but you may NOT invent
+the subject itself. If the content does not name a condition you can build on, pick a
+different aspect of the same content rather than inventing one.
+
+🚨 NO PRIORITY RANKING. These words are BANNED from the question stem:
+FIRST, PRIORITY, MOST IMPORTANT, IMMEDIATE, INITIAL, BEST.
+Those belong to rung 3. Every correct option here is simply correct — the student is
+not ordering or ranking anything.
+
+GOOD question examples (USE THESE STYLES):
+- "A patient with systemic lupus erythematosus is seen for routine follow-up. Which should the nurse monitor? (Select all that apply)"
+- "A patient is discharged home with a walker. Which instructions should the nurse include? (Select all that apply)"
+- "A patient is receiving furosemide. Which findings should the nurse report? (Select all that apply)"
+
+BAD question examples (DO NOT USE):
+- "Which of the following are symptoms of hypoglycemia?" (rung 1 — no patient)
+- "Which action should the nurse take FIRST?" (rung 3 — ranking)
+- "A patient with sarcoidosis..." when sarcoidosis is nowhere in the content (invented subject)
+
+SATA APPLIED QUESTION REQUIREMENTS:
+
+1. **Question Format:**
+   - Open with the patient and the named condition/medication/device from the content
+   - End the question with "(Select all that apply)" or the {language} equivalent
+   - Ask what the nurse monitors, does, teaches, assesses or documents
+
+2. **Options (MUST have exactly 5-6 options):**
+   - Provide 5-6 plausible nursing actions or findings (A through E or F)
+   - EXACTLY {num_correct} options should be correct FOR THIS PATIENT
+   - Incorrect options must be real nursing actions that are simply wrong for this
+     condition — never nonsense, never actions invented to be obviously wrong
+   - Mix up the order - don't cluster correct answers together
+
+3. **Answer Array:**
+   - List ALL correct options in the "answer" field as an array
+
+4. **Justification Format:**
+   - Explain why EACH option applies or does not apply to THIS patient
+   - Use <b>...</b> for option-label headers like "A, C, and D are correct" (visual emphasis only, NOT clickable)
+   - Use <strong>...</strong> ONLY for medical terminology — drugs, conditions, signs, labs, anatomy, procedures. Each <strong> term in the rendered UI becomes a tappable popover, so wrap the noun phrase only — never an option label, generic word, or full sentence.
+   - Aim for 2–5 <strong> medical terms across the full justification.
+
+TOPIC ASSIGNMENT:
+- Assign a SPECIFIC topic/subject to this question
+- The topic should be 2-4 words maximum in {language}
+- Be specific (e.g., "Lupus Monitoring" not "Autoimmune")
+
+Return ONLY valid JSON (no markdown wrapper).
+The "_reasoning" field MUST come first — fill it out before writing anything else.
+{{
+    "_reasoning": {{
+        "grounding": "The exact phrase from the document content naming the condition, medication or device this question is built on. If you cannot fill this honestly, you have invented the subject — start over with different content.",
+        "applied_check": "Why this is rung 2: what the patient has, and what the nurse is being asked to monitor or do",
+        "no_ranking_check": "Confirm the stem contains none of FIRST/PRIORITY/MOST IMPORTANT/IMMEDIATE/INITIAL/BEST"
+    }},
+    "question": "A patient with <condition from the content> ... Which should the nurse monitor? (Select all that apply)",
+    "questionType": "sata",
+    "quizMode": "applied",
+    "options": [
+        "A) First option",
+        "B) Second option",
+        "C) Third option",
+        "D) Fourth option",
+        "E) Fifth option",
+        "F) Sixth option"
+    ],
+    "answer": ["A) First option", "C) Third option"],
+    "justification": "<b>A and C are correct.</b> ... <br><br><b>B is incorrect</b> because ...",
+    "topic": "Specific Topic Name",
+    "scoringType": "partial",
+    "metadata": {{
+        "sourceLanguage": "{language}",
+        "questionType": "sata",
+        "quizMode": "applied",
+        "category": "nursing",
+        "difficulty": "{difficulty}",
+        "numCorrectOptions": {num_correct},
+        "sourceDocument": "conversational_generation"
+    }}
+}}
+
+Critical Rules:
+1. The "questionType" field MUST be "sata"
+2. The "quizMode" field MUST be "applied"
+3. The "answer" field MUST be an ARRAY of correct options (not a single string)
+4. Include EXACTLY {num_correct} correct answers in the array
+5. Write everything in {language}
+6. The stem MUST contain a patient and a condition drawn from the content
+7. The stem MUST NOT ask the student to rank, order, or pick what comes FIRST
+"""
+
+
 # ============================================
 # SATA QUESTION GENERATOR
 # ============================================
@@ -305,9 +430,12 @@ async def generate_sata_question(
     print(f"🎮 Quiz mode: {quiz_mode}")
     print(f"{'='*60}\n")
 
-    # Select template based on quiz mode
+    # Select template based on quiz mode. Three rungs: factual recall,
+    # applied (patient + named condition, no ranking), NCLEX clinical judgement.
     if quiz_mode == "knowledge":
         template_to_use = SATA_KNOWLEDGE_PROMPT_TEMPLATE
+    elif quiz_mode == "applied":
+        template_to_use = SATA_APPLIED_PROMPT_TEMPLATE
     else:
         template_to_use = SATA_PROMPT_TEMPLATE
 
@@ -537,6 +665,97 @@ def distribute_question_types(
         random.shuffle(result)
         print(f"📊 Other type distribution: {result}")
 
+    return result
+
+
+# ============================================
+# QUIZ MODE DISTRIBUTION
+# ============================================
+
+# What fraction of a node's questions should be APPLIED (patient + condition,
+# "what does the nurse monitor/do") rather than KNOWLEDGE (plain recall).
+#
+# Keyed on the planner's node difficulty, which already ramps across a plan:
+# a topic runs quick-check(1) -> lesson(1) -> quiz(2) -> mini-test(2), so the
+# student is taught before she is tested in applied form. Difficulty 1 keeps a
+# single applied question so the rung is never completely absent.
+#
+# This table is deliberately BACKEND-ONLY. The frontend sends the raw node
+# difficulty and never a ratio, so this does not become another mirrored
+# cross-repo constant (see "Cross-repo contracts" in the frontend CLAUDE.md).
+APPLIED_FRACTION = {1: 0.2, 2: 0.5, 3: 0.8}
+APPLIED_FRACTION_DEFAULT = 0.2
+
+
+def distribute_quiz_modes(total_questions: int, node_difficulty=None) -> list:
+    """
+    Decide, per question, whether it is a KNOWLEDGE or an APPLIED item.
+
+    Mirrors distribute_question_types above: returns one entry per question, in
+    generation order, INTERLEAVED rather than blocked. All the recall questions
+    first and all the applied ones last would read as a difficulty cliff halfway
+    through the node.
+
+    Args:
+        total_questions: How many questions the node will generate.
+        node_difficulty: The planner's 1-3 difficulty on the node. Anything
+                         missing or unrecognised falls back to the difficulty-1
+                         fraction — the recall-leaning end, never the reverse.
+
+    Returns:
+        list[str]: "knowledge" / "applied", length == total_questions.
+
+    Example:
+        distribute_quiz_modes(5, 1)  -> 1 applied  of 5
+        distribute_quiz_modes(5, 2)  -> 3 applied  of 5
+        distribute_quiz_modes(5, 3)  -> 4 applied  of 5
+    """
+    if total_questions <= 0:
+        return []
+
+    # A real number is CLAMPED into the table's range, not dropped. Production
+    # plans contain difficulty-4 nodes; looking those up and missing would hand
+    # the hardest node in the plan the most recall-heavy mix — exactly backwards.
+    # Only a genuinely unusable value (None, "", a list) takes the default.
+    try:
+        difficulty_key = max(1, min(3, int(node_difficulty)))
+    except (TypeError, ValueError):
+        difficulty_key = None
+
+    fraction = APPLIED_FRACTION.get(difficulty_key, APPLIED_FRACTION_DEFAULT)
+
+    # Explicit half-up rounding. Python's round() is banker's rounding, so
+    # round(0.5 * 5) would give 2 where this gives 3.
+    applied_count = int(math.floor(fraction * total_questions + 0.5))
+    applied_count = max(0, min(total_questions, applied_count))
+    knowledge_count = total_questions - applied_count
+
+    if applied_count == 0:
+        return ["knowledge"] * total_questions
+    if knowledge_count == 0:
+        return ["applied"] * total_questions
+
+    # Interleave by spreading the minority mode across evenly-spaced slots.
+    minority = "applied" if applied_count <= knowledge_count else "knowledge"
+    minority_count = min(applied_count, knowledge_count)
+    majority = "knowledge" if minority == "applied" else "applied"
+
+    result = [majority] * total_questions
+    step = total_questions / float(minority_count)
+    for i in range(minority_count):
+        slot = int(math.floor(i * step + step / 2.0))
+        result[min(slot, total_questions - 1)] = minority
+
+    # Spacing collisions can cost an item; top up so the counts stay exact.
+    while result.count("applied") < applied_count:
+        result[result.index("knowledge")] = "applied"
+    while result.count("applied") > applied_count:
+        result[result.index("applied")] = "knowledge"
+
+    # Plain ASCII deliberately: this module is imported by standalone test
+    # scripts run from a cp1252 Windows console, where an emoji in a log line
+    # raises UnicodeEncodeError and takes the caller down with it.
+    print(f"[quiz_modes] difficulty={node_difficulty} -> {result}")
     return result
 
 

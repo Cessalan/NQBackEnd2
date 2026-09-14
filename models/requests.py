@@ -135,6 +135,14 @@ class StudyItemRequest(BaseModel):
     # frontend also suppresses scoring for these.
     is_diagnostic: bool = False
     num_questions: Optional[int] = None   # Override question count (None = default)
+    # The plan node's 1-3 difficulty. Sets how much of a quiz node is APPLIED
+    # (a named condition from her uploads + what the nurse monitors/does) rather
+    # than plain recall — see distribute_quiz_modes in tools/sata_prompts.py.
+    # Raw difficulty is sent, never a ratio: the mix table stays backend-only so
+    # it does not become another mirrored cross-repo constant.
+    # Defaults to 1 (recall-leaning) so callers without a node — e.g. the
+    # FirstLessonPane quick check — keep the gentler opening they have today.
+    difficulty: Optional[int] = 1
 
 
 class StudyAudioRequest(BaseModel):
@@ -168,6 +176,16 @@ class StudyExamRequest(BaseModel):
     question_count: int = 10
     custom_instructions: Optional[str] = None      # Student's custom instructions
     language: str = "en"
+    # The plan node's difficulty, used only when quiz_mode == "applied" to set
+    # how much of the exam is applied vs recall. Exam nodes always carry one
+    # (2, 3 or 4 in production), so the student is never asked for it.
+    difficulty: Optional[int] = 2
+    # Defaults to "knowledge" so the two OTHER callers of /study/generate-exam
+    # keep today's behaviour: the adaptive drills in ExamDrillService and the
+    # NCLEX practice screen. The priority drill in particular sends instructions
+    # demanding "what the nurse does FIRST", which the applied template bans —
+    # so applied has to be opt-in per caller, not flipped on at the endpoint.
+    quiz_mode: Optional[str] = "knowledge"
 
 
 class ExamDebriefMessage(BaseModel):

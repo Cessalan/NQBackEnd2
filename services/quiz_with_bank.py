@@ -139,6 +139,44 @@ Content:
 Return ONLY a JSON array of {num_concepts} concept strings. No explanations.
 Language: {language}
 """
+    elif quiz_mode == "applied":
+        # Grounding for applied questions is enforced HERE, not in the question
+        # template. The extractor is already document-bound, and it is allowed to
+        # return fewer concepts than asked — which is exactly the fallback we
+        # want: if her material cannot support N applied concepts, the caller
+        # fills the remainder with recall rather than inventing a condition.
+        #
+        # Same discipline as services/course_intelligence.py: a claim that cannot
+        # cite its source is dropped, never softened.
+        prompt = f"""You are a nursing education expert.
+From the following content about "{topic}", extract up to {num_concepts} DISTINCT APPLIED concepts to test.
+
+{selection_guidance}
+
+An APPLIED concept pairs something the content NAMES with what the nurse does about it.
+Write each one as "<subject named in the content> - what the nurse monitors/does/teaches".
+
+Examples of the shape:
+- "Systemic lupus erythematosus - routine monitoring the nurse performs"
+- "Furosemide therapy - laboratory values the nurse follows"
+- "Walker use at discharge - instructions the nurse gives"
+
+HARD RULES:
+- The SUBJECT (condition, medication, device, procedure or situation) MUST be named
+  in the content below. Do not introduce a condition the content never mentions.
+- The nursing response does NOT need to be in the content — that part may come from
+  your own nursing knowledge.
+- Do NOT produce concepts about ranking, prioritising, or what to do FIRST.
+- If the content supports fewer than {num_concepts} such concepts, return FEWER.
+  Returning an invented subject is far worse than returning a short list.
+{avoid_block}
+Content:
+{content[:8000]}
+
+Return ONLY a JSON array of concept strings (at most {num_concepts}). No explanations.
+Language: {language}
+"""
+
     else:
         prompt = f"""You are a nursing education expert.
 From the following content about "{topic}", extract exactly {num_concepts} DISTINCT factual concepts to test.
@@ -189,6 +227,91 @@ Language: {language}
         return []
 
 
+async def _extract_concepts_for_mode_plan(
+    content_context: str,
+    topic: str,
+    mode_sequence: List[str],
+    language: str,
+    learning_objective: str,
+    avoid_concepts: List[str] = None,
+) -> tuple:
+    """
+    Extract one concept per planned question, honouring each slot's quiz mode.
+
+    Returns (concepts, mode_sequence). Both are the same length, and the mode
+    sequence comes back POSSIBLY ALTERED — that is the point of this function.
+
+    The applied-mode extractor is instructed to return fewer concepts rather
+    than invent a condition the student's documents never mention. When it does,
+    the unfilled slots are demoted to "knowledge" instead of being dropped or
+    filled with an invented subject. Demotion only ever goes applied -> recall;
+    nothing is ever promoted, which mirrors the confidence discipline in
+    services/course_intelligence.py.
+    """
+    total = len(mode_sequence)
+    if total == 0:
+        return [], []
+
+    needed = {}
+    for mode in mode_sequence:
+        needed[mode] = needed.get(mode, 0) + 1
+
+    pools = {}
+    for mode, count in needed.items():
+        extracted = await extract_concepts_from_content(
+            content=content_context,
+            topic=topic,
+            num_concepts=count,
+            language=language,
+            quiz_mode=mode,
+            learning_objective=learning_objective,
+            avoid_concepts=avoid_concepts,
+        )
+        pools[mode] = list(extracted or [])
+        if len(pools[mode]) < count:
+            logger.info(
+                f"Concept pool for '{mode}' came back short "
+                f"({len(pools[mode])}/{count}) — those slots will fall back to recall"
+            )
+
+    # Top up the recall pool once if anything came up short, so demoted slots
+    # still get a real concept rather than a placeholder.
+    shortfall = sum(max(0, c - len(pools.get(m, []))) for m, c in needed.items())
+    if shortfall > 0:
+        already = list(avoid_concepts or []) + [c for pool in pools.values() for c in pool]
+        extra = await extract_concepts_from_content(
+            content=content_context,
+            topic=topic,
+            num_concepts=shortfall,
+            language=language,
+            quiz_mode="knowledge",
+            learning_objective=learning_objective,
+            avoid_concepts=already,
+        )
+        pools.setdefault("knowledge", []).extend(list(extra or []))
+
+    concepts = []
+    resolved_modes = []
+    for slot, mode in enumerate(mode_sequence):
+        pool = pools.get(mode) or []
+        if pool:
+            concepts.append(pool.pop(0))
+            resolved_modes.append(mode)
+            continue
+
+        recall_pool = pools.get("knowledge") or []
+        if recall_pool:
+            concepts.append(recall_pool.pop(0))
+            resolved_modes.append("knowledge")
+            continue
+
+        # Nothing left anywhere — same placeholder shape the caller used before.
+        concepts.append(f"Aspect {slot + 1} of {topic}")
+        resolved_modes.append("knowledge")
+
+    return concepts, resolved_modes
+
+
 async def stream_quiz_questions(
     topic: str,
     difficulty: str,
@@ -205,6 +328,7 @@ async def stream_quiz_questions(
     additional_context: str = None,
     existing_questions: List[str] = None,
     index_offset: int = 0,
+    node_difficulty: int = None,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Generate quiz questions fresh from document content via LLM.
@@ -223,7 +347,16 @@ async def stream_quiz_questions(
         existing_topics: User's existing topics from progress tracking. LLM will try
                         to match questions to these topics when applicable.
         quiz_mode: "knowledge" for factual recall questions (default),
-                   "nclex" for clinical judgment questions
+                   "nclex" for clinical judgment questions,
+                   "applied" for a MIX of recall and applied questions (a named
+                   condition from her documents + what the nurse monitors/does).
+                   "applied" is the only mode that produces a mixed batch; the
+                   other two apply to every question, so existing callers are
+                   unaffected.
+        node_difficulty: The study plan node's 1-3 difficulty. Only consulted
+                   when quiz_mode == "applied", where it sets the recall/applied
+                   ratio. Missing or unrecognised falls back to the recall-leaning
+                   end. See distribute_quiz_modes in tools/sata_prompts.py.
         existing_questions: Question text already in this quiz. Set when EXTENDING
                    a quiz on demand so the new batch avoids repeating the old one.
         index_offset: Position the first new question occupies in the full quiz.
@@ -254,7 +387,11 @@ async def stream_quiz_questions(
         ...         print(f"Got question: {chunk['question']['question'][:50]}...")
     """
     # Import SATA, Case Study, and Unfolding Case Study generators for mixed type quizzes
-    from tools.sata_prompts import generate_sata_question, distribute_question_types
+    from tools.sata_prompts import (
+        generate_sata_question,
+        distribute_question_types,
+        distribute_quiz_modes,
+    )
     from tools.casestudy_prompts import generate_casestudy_question
     from tools.unfolding_casestudy_prompts import generate_unfolding_casestudy
 
@@ -444,22 +581,31 @@ async def stream_quiz_questions(
         print(f"🧠 [CONCEPT-FIRST] Extracting {questions_to_generate} concepts from content...")
         print(f"{'='*60}\n")
 
-        concepts = await extract_concepts_from_content(
-            content=content_context,
+        # Plan the per-question mode first. Only "applied" yields a mixed batch;
+        # "knowledge" and "nclex" stay one mode for the whole batch, so every
+        # pre-existing caller generates exactly what it generated before.
+        if quiz_mode == "applied":
+            mode_sequence = distribute_quiz_modes(questions_to_generate, node_difficulty)
+        else:
+            mode_sequence = [quiz_mode] * questions_to_generate
+
+        concepts, mode_sequence = await _extract_concepts_for_mode_plan(
+            content_context=content_context,
             topic=topic,
-            num_concepts=questions_to_generate,
+            mode_sequence=mode_sequence,
             language=session.user_language or "english",
-            quiz_mode=quiz_mode,
             learning_objective=learning_objective,
-            avoid_concepts=existing_questions
+            avoid_concepts=existing_questions,
         )
 
         if not concepts:
             logger.warning("⚠️ Concept extraction failed, falling back to topic-only generation")
             # Fallback: generate simple concept placeholders
             concepts = [f"Aspect {index_offset + i + 1} of {topic}" for i in range(questions_to_generate)]
+            mode_sequence = ["knowledge"] * questions_to_generate
 
         logger.info(f"✅ Got {len(concepts)} concepts, generating one question per concept...")
+        logger.info(f"Quiz mode distribution: {mode_sequence}")
 
         # Distribute question types for remaining questions
         remaining_type_sequence = distribute_question_types(questions_to_generate, question_types)
@@ -487,6 +633,8 @@ async def stream_quiz_questions(
             """Generate a single question - returns (index, question_data)"""
             current_question_num = question_index + concept_idx + 1
             current_question_type = remaining_type_sequence[concept_idx] if concept_idx < len(remaining_type_sequence) else "mcq"
+            # Per-slot mode. Identical to `quiz_mode` for every non-applied batch.
+            current_quiz_mode = mode_sequence[concept_idx] if concept_idx < len(mode_sequence) else quiz_mode
 
             try:
                 question_data = None
@@ -500,7 +648,7 @@ async def stream_quiz_questions(
                         language=session.user_language,
                         content_context=content_context,
                         questions_to_avoid=[],  # No blocking on previous - concepts are unique
-                        quiz_mode=quiz_mode
+                        quiz_mode=current_quiz_mode
                     )
                 elif current_question_type == "casestudy":
                     question_data = await generate_casestudy_question(
@@ -530,7 +678,7 @@ async def stream_quiz_questions(
                         questions_to_avoid=[],
                         target_letter=random_target_letter,
                         existing_topics=existing_topics,
-                        quiz_mode=quiz_mode,
+                        quiz_mode=current_quiz_mode,
                         learning_objective=learning_objective
                     )
 

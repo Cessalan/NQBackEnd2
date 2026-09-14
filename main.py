@@ -3172,6 +3172,11 @@ def _format_study_question(q: dict, fallback_topic: str) -> dict:
         # New one-sentence summary; full rationale fetched on demand.
         "correctBlurb": q.get("correct_blurb", ""),
         "topic": q.get("topic", fallback_topic),
+        # Which rung this question was written on: "knowledge" (recall) or
+        # "applied" (named condition + what the nurse monitors/does). Nothing
+        # reads it yet — it is here so the applied rollout can actually be
+        # measured afterwards, which is the only way to know if it worked.
+        "quizMode": q.get("quizMode", "knowledge"),
     }
 
 
@@ -5877,7 +5882,8 @@ async def generate_study_exam(request: StudyExamRequest):
             session=session,
             chat_id=session.chat_id,
             question_types=request.question_types,
-            quiz_mode="knowledge"
+            quiz_mode=request.quiz_mode or "knowledge",
+            node_difficulty=request.difficulty,
         ):
             if chunk.get("status") == "question_ready":
                 question = chunk.get("question")
@@ -6005,7 +6011,10 @@ async def generate_study_item(request: StudyItemRequest):
         elif request.node_type == "quiz":
             # Quizzes use stream_quiz_with_bank (same as chat tools)
             content = await _generate_quiz_via_stream(
-                session, request.node_label, num_questions=STUDY_QUIZ_QUESTIONS
+                session, request.node_label, num_questions=STUDY_QUIZ_QUESTIONS,
+                node_difficulty=request.difficulty,
+                # Diagnostic calibrates before anything is taught — keep it recall.
+                quiz_mode="knowledge" if request.is_diagnostic else "applied",
             )
 
         elif request.node_type == "audio":
@@ -6091,6 +6100,10 @@ async def generate_study_item_stream(request: StudyItemRequest):
                     STUDY_DIAGNOSTIC_QUESTIONS if request.is_diagnostic
                     else STUDY_QUIZ_QUESTIONS
                 )
+                # "applied" asks for a MIX of recall and applied questions, with
+                # the ratio coming from the node's difficulty. The diagnostic is
+                # deliberately excluded: it runs before anything has been taught,
+                # and it exists to calibrate, so it stays pure recall.
                 questions = []
                 async for chunk in stream_quiz_with_bank(
                     topic=request.node_label,
@@ -6100,7 +6113,8 @@ async def generate_study_item_stream(request: StudyItemRequest):
                     session=session,
                     chat_id=session.chat_id,
                     question_types=STUDY_QUIZ_TYPES,
-                    quiz_mode="knowledge"
+                    quiz_mode="knowledge" if request.is_diagnostic else "applied",
+                    node_difficulty=request.difficulty,
                 ):
                     # Forward status updates to frontend
                     yield f"data: {json.dumps(chunk)}\n\n"
@@ -6628,7 +6642,9 @@ async def _setup_study_session(chat_id: str, language: str = "en") -> Persistent
 async def _generate_quiz_via_stream(
     session: PersistentSessionContext,
     topic: str,
-    num_questions: int = 5
+    num_questions: int = 5,
+    node_difficulty: int = None,
+    quiz_mode: str = "applied"
 ) -> dict:
     """
     Generate quiz questions using stream_quiz_with_bank.
@@ -6654,7 +6670,8 @@ async def _generate_quiz_via_stream(
         session=session,
         chat_id=session.chat_id,
         question_types=STUDY_QUIZ_TYPES,  # MCQ-weighted, one SATA guaranteed
-        quiz_mode="knowledge"    # Study mode uses knowledge mode (factual questions)
+        quiz_mode=quiz_mode,     # "applied" = mixed recall/applied, ratio from difficulty
+        node_difficulty=node_difficulty,
     ):
         if chunk.get("status") == "question_ready":
             question = chunk.get("question")
