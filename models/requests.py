@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional
 
 class Message(BaseModel):
@@ -86,6 +86,7 @@ class StudyPlanRequest(BaseModel):
     # so the skip path is the same code path rather than a second one to keep
     # working.
     diagnostic: Optional[dict] = None
+    quickCheckId: Optional[str] = Field(default=None, min_length=1, max_length=128, pattern=r'^[A-Za-z0-9_-]+$')
 
     # What the student told us about her class: school, courseCode, courseName,
     # professor, examDescription, examDate. Collected by the course-context
@@ -125,6 +126,7 @@ class StudyItemRequest(BaseModel):
     chat_id: str                          # Chat ID for context
     node_type: str                        # "lesson" | "flashcard" | "quiz" | "audio"
     node_label: str                       # Topic/label for this node (e.g., "Cardiac Medications")
+    node_id: Optional[str] = None         # Resolve saved review focus for lesson generation
     context_tags: Optional[List[str]] = []  # Tags for better context
     asked_hashes: Optional[List[str]] = []  # Previously shown content hashes (anti-repeat)
     language: str = "en"                  # Language for content

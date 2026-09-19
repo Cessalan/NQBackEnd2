@@ -324,6 +324,7 @@ app.add_middleware(
 from services import stripe_billing
 # Server-side free-tier quota check (mirrors the client gate in UsageService.js)
 from services import usage_guard
+from services.quick_check import load_quick_check, attach_review_evidence, load_lesson_review_reason, lesson_focus_terms, lesson_focus_instruction
 
 # ══════════════════════════════════════════════════════════════════════════
 # EMAIL
@@ -3216,6 +3217,9 @@ async def generate_study_plan(request: StudyPlanRequest):
         # ------------------------------------------
         # STEP 1: Get or create session & load insights
         # ------------------------------------------
+        quick_check = await asyncio.to_thread(load_quick_check, request.chat_id, request.quickCheckId)
+        if request.quickCheckId:
+            request.diagnostic = quick_check.diagnostic() if quick_check else None
         if request.chat_id not in ACTIVE_SESSIONS:
             ACTIVE_SESSIONS[request.chat_id] = NursingTutor(request.chat_id)
             await ACTIVE_SESSIONS[request.chat_id].load_file_insights_from_firebase()
@@ -3366,6 +3370,8 @@ Return ONLY valid JSON (all strings must be in {prompt_language}):
             nodes = _order_units_by_priority(nodes, unique_topics, unique_topics)
         nodes = _attach_status_and_exam_nodes(nodes, unique_topics)
 
+        nodes = attach_review_evidence(nodes, quick_check)
+
         print(f"✅ Final study path with {len(nodes)} nodes (including exams)")
 
         # ------------------------------------------
@@ -3379,6 +3385,7 @@ Return ONLY valid JSON (all strings must be in {prompt_language}):
             "archetype": _plan_archetype(_days_to_exam(user_prefs)),
             "tiers": _summarize_tiers(nodes, unique_topics),
             "recommended_start": _actual_recommended_start(nodes, unique_topics, request.diagnostic),
+            "quickCheckId": quick_check.checkId if quick_check else None,
             "course_intelligence": bool(ci_report),
         }
 
@@ -4064,6 +4071,8 @@ def _weight_path_by_diagnostic(nodes, diagnostic, unique_topics, days_to_exam=No
     for u in units:
         for n in u["nodes"]:
             n["_tier"] = u["tier"]
+            n["topic"] = u["topic"]
+            n["topicKey"] = ' '.join(u["topic"].split()).lower()
             out.append(n)
     return out
 
@@ -4119,6 +4128,8 @@ def _attach_status_and_exam_nodes(nodes: list, unique_topics: list) -> list:
                 "id": f"exam_{exam_counter}",
                 "type": "exam",
                 "label": exam_label,
+                "topic": exam_label,
+                "topicKey": ' '.join(exam_label.split()).lower(),
                 "tags": ["exam", "mixed_types"],
                 "difficulty": 2,
                 "status": "locked"
@@ -4211,7 +4222,12 @@ async def run_course_intelligence_endpoint(request: CourseIntelligenceRequest):
                                 request.courseContext, prompt_language, course_intelligence,
                             ):
                                 await queue.put(preview_event)
-                        await asyncio.wait_for(forward(), timeout=30)
+                        # 45s, not 30: the readiness check asks for eight questions in
+                        # four formats, including case-study scenarios, which is roughly
+                        # twice the output of the six plain MCQs this bound was set for.
+                        # Heartbeats keep the stream alive meanwhile (CI_STALL_MS 45s is
+                        # per event; CI_TOTAL_MS is 150s).
+                        await asyncio.wait_for(forward(), timeout=45)
                     except asyncio.CancelledError:
                         raise
                     except Exception:
@@ -4307,6 +4323,9 @@ async def start_study_journey(request: StudyPlanRequest):
                 yield f"data: {json.dumps({'status': 'error', 'code': 'plan_quota_exceeded', 'message': usage_guard.PLAN_QUOTA_MESSAGE})}\n\n"
                 return
             # ---------- STEP 1: session + topics ----------
+            quick_check = await asyncio.to_thread(load_quick_check, request.chat_id, request.quickCheckId)
+            if request.quickCheckId:
+                request.diagnostic = quick_check.diagnostic() if quick_check else None
             if request.chat_id not in ACTIVE_SESSIONS:
                 ACTIVE_SESSIONS[request.chat_id] = NursingTutor(request.chat_id)
                 await ACTIVE_SESSIONS[request.chat_id].load_file_insights_from_firebase()
@@ -4407,6 +4426,7 @@ async def start_study_journey(request: StudyPlanRequest):
             if not request.diagnostic:
                 nodes = _order_units_by_priority(nodes, unique_topics, unique_topics)
             nodes = _attach_status_and_exam_nodes(nodes, unique_topics)
+            nodes = attach_review_evidence(nodes, quick_check)
             print(f"✅ /study/start built path with {len(nodes)} nodes")
 
             plan_payload = {
@@ -4425,6 +4445,7 @@ async def start_study_journey(request: StudyPlanRequest):
                 # that starts somewhere other than the promised topic is the
                 # one bug this whole feature cannot survive.
                 "recommended_start": _actual_recommended_start(nodes, unique_topics, request.diagnostic),
+                "quickCheckId": quick_check.checkId if quick_check else None,
                 "course_intelligence": bool(request.courseIntelligence),
             }
             yield f"data: {json.dumps({'status': 'plan_ready', 'plan': plan_payload})}\n\n"
@@ -4446,7 +4467,7 @@ async def start_study_journey(request: StudyPlanRequest):
 
             try:
                 if node_type == "lesson":
-                    content = await _generate_lesson_with_context(study_session, node_label, request.language)
+                    content = await _generate_lesson_with_context(study_session, node_label, request.language, first_node.get('reviewReason'))
                     content_hash = hashlib.md5(json.dumps(content, sort_keys=True).encode()).hexdigest()[:12]
                     yield f"data: {json.dumps({'status': 'first_node_ready', 'node_id': node_id, 'type': 'lesson', 'content': content, 'hash': content_hash})}\n\n"
 
@@ -5998,8 +6019,9 @@ async def generate_study_item(request: StudyItemRequest):
 
         if request.node_type == "lesson":
             # Lessons use enhanced context retrieval (k=1000)
+            review_reason = await asyncio.to_thread(load_lesson_review_reason, request.chat_id, request.node_id, request.node_label)
             content = await _generate_lesson_with_context(
-                session, request.node_label, request.language
+                session, request.node_label, request.language, review_reason
             )
 
         elif request.node_type == "flashcard":
@@ -6165,9 +6187,10 @@ async def generate_study_item_stream(request: StudyItemRequest):
                 yield f"data: {json.dumps({'status': 'generating', 'message': 'Creating lesson...'})}\n\n"
 
                 content = None
+                review_reason = await asyncio.to_thread(load_lesson_review_reason, request.chat_id, request.node_id, request.node_label)
                 try:
                     async for chunk in _stream_lesson_with_context(
-                        session, request.node_label, request.language
+                        session, request.node_label, request.language, review_reason
                     ):
                         if chunk.get("status") == "lesson_content":
                             content = chunk.get("content")
@@ -6178,7 +6201,7 @@ async def generate_study_item_stream(request: StudyItemRequest):
 
                 if not content or not content.get("pages"):
                     content = await _generate_lesson_with_context(
-                        session, request.node_label, request.language
+                        session, request.node_label, request.language, review_reason
                     )
 
                 content_hash = hashlib.md5(json.dumps(content, sort_keys=True).encode()).hexdigest()[:12]
@@ -6729,7 +6752,8 @@ async def _generate_flashcard_via_stream(
 async def _generate_lesson_with_context(
     session: PersistentSessionContext,
     topic: str,
-    language: str
+    language: str,
+    review_reason: dict = None
 ) -> dict:
     """
     Generate lesson using document context properly.
@@ -6739,7 +6763,7 @@ async def _generate_lesson_with_context(
     # Use same retrieval pattern as flashcards/quizzes: k=1000
     context = ""
     if session.vectorstore:
-        docs = session.vectorstore.similarity_search(query=topic, k=1000)
+        docs = session.vectorstore.similarity_search(query=topic + ' ' + ' '.join(lesson_focus_terms(review_reason)), k=1000)
         full_text = "\n\n".join([doc.page_content for doc in docs])
         context = full_text[:12000]  # Increased limit for better coverage
         print(f"📚 Lesson context: {len(docs)} chunks, {len(context)} chars")
@@ -6754,6 +6778,7 @@ async def _generate_lesson_with_context(
     prompt_language = _language_for_prompt(language)
 
     prompt = f"""Create a MULTI-PAGE lesson about: {topic}
+{lesson_focus_instruction(review_reason)}
 
 🚨🚨🚨 CRITICAL INSTRUCTION 🚨🚨🚨
 You MUST ONLY use information from the document content below.
@@ -6879,7 +6904,8 @@ def _drain_json_objects(buf: str, cursor: int):
 async def _stream_lesson_with_context(
     session: PersistentSessionContext,
     topic: str,
-    language: str
+    language: str,
+    review_reason: dict = None
 ):
     """Streaming twin of _generate_lesson_with_context.
 
@@ -6896,7 +6922,7 @@ async def _stream_lesson_with_context(
     """
     context = ""
     if session.vectorstore:
-        docs = session.vectorstore.similarity_search(query=topic, k=1000)
+        docs = session.vectorstore.similarity_search(query=topic + ' ' + ' '.join(lesson_focus_terms(review_reason)), k=1000)
         full_text = "\n\n".join([doc.page_content for doc in docs])
         context = full_text[:12000]
         print(f"📚 Lesson context (stream): {len(docs)} chunks, {len(context)} chars")
@@ -6909,6 +6935,7 @@ async def _stream_lesson_with_context(
     prompt_language = _language_for_prompt(language)
 
     prompt = f"""Create a MULTI-PAGE lesson about: {topic}
+{lesson_focus_instruction(review_reason)}
 
 🚨🚨🚨 CRITICAL INSTRUCTION 🚨🚨🚨
 You MUST ONLY use information from the document content below.
