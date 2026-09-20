@@ -293,6 +293,9 @@ class NodeDebriefItem(BaseModel):
     """One question the student answered, with how it went."""
     question: str
     correct: bool
+    question_index: Optional[int] = Field(default=None, ge=0)
+    options: List[str] = Field(default_factory=list, max_length=20)
+    correct_answer: str = Field(default='', max_length=2000)
     question_type: str = "mcq"                    # mcq | sata | casestudy
     rationale: str = ""                           # Why the right answer is right
 
@@ -316,6 +319,7 @@ class NodeDebriefRequest(BaseModel):
     node_type: str = "quiz"
     score_percent: int = 0
     items: List[NodeDebriefItem] = []
+    reasoning_discussions: List[dict] = Field(default_factory=list, max_length=8)
     days_until_exam: Optional[int] = None         # Sharpens the "work on" line
     language: str = "en"
     # Accumulated per-format record for the WHOLE plan, e.g.

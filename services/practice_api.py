@@ -132,6 +132,7 @@ def build_router(setup_session):
         from services.practice_debrief import create_debrief
         return await create_debrief(body.chat_id, body.message_id, body.language)
 
+    @router.post("/study/reasoning")
     @router.post("/quiz/tutor")
     async def tutor(body: TutorRequest, request: Request):
         await asyncio.to_thread(owner, request, body.chat_id)
@@ -139,6 +140,8 @@ def build_router(setup_session):
             raise HTTPException(413, "Question context is too large.")
         try:
             session = await setup_session(body.chat_id, body.language)
+            if request.url.path.endswith("/study/reasoning"):
+                return await respond(body, session, reasoning=True)
             return await respond(body, session)
         except HTTPException:
             raise

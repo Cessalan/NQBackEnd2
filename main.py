@@ -5609,6 +5609,12 @@ async def node_debrief(request: NodeDebriefRequest):
             "generated": bool(note),
         }
 
+    if request.reasoning_discussions:
+        from services.reasoning_debrief import build_reasoning_debrief
+        reasoning_note = await build_reasoning_debrief(request)
+        if reasoning_note:
+            return reasoning_note
+
     # ── Buckets ──────────────────────────────────────────────────────────
     # Three ways a nursing question can be hard, each needing a different fix:
     #   knowledge  — do you know the fact (mcq)
