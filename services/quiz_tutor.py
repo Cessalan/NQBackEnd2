@@ -46,7 +46,11 @@ def tutor_question_context(request):
         return request.question
     # No key, choices, rationales, scoring metadata, or previously revealed answer
     # enters the pre-answer tutor context, for any question format.
-    return {key: request.question[key] for key in ('question', 'questionType', 'caseStudy') if key in request.question}
+    context = {key: request.question[key] for key in ('question', 'questionType', 'caseStudy') if key in request.question}
+    if request.question.get('questionType') == 'matrix':
+        context['columns'] = [{k: c[k] for k in ('id', 'label') if k in c} for c in request.question.get('columns', [])]
+        context['rows'] = [{k: r[k] for k in ('id', 'text') if k in r} for r in request.question.get('rows', [])]
+    return context
 
 
 def protect_hint(reply, question, language):

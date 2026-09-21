@@ -552,6 +552,21 @@ def distribute_question_types(
     if not question_types:
         question_types = ['mcq']
 
+    # Reserve a matrix slot while keeping the established mix for other types.
+    # Never exceed the requested count, even when there are more types than slots.
+    if 'matrix' in question_types:
+        types = list(dict.fromkeys(question_types))
+        if total_questions <= 0:
+            return []
+        if len(types) == 1:
+            return ['matrix'] * total_questions
+        if total_questions < len(types):
+            return types[:total_questions]
+        count = max(1, total_questions // 4)
+        result = ['matrix'] * count + distribute_question_types(total_questions - count, [t for t in types if t != 'matrix'])
+        random.shuffle(result)
+        return result[:total_questions]
+
     # Normalize case for unfoldingCase (handle both unfoldingcase and unfoldingCase)
     normalized_types = []
     for qtype in question_types:

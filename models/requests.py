@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Literal
 
 class Message(BaseModel):
     role: str
@@ -174,13 +174,13 @@ class StudyExamRequest(BaseModel):
     """
     chat_id: str
     topic: str                                     # Topic this exam covers
-    question_types: List[str] = ["mcq", "sata", "casestudy"]
+    question_types: List[str] = ["mcq", "sata", "casestudy", "matrix"]
     question_count: int = 10
     custom_instructions: Optional[str] = None      # Student's custom instructions
     language: str = "en"
-    # The plan node's difficulty, used only when quiz_mode == "applied" to set
-    # how much of the exam is applied vs recall. Exam nodes always carry one
-    # (2, 3 or 4 in production), so the student is never asked for it.
+    # Separate question complexity from the planner's applied/recall mix.
+    question_difficulty: Literal["easy", "medium", "hard"] = "medium"
+    # The plan node's difficulty sets the applied/recall mix.
     difficulty: Optional[int] = 2
     # Defaults to "knowledge" so the two OTHER callers of /study/generate-exam
     # keep today's behaviour: the adaptive drills in ExamDrillService and the

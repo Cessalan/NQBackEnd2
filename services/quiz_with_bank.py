@@ -393,6 +393,7 @@ async def stream_quiz_questions(
         distribute_quiz_modes,
     )
     from tools.casestudy_prompts import generate_casestudy_question
+    from tools.matrix_prompts import generate_matrix_question
     from tools.unfolding_casestudy_prompts import generate_unfolding_casestudy
 
     # Default to MCQ if no types specified
@@ -640,7 +641,12 @@ async def stream_quiz_questions(
                 question_data = None
 
                 # Generate based on question type, passing the specific concept
-                if current_question_type == "sata":
+                if current_question_type == "matrix":
+                    question_data = await generate_matrix_question(
+                        topic=concept, difficulty=difficulty, question_num=current_question_num,
+                        language=session.user_language, content_context=content_context,
+                        questions_to_avoid=[], quiz_mode=current_quiz_mode)
+                elif current_question_type == "sata":
                     question_data = await generate_sata_question(
                         topic=concept,
                         difficulty=difficulty,

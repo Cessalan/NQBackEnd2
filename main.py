@@ -3139,9 +3139,9 @@ DIAGNOSTIC_TOPIC_LIMIT = 4       # topics covered at all
 # study sessions stop at or before node 1 — so 4 in 10 students only ever saw
 # multiple choice, aced it, and left believing they were fine.
 # distribute_question_types keeps the mix MCQ-weighted (gentle on-ramp) while
-# guaranteeing at least one SATA per node, so nobody finishes a quiz node
-# without meeting the format they actually struggle with.
-STUDY_QUIZ_TYPES = ["mcq", "sata"]
+# including SATA and matrix items when the node has enough questions, so students
+# practise more than recognition alone.
+STUDY_QUIZ_TYPES = ["mcq", "sata", "matrix"]
 
 
 def _format_study_question(q: dict, fallback_topic: str) -> dict:
@@ -3158,7 +3158,7 @@ def _format_study_question(q: dict, fallback_topic: str) -> dict:
     """
     q_type = q.get("questionType", "mcq")
 
-    if q_type in ("sata", "casestudy", "unfoldingCase"):
+    if q_type in ("sata", "casestudy", "unfoldingCase", "matrix"):
         return {**q, "questionType": q_type, "topic": q.get("topic", fallback_topic)}
 
     answer = q.get("answer", "A)")
@@ -5903,7 +5903,7 @@ async def generate_study_exam(request: StudyExamRequest):
         questions = []
         async for chunk in stream_quiz_with_bank(
             topic=exam_topic,
-            difficulty="medium",
+            difficulty=request.question_difficulty,
             num_questions=request.question_count,
             source=source,
             session=session,
@@ -5964,6 +5964,7 @@ async def generate_study_exam(request: StudyExamRequest):
             "hash": content_hash,
             "examConfig": {
                 "questionTypes": request.question_types,
+                "questionDifficulty": request.question_difficulty,
                 "questionCount": request.question_count,
                 "customInstructions": request.custom_instructions
             }
