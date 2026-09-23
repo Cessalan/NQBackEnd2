@@ -1,0 +1,1057 @@
+INFO:     Started server process [624]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+C:\Users\Billion\Desktop\NQBackEnd\NQBackEnd2\venv\Lib\site-packages\fastapi\openapi\utils.py:207: UserWarning: Duplicate Operation ID files_proxy_files_proxy__chat_id___filename__get for function files_proxy at C:\Users\Billion\Desktop\NQBackEnd\NQBackEnd2\main.py
+  warnings.warn(message, stacklevel=1)
+✅ OPENAI_API_KEY found
+   Length: 164
+   First 15 chars: sk-proj-cIM8Pnc
+   Last 4 chars: ...GWUA
+   Type: <class 'str'>
+   Contains whitespace: False
+🚀 Started periodic cleanup task (30s interval, 60s timeout)
+INFO:     127.0.0.1:50395 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63784 - "OPTIONS /admin/workspace/email/layout-preview HTTP/1.1" 200 OK
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1789959431.065299   22056 alts_credentials.cc:93] ALTS creds ignored. Not running on GCP and untrusted ALTS is not enabled.
+INFO:     127.0.0.1:63784 - "POST /admin/workspace/email/layout-preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52451 - "POST /admin/workspace/email/layout-preview HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:52451 - "POST /admin/workspace/email/ai-draft HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52451 - "POST /admin/workspace/email/layout-preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58830 - "OPTIONS /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58830 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58830 - "GET /admin/workspace/email HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57166 - "OPTIONS /admin/workspace/email/ai-draft HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:57166 - "POST /admin/workspace/email/ai-draft HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57166 - "POST /admin/workspace/email/layout-preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52797 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52797 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55645 - "OPTIONS /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55645 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54891 - "OPTIONS /admin/workspace/users HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54891 - "GET /admin/workspace/users HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54891 - "OPTIONS /admin/workspace/users/02AHE7HkUhQ8XIYFsQHx5iaZ7Wr2 HTTP/1.1" 200 OK
+C:\Users\Billion\Desktop\NQBackEnd\NQBackEnd2\venv\Lib\site-packages\google\cloud\firestore_v1\base_collection.py:304: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  return query.where(field_path, op_string, value)
+INFO:     127.0.0.1:54891 - "GET /admin/workspace/users/02AHE7HkUhQ8XIYFsQHx5iaZ7Wr2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54891 - "GET /admin/workspace/users/02AHE7HkUhQ8XIYFsQHx5iaZ7Wr2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59984 - "OPTIONS /admin/workspace/exams?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59984 - "GET /admin/workspace/exams?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51013 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51013 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51830 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51830 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55147 - "OPTIONS /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55147 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55147 - "OPTIONS /admin/workspace/exams?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55147 - "GET /admin/workspace/exams?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61227 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61227 - "GET /admin/workspace/exams?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59171 - "OPTIONS /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59171 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59171 - "OPTIONS /admin/workspace/exams?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59171 - "GET /admin/workspace/exams?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63447 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63447 - "GET /admin/workspace/exams?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58135 - "OPTIONS /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58135 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58135 - "OPTIONS /admin/workspace/exams?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58135 - "GET /admin/workspace/exams?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49467 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49467 - "GET /admin/workspace/exams?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51392 - "OPTIONS /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51392 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51392 - "OPTIONS /admin/workspace/exams?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51392 - "GET /admin/workspace/exams?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52684 - "OPTIONS /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60132 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60132 - "GET /admin/workspace/exams?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60221 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60221 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57690 - "OPTIONS /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52580 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57690 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57690 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50617 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52580 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52580 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62984 - "OPTIONS /study/course-intelligence HTTP/1.1" 200 OK
+C:\Users\Billion\Desktop\NQBackEnd\NQBackEnd2\venv\Lib\site-packages\google_crc32c\__init__.py:29: RuntimeWarning: As the c extension couldn't be imported, `google-crc32c` is using a pure python implementation that is significantly slower. If possible, please configure a c build environment and compile the extension
+  warnings.warn(_SLOW_CRC32C_WARNING, RuntimeWarning)
+INFO:faiss.loader:Loading faiss with AVX2 support.
+INFO:faiss.loader:Successfully loaded faiss with AVX2 support.
+C:\Users\Billion\Desktop\NQBackEnd\NQBackEnd2\venv\Lib\site-packages\google\cloud\firestore_v1\base_collection.py:304: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  return query.where(field_path, op_string, value)
+
+============================================================
+🔎 COURSE INTELLIGENCE - chat_id: mdZRA2CRxwzn4uZRjYxT
+   context: none (exam described: False)
+============================================================
+🔒 Session context set for chat_id: mdZRA2CRxwzn4uZRjYxT (coroutine-safe)
+📥 set_session_context: Loading documents list for mdZRA2CRxwzn4uZRjYxT
+files in chat according to storage [{'filename': 'Évaluation (C)ABCDE.pdf', 'path': 'chats/mdZRA2CRxwzn4uZRjYxT/uploads/Évaluation (C)ABCDE.pdf'}]
+📥 set_session_context: Loading vectorstore for mdZRA2CRxwzn4uZRjYxT (not cached)
+✅ Loaded 1 file insights from Firebase
+   Files: ['Évaluation (C)ABCDE.pdf']
+INFO:     127.0.0.1:62984 - "POST /study/course-intelligence HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:55389 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55389 - "POST /warm_up HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:55389 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55389 - "POST /warm_up HTTP/1.1" 200 OK
+
+============================================================
+🔎 COURSE INTELLIGENCE - chat_id: mdZRA2CRxwzn4uZRjYxT
+   context: none (exam described: False)
+============================================================
+INFO:     127.0.0.1:52176 - "POST /study/course-intelligence HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:60961 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60961 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60961 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60961 - "POST /warm_up HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+
+============================================================
+🔎 COURSE INTELLIGENCE - chat_id: mdZRA2CRxwzn4uZRjYxT
+   context: none (exam described: False)
+============================================================
+INFO:     127.0.0.1:64698 - "POST /study/course-intelligence HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+🧪 Readiness check: 0 valid — mcq 0, sata 0, casestudy 0
+INFO:     127.0.0.1:64698 - "OPTIONS /study/diagnostic-quiz HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+
+============================================================
+🔬 DIAGNOSTIC QUIZ GENERATION - chat_id: mdZRA2CRxwzn4uZRjYxT
+============================================================
+📊 Active: 1 sessions, 0 connections
+✅ Generated 6 diagnostic questions over 2 topics
+INFO:     127.0.0.1:64698 - "POST /study/diagnostic-quiz HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:65461 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65461 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65461 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65461 - "POST /warm_up HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:64983 - "OPTIONS /study/course-intelligence HTTP/1.1" 200 OK
+
+============================================================
+🔎 COURSE INTELLIGENCE - chat_id: mdZRA2CRxwzn4uZRjYxT
+   context: none (exam described: False)
+============================================================
+INFO:     127.0.0.1:64983 - "POST /study/course-intelligence HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:61350 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61350 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61350 - "POST /warm_up HTTP/1.1" 200 OK
+
+============================================================
+🔎 COURSE INTELLIGENCE - chat_id: mdZRA2CRxwzn4uZRjYxT
+   context: none (exam described: False)
+============================================================
+INFO:     127.0.0.1:54221 - "POST /study/course-intelligence HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+📊 Active: 1 sessions, 0 connections
+🧪 Readiness check: 0 valid — mcq 0, sata 0, casestudy 0
+INFO:     127.0.0.1:65206 - "OPTIONS /study/diagnostic-quiz HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+
+============================================================
+🔬 DIAGNOSTIC QUIZ GENERATION - chat_id: mdZRA2CRxwzn4uZRjYxT
+============================================================
+📊 Active: 1 sessions, 0 connections
+✅ Generated 6 diagnostic questions over 2 topics
+INFO:     127.0.0.1:65206 - "POST /study/diagnostic-quiz HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:56376 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56376 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56376 - "POST /warm_up HTTP/1.1" 200 OK
+
+============================================================
+🔎 COURSE INTELLIGENCE - chat_id: mdZRA2CRxwzn4uZRjYxT
+   context: none (exam described: False)
+============================================================
+INFO:     127.0.0.1:49682 - "POST /study/course-intelligence HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:53002 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53002 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53002 - "POST /warm_up HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+
+============================================================
+🔎 COURSE INTELLIGENCE - chat_id: mdZRA2CRxwzn4uZRjYxT
+   context: none (exam described: False)
+============================================================
+INFO:     127.0.0.1:60929 - "POST /study/course-intelligence HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:60929 - "OPTIONS /study/diagnostic-quiz HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+
+============================================================
+🔬 DIAGNOSTIC QUIZ GENERATION - chat_id: mdZRA2CRxwzn4uZRjYxT
+============================================================
+📊 Active: 1 sessions, 0 connections
+✅ Generated 6 diagnostic questions over 2 topics
+INFO:     127.0.0.1:60929 - "POST /study/diagnostic-quiz HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:62452 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62452 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62452 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62452 - "POST /warm_up HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:64643 - "OPTIONS /study/course-intelligence HTTP/1.1" 200 OK
+
+============================================================
+🔎 COURSE INTELLIGENCE - chat_id: mdZRA2CRxwzn4uZRjYxT
+   context: none (exam described: False)
+============================================================
+INFO:     127.0.0.1:64643 - "POST /study/course-intelligence HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+🧪 Readiness check: 0 valid — mcq 0, sata 0, casestudy 0
+
+============================================================
+🔬 DIAGNOSTIC QUIZ GENERATION - chat_id: mdZRA2CRxwzn4uZRjYxT
+============================================================
+✅ Generated 6 diagnostic questions over 2 topics
+INFO:     127.0.0.1:64643 - "POST /study/diagnostic-quiz HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:60786 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60786 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60786 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60786 - "POST /warm_up HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:61676 - "OPTIONS /study/course-intelligence HTTP/1.1" 200 OK
+
+============================================================
+🔎 COURSE INTELLIGENCE - chat_id: mdZRA2CRxwzn4uZRjYxT
+   context: none (exam described: False)
+============================================================
+INFO:     127.0.0.1:61676 - "POST /study/course-intelligence HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:51522 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51522 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51522 - "POST /warm_up HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+
+============================================================
+🔎 COURSE INTELLIGENCE - chat_id: mdZRA2CRxwzn4uZRjYxT
+   context: none (exam described: False)
+============================================================
+INFO:     127.0.0.1:57329 - "POST /study/course-intelligence HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:54546 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54546 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54546 - "POST /warm_up HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+
+============================================================
+🔎 COURSE INTELLIGENCE - chat_id: mdZRA2CRxwzn4uZRjYxT
+   context: none (exam described: False)
+============================================================
+INFO:     127.0.0.1:59970 - "POST /study/course-intelligence HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:61779 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61779 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61779 - "POST /warm_up HTTP/1.1" 200 OK
+
+============================================================
+🔎 COURSE INTELLIGENCE - chat_id: mdZRA2CRxwzn4uZRjYxT
+   context: none (exam described: False)
+============================================================
+INFO:     127.0.0.1:49737 - "POST /study/course-intelligence HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+📊 Active: 1 sessions, 0 connections
+🧪 Readiness check: 0 valid — mcq 0, sata 0, casestudy 0
+INFO:     127.0.0.1:49737 - "OPTIONS /study/diagnostic-quiz HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+
+============================================================
+🔬 DIAGNOSTIC QUIZ GENERATION - chat_id: mdZRA2CRxwzn4uZRjYxT
+============================================================
+✅ Generated 6 diagnostic questions over 2 topics
+INFO:     127.0.0.1:49737 - "POST /study/diagnostic-quiz HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:52279 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52279 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52279 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52279 - "POST /warm_up HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:50688 - "OPTIONS /study/course-intelligence HTTP/1.1" 200 OK
+
+============================================================
+🔎 COURSE INTELLIGENCE - chat_id: mdZRA2CRxwzn4uZRjYxT
+   context: none (exam described: False)
+============================================================
+INFO:     127.0.0.1:50688 - "POST /study/course-intelligence HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:53308 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53308 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53308 - "POST /warm_up HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+
+============================================================
+🔎 COURSE INTELLIGENCE - chat_id: mdZRA2CRxwzn4uZRjYxT
+   context: none (exam described: False)
+============================================================
+INFO:     127.0.0.1:58140 - "POST /study/course-intelligence HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+🧪 Readiness check: 0 valid — mcq 0, sata 0, casestudy 0
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:58140 - "OPTIONS /study/diagnostic-quiz HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+
+============================================================
+🔬 DIAGNOSTIC QUIZ GENERATION - chat_id: mdZRA2CRxwzn4uZRjYxT
+============================================================
+✅ Generated 6 diagnostic questions over 2 topics
+INFO:     127.0.0.1:58140 - "POST /study/diagnostic-quiz HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:57671 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57671 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57671 - "POST /warm_up HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+
+============================================================
+🔎 COURSE INTELLIGENCE - chat_id: mdZRA2CRxwzn4uZRjYxT
+   context: none (exam described: False)
+============================================================
+INFO:     127.0.0.1:59345 - "POST /study/course-intelligence HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:55205 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55205 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55205 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55205 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55205 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55205 - "POST /warm_up HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+
+============================================================
+🔎 COURSE INTELLIGENCE - chat_id: mdZRA2CRxwzn4uZRjYxT
+   context: none (exam described: False)
+============================================================
+INFO:     127.0.0.1:54463 - "POST /study/course-intelligence HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:49849 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49849 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49849 - "POST /warm_up HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+
+============================================================
+🔎 COURSE INTELLIGENCE - chat_id: mdZRA2CRxwzn4uZRjYxT
+   context: none (exam described: False)
+============================================================
+INFO:     127.0.0.1:50060 - "POST /study/course-intelligence HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+🧪 Readiness check: 0 valid — mcq 0, sata 0, casestudy 0
+
+============================================================
+🔬 DIAGNOSTIC QUIZ GENERATION - chat_id: mdZRA2CRxwzn4uZRjYxT
+============================================================
+✅ Generated 6 diagnostic questions over 2 topics
+INFO:     127.0.0.1:50060 - "POST /study/diagnostic-quiz HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:51465 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51465 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51465 - "POST /warm_up HTTP/1.1" 200 OK
+
+============================================================
+🔎 COURSE INTELLIGENCE - chat_id: mdZRA2CRxwzn4uZRjYxT
+   context: none (exam described: False)
+============================================================
+INFO:     127.0.0.1:51615 - "POST /study/course-intelligence HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+📊 Active: 1 sessions, 0 connections
+🧪 Readiness check: 0 valid — mcq 0, sata 0, casestudy 0
+
+============================================================
+🔬 DIAGNOSTIC QUIZ GENERATION - chat_id: mdZRA2CRxwzn4uZRjYxT
+============================================================
+✅ Generated 6 diagnostic questions over 2 topics
+INFO:     127.0.0.1:51615 - "POST /study/diagnostic-quiz HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:56151 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56151 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56151 - "POST /warm_up HTTP/1.1" 200 OK
+
+============================================================
+🔎 COURSE INTELLIGENCE - chat_id: mdZRA2CRxwzn4uZRjYxT
+   context: none (exam described: False)
+============================================================
+INFO:     127.0.0.1:53282 - "POST /study/course-intelligence HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+🧪 Readiness check: 0 valid — mcq 0, sata 0, casestudy 0
+📊 Active: 1 sessions, 0 connections
+
+============================================================
+🔬 DIAGNOSTIC QUIZ GENERATION - chat_id: mdZRA2CRxwzn4uZRjYxT
+============================================================
+✅ Generated 6 diagnostic questions over 2 topics
+INFO:     127.0.0.1:53282 - "POST /study/diagnostic-quiz HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49726 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49726 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49726 - "POST /warm_up HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:49545 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49545 - "POST /warm_up HTTP/1.1" 200 OK
+
+============================================================
+🔎 COURSE INTELLIGENCE - chat_id: mdZRA2CRxwzn4uZRjYxT
+   context: none (exam described: False)
+============================================================
+INFO:     127.0.0.1:49545 - "POST /study/course-intelligence HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:57331 - "POST /warm_up HTTP/1.1" 200 OK
+
+============================================================
+🔎 COURSE INTELLIGENCE - chat_id: mdZRA2CRxwzn4uZRjYxT
+   context: none (exam described: False)
+============================================================
+INFO:     127.0.0.1:57021 - "POST /study/course-intelligence HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+📊 Active: 1 sessions, 0 connections
+🧪 Readiness check: 0 valid — mcq 0, sata 0, casestudy 0
+
+============================================================
+🔬 DIAGNOSTIC QUIZ GENERATION - chat_id: mdZRA2CRxwzn4uZRjYxT
+============================================================
+📊 Active: 1 sessions, 0 connections
+✅ Generated 6 diagnostic questions over 2 topics
+INFO:     127.0.0.1:49184 - "POST /study/diagnostic-quiz HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:62844 - "OPTIONS /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62844 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61204 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61204 - "POST /warm_up HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:58474 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:58491 - "OPTIONS /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58491 - "GET /admin/workspace/me HTTP/1.1" 401 Unauthorized
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:58150 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:64111 - "OPTIONS /admin/workspace/users HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64111 - "GET /admin/workspace/users HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52703 - "OPTIONS /admin/workspace/users?cursor=2M8yW4kXmNYYKpkVRYBDCr8zRvn2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52703 - "GET /admin/workspace/users?cursor=2M8yW4kXmNYYKpkVRYBDCr8zRvn2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58630 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58630 - "POST /warm_up HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:50430 - "OPTIONS /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50430 - "GET /admin/workspace/me HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:63619 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63619 - "GET /admin/workspace/users HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:51290 - "OPTIONS /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51290 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:62170 - "OPTIONS /study/diagnostic-quiz HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+
+============================================================
+🔬 DIAGNOSTIC QUIZ GENERATION - chat_id: mdZRA2CRxwzn4uZRjYxT
+============================================================
+✅ Generated 6 diagnostic questions over 2 topics
+INFO:     127.0.0.1:62170 - "POST /study/diagnostic-quiz HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:56335 - "GET /docs HTTP/1.1" 200 OK
+📊 Active: 1 sessions, 0 connections
+INFO:     127.0.0.1:55745 - "OPTIONS /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55745 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54096 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54096 - "OPTIONS /admin/workspace/users HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54096 - "GET /admin/workspace/users HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63969 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59327 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59327 - "GET /admin/workspace/users HTTP/1.1" 200 OK

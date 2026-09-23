@@ -1,0 +1,18 @@
+INFO:     Started server process [43160]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+C:\Users\Billion\Desktop\NQBackEnd\NQBackEnd2\venv\Lib\site-packages\fastapi\openapi\utils.py:207: UserWarning: Duplicate Operation ID files_proxy_files_proxy__chat_id___filename__get for function files_proxy at C:\Users\Billion\Desktop\NQBackEnd\NQBackEnd2\main.py
+  warnings.warn(message, stacklevel=1)
+✅ OPENAI_API_KEY found
+   Length: 164
+   First 15 chars: sk-proj-cIM8Pnc
+   Last 4 chars: ...GWUA
+   Type: <class 'str'>
+   Contains whitespace: False
+🚀 Started periodic cleanup task (30s interval, 60s timeout)
+INFO:     127.0.0.1:64510 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55954 - "OPTIONS /admin/workspace/email HTTP/1.1" 200 OK
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1789958175.876291   12192 alts_credentials.cc:93] ALTS creds ignored. Not running on GCP and untrusted ALTS is not enabled.
+INFO:     127.0.0.1:55954 - "GET /admin/workspace/email HTTP/1.1" 200 OK

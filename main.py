@@ -249,7 +249,8 @@ def get_loader_for_file(path):
 
 # Initialize Firebase
 if not firebase_admin._apps:
-    cred = credentials.Certificate("FireBaseAccess.json")
+    cred = (credentials.Certificate("FireBaseAccess.json")
+            if os.path.exists("FireBaseAccess.json") else credentials.ApplicationDefault())
     firebase_admin.initialize_app(cred, {
         "storageBucket": os.getenv("FIREBASE_BUCKET", "docai-efb03.firebasestorage.app")
     })
@@ -7733,3 +7734,17 @@ if __name__ == "__main__":
         port=port,
         reload=False,  # CRITICAL: No reload in production
     )
+
+# Admin data and legacy admin actions are authenticated in production and local development.
+from services.admin_api import router as admin_workspace_router, require_admin
+from fastapi.responses import JSONResponse
+app.include_router(admin_workspace_router)
+
+@app.middleware('http')
+async def protect_legacy_admin_actions(request: Request, call_next):
+    if request.method != 'OPTIONS' and request.url.path in ('/admin/import-questions', '/admin/question-bank-stats', '/api/email/test', '/api/email/preflight'):
+        try:
+            await asyncio.to_thread(require_admin, request)
+        except HTTPException as exc:
+            return JSONResponse(status_code=exc.status_code, content={'detail': exc.detail})
+    return await call_next(request)

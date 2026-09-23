@@ -13,6 +13,7 @@ from typing import AsyncGenerator
 import os, tempfile
 import json
 import random
+from tools.mcq_answer_position import place_correct_option
 import numpy as np
 
 #to format llm response into string
@@ -1666,44 +1667,44 @@ async def _generate_single_question(
 
     avoid_text = "\n".join([f"- {q}" for q in questions_to_avoid]) if questions_to_avoid else "None - this is the first question"
 
-    if target_letter:
-        if quiz_mode == "knowledge":
-            answer_instruction = f"""
-            CRITICAL REQUIREMENT - CORRECT ANSWER POSITION:
-            You MUST make option **{target_letter})** the correct answer for this question.
-
-            Design your question so that {target_letter} is the ONLY correct answer.
+    # The model always writes the correct answer as A; `target_letter` is then
+    # honoured in code by MOVING options (see tools/mcq_answer_position.py).
+    # Asking the model for the letter instead let it re-key a question to fit
+    # the letter, which is how one question ended up keyed A and B on reruns.
+    position_rule = """
+            CORRECT ANSWER POSITION: write the correct answer as option **A)**.
+            The options are shuffled afterwards, so:
+            - never use "all of the above" or "none of the above"
+            - never refer to an option by its letter in the question or in correct_blurb
+            """
+    if quiz_mode == "knowledge":
+        answer_instruction = position_rule + """
+            Design your question so that A is the ONLY correct answer.
             - All 4 options should be plausible to someone unfamiliar with the topic
-            - But {target_letter} should be the ONLY factually correct answer
+            - But A should be the ONLY factually correct answer
             - The other options should be common misconceptions or incorrect facts
             """
-        elif quiz_mode == "applied":
-            # Deliberately NOT the NCLEX wording below: applied questions have one
-            # right answer, not a "best" one. Telling the model to pick the BEST
-            # option is what turns a rung-2 question into a rung-3 ranking question.
-            answer_instruction = f"""
-            CRITICAL REQUIREMENT - CORRECT ANSWER POSITION:
-            You MUST make option **{target_letter})** the correct answer for this question.
-
-            Design your question so that {target_letter} is the ONLY correct answer
+    elif quiz_mode == "applied":
+        # Deliberately NOT the NCLEX wording below: applied questions have one
+        # right answer, not a "best" one. Telling the model to pick the BEST
+        # option is what turns a rung-2 question into a rung-3 ranking question.
+        answer_instruction = position_rule + """
+            Design your question so that A is the ONLY correct answer
             for this patient's condition.
             - All 4 options should be real nursing actions or parameters
-            - But only {target_letter} should be correct for THIS condition
+            - But only A should be correct for THIS condition
             - The others should be actions that are valid in general nursing practice
               but wrong here — not "less optimal", actually wrong
-            """
-        else:
-            answer_instruction = f"""
-            CRITICAL REQUIREMENT - CORRECT ANSWER POSITION:
-            You MUST make option **{target_letter})** the correct answer for this question.
-
-            Design your question and options so that {target_letter} is the most appropriate clinical response.
-            - All 4 options should be plausible
-            - But {target_letter} should be the BEST choice based on evidence-based practice
-            - The other options should be reasonable but less optimal or incorrect
+            - If the content lists several steps that are ALL correct, do not offer
+              two of them as options; ask about one step, or about the order
             """
     else:
-        answer_instruction = "You can choose any option (A, B, C, or D) as the correct answer."
+        answer_instruction = position_rule + """
+            Design your question and options so that A is the most appropriate clinical response.
+            - All 4 options should be plausible
+            - But A should be the BEST choice based on evidence-based practice
+            - The other options should be reasonable but less optimal or incorrect
+            """
 
     if existing_topics:
         topics_list = "\n".join([f"      - {t}" for t in existing_topics[:30]])
@@ -2311,6 +2312,10 @@ async def _generate_single_question(
             if concept_label:
                 parsed_question["concept"] = concept_label[:120]
 
+        # Move the keyed option to the requested (or a random) position. This
+        # also rewrites `answer` and metadata.correctAnswerIndex, which every
+        # caller reads the key from.
+        place_correct_option(parsed_question, target_letter)
         answer = parsed_question.get('answer', '')
         if answer:
             answer_letter = answer[0]
