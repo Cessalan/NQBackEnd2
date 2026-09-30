@@ -31,6 +31,7 @@ Usage:
 
 import asyncio
 import random
+import re
 import logging
 from typing import AsyncGenerator, Dict, Any, List, Optional
 
@@ -312,6 +313,24 @@ async def _extract_concepts_for_mode_plan(
     return concepts, resolved_modes
 
 
+_WORD = re.compile(r"[a-zA-ZÀ-ſ]{4,}")
+# Words every nursing concept shares; overlap on these proves nothing.
+_GENERIC_WORDS = {"nursing", "patient", "patients", "care", "management", "assessment", "interventions",
+                  "intervention", "with", "from", "that", "this", "their", "about", "signs", "symptoms"}
+
+
+def off_source_share(concepts, source_text):
+    """Share of concepts with no distinctive word in the source text."""
+    source_words = {w.lower() for w in _WORD.findall(source_text or "")}
+
+    def on_source(concept):
+        words = {w.lower() for w in _WORD.findall(str(concept))} - _GENERIC_WORDS
+        return bool(words & source_words) if words else True
+
+    concepts = [c for c in concepts if c]
+    return (sum(not on_source(c) for c in concepts) / len(concepts)) if concepts else 0.0
+
+
 async def stream_quiz_questions(
     topic: str,
     difficulty: str,
@@ -329,6 +348,8 @@ async def stream_quiz_questions(
     existing_questions: List[str] = None,
     index_offset: int = 0,
     node_difficulty: int = None,
+    source_text: str = None,
+    guidance: str = None,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Generate quiz questions fresh from document content via LLM.
@@ -553,6 +574,15 @@ async def stream_quiz_questions(
             docs = session.vectorstore.similarity_search(query=topic, k=30)
             full_text = "\n\n".join([doc.page_content for doc in docs])[:12000]
             content_context = f"Document content:\n{full_text}"
+        elif source_text:
+            # Notes the student pasted into the chat (services/practice_profile).
+            # Before this, only the router's topic reached this point: a pasted
+            # mental-health study guide arrived as its title, "Exam I Study
+            # Guide - NURS 3900", and came back as potassium and heparin.
+            content_context = (
+                "The student's own study notes (pasted into the chat). Every question "
+                "must test a topic that appears in these notes:\n" + source_text[:12000]
+            )
         else:
             content_context = f"""You are generating questions about: {topic}
 
@@ -590,6 +620,9 @@ async def stream_quiz_questions(
         else:
             mode_sequence = [quiz_mode] * questions_to_generate
 
+        if guidance:
+            content_context = f"{guidance}\n\n{content_context}"
+
         concepts, mode_sequence = await _extract_concepts_for_mode_plan(
             content_context=content_context,
             topic=topic,
@@ -598,6 +631,24 @@ async def stream_quiz_questions(
             learning_objective=learning_objective,
             avoid_concepts=existing_questions,
         )
+
+        # Pasted notes: a concept sharing no distinctive word with them is
+        # off-source. One stricter re-extraction; if that still drifts, keep
+        # the questions (an empty quiz helps nobody) but log it so the rate
+        # is visible.
+        if source_text and concepts and off_source_share(concepts, source_text) > 0.5:
+            logger.warning(f"off_source: {off_source_share(concepts, source_text):.0%} of concepts not in pasted notes, retrying")
+            strict_context = ("Choose concepts ONLY from topics named in the student's notes below. "
+                              "Do not add general nursing topics they do not mention.\n\n" + content_context)
+            retry_concepts, retry_modes = await _extract_concepts_for_mode_plan(
+                content_context=strict_context, topic=topic, mode_sequence=list(mode_sequence),
+                language=session.user_language or "english", learning_objective=learning_objective,
+                avoid_concepts=existing_questions,
+            )
+            if retry_concepts and off_source_share(retry_concepts, source_text) < off_source_share(concepts, source_text):
+                concepts, mode_sequence = retry_concepts, retry_modes
+            if off_source_share(concepts, source_text) > 0.5:
+                logger.warning(f"off_source persisted for chat {chat_id}: {concepts}")
 
         if not concepts:
             logger.warning("⚠️ Concept extraction failed, falling back to topic-only generation")

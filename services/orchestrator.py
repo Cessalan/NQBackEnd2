@@ -132,6 +132,10 @@ class NursingTutor:
     def __init__(self, chat_id: str):
         self.session = PersistentSessionContext(chat_id)
         self.tools_instance = NursingTools(self.session)
+        self._profile_saved = False
+        self._recent_user_messages = []
+        self._analyzer_practice = {}
+        self._practice_dirty = False
 
         # Get properly decorated tools — keep a reference so we can rebind
         # with `tool_choice` later when fast routing has a confident pick.
@@ -349,6 +353,19 @@ class NursingTutor:
                     self.session.quizzes = full_context_from_db["quizzes"]
             except Exception as e:
                 print("error during quizzes context creation",e)
+
+            # Practice memory: what this chat has been asked to generate, so a
+            # batch is decided by the whole conversation, not one message.
+            # See services/practice_profile.py.
+            try:
+                from services import practice_profile_store
+                self.session.practice_profile, self._profile_saved = practice_profile_store.from_context(full_context_from_db)
+                self.session.asked_questions = full_context_from_db.get("asked_questions") or []
+                self._recent_user_messages = full_context_from_db.get("recent_user_messages") or []
+            except Exception as e:
+                print("error loading practice profile (continuing without)", e)
+                self.session.practice_profile, self._profile_saved = {}, False
+                self._recent_user_messages = []
                 
             
             # self.session.message_history.append({
@@ -372,8 +389,18 @@ class NursingTutor:
             # If so, we transform the message to make it explicit for the LLM.
             # ═══════════════════════════════════════════════════════════════════
 
+            # The student's own words, before any rewriting below. Practice
+            # settings are parsed from THIS, never from the rewritten text.
+            raw_user_input = user_input
+
             # Check if this is a continuation request
             continuation_info = self._is_continuation_request(user_input)
+
+            # "more" continues the chat's saved scope, not the topic of the
+            # last quiz, which may have been a one-off targeted drill.
+            saved_scope = (self.session.practice_profile or {}).get("scope")
+            if continuation_info['is_continuation'] and continuation_info.get('action_type') == 'quiz' and saved_scope:
+                continuation_info['topic'] = saved_scope
 
             # If it's a continuation, transform the message to be explicit
             if continuation_info['is_continuation']:
@@ -478,11 +505,13 @@ class NursingTutor:
                         if isinstance(d, dict)
                     ]
                     file_insights = getattr(self.session, 'file_insights', {}) or {}
+                    from services.practice_profile import summary_line
                     classification = await analyze_intent(
                         user_message=user_input,
                         recent_history=self.session.message_history[-5:],
                         uploaded_docs=uploaded_docs,
                         file_insights=file_insights,
+                        saved_practice=summary_line(self.session.practice_profile),
                     )
                     print(
                         f"🧠 ANALYZER: intent={classification.get('intent')} "
@@ -504,6 +533,34 @@ class NursingTutor:
                             honesty_preamble = classification.get('honesty_message')
                 except Exception as e:
                     print(f"ERROR running intent analyzer (continuing without): {e}")
+
+            # ═══════════════════════════════════════════════════════════════════
+            # STEP: UPDATE THE CHAT'S PRACTICE SETTINGS
+            # ═══════════════════════════════════════════════════════════════════
+            # Code reads the unambiguous instructions ("no ordering", "make it
+            # 40"); the analyzer adds what keywords can't ("less pharmacology",
+            # a new topic). merge() keeps every field the message didn't touch
+            # and never lets a model guess re-enable an excluded format. Saved
+            # immediately, so "no ordering questions" sticks even on a turn
+            # that generates nothing.
+            # ═══════════════════════════════════════════════════════════════════
+            self._analyzer_practice = {}
+            try:
+                from services import practice_profile as pp
+                if classification and not classification.get('_fallback'):
+                    self._analyzer_practice = classification.get('practice_changes') or {}
+                merged, changed = pp.merge(
+                    self.session.practice_profile, pp.parse_changes(raw_user_input),
+                    analyzer_changes=self._analyzer_practice if self._analyzer_practice.get('scope_action') == 'change' else
+                    {k: v for k, v in self._analyzer_practice.items() if k != 'scope'},
+                )
+                self.session.practice_profile = merged
+                if changed:
+                    print(f"🧷 PRACTICE PROFILE changed {changed}: {pp.summary_line(merged)}")
+                    from services import practice_profile_store
+                    self._profile_saved = await practice_profile_store.save(self.session.chat_id, merged)
+            except Exception as e:
+                print(f"ERROR updating practice profile (continuing without): {e}")
 
             # ═══════════════════════════════════════════════════════════════════
             # STEP: EXAM RESEARCH (web search for school-specific exams)
@@ -625,7 +682,17 @@ class NursingTutor:
             #   4. gpt-4.1 only for actual content generation
             # ═══════════════════════════════════════════════════════════════════
 
-            fast_route_tool = self._fast_route_check(user_input)
+            # A continuation is decided by WHAT is being continued, not by the
+            # words in the rewritten message. "more" after a quiz on "NURS 3900
+            # Exam I Study Guide" was rewritten to include that topic, the
+            # study-sheet pattern matched "study guide", and the student got
+            # no quiz at all.
+            if continuation_info.get('is_continuation') and continuation_info.get('action_type') == 'quiz':
+                fast_route_tool = "generate_quiz_stream"
+            elif continuation_info.get('is_continuation') and continuation_info.get('action_type') == 'flashcard':
+                fast_route_tool = "generate_flashcards_stream"
+            else:
+                fast_route_tool = self._fast_route_check(user_input)
 
             # Did the student explicitly ask to be TAUGHT? Used below to stop
             # the analyzer from answering "teach me X" with a generated test.
@@ -848,6 +915,12 @@ class NursingTutor:
                                 merged[k] = v
                             tc["args"] = merged
                             print(f"📐 ANALYZER OVERRIDES applied to {tc.get('name')}: {tool_args_overrides}")
+
+                for tc in tool_calls_made:
+                    if tc.get("name") == "generate_quiz_stream":
+                        tc["args"] = self._apply_practice_profile(
+                            dict(tc.get("args") or {}), raw_user_input,
+                            continuation_info.get('is_continuation', False))
 
                 # ─────────────────────────────────────────────────────────
                 # HONESTY PREAMBLE: stream once before content generation
@@ -1169,6 +1242,19 @@ class NursingTutor:
                                     from services.exam_research import format_brief_as_context
                                     research_context_text = format_brief_as_context(research_brief)
 
+                                # Practice memory: save what this quiz established, and
+                                # hand the generator the student's own material, her
+                                # steer, and every question this chat already asked.
+                                from services import practice_profile as pp
+                                profile = pp.normalize(self.session.practice_profile)
+                                if self._practice_dirty or not self._profile_saved:
+                                    from services import practice_profile_store
+                                    self._profile_saved = await practice_profile_store.save(self.session.chat_id, profile)
+                                    self._practice_dirty = False
+                                source_text = profile["source"]["pastedText"] if profile["source"]["kind"] == "pasted" else None
+                                quiz_settings = {"difficulty": metadata.get("difficulty"), "question_types": metadata.get("question_types"),
+                                                 "scope": profile["scope"] or metadata.get("topic") or "", "requested_total": None}
+
                                 # Stream questions one by one (with optional empathetic message)
                                 async for chunk in stream_quiz_questions(
                                     topic=metadata.get("topic"),
@@ -1184,6 +1270,9 @@ class NursingTutor:
                                     learning_objective=metadata.get("learning_objective", "general"),
                                     user_prompt=metadata.get("user_prompt"),
                                     additional_context=research_context_text,
+                                    source_text=source_text,
+                                    guidance=pp.generation_guidance(profile),
+                                    existing_questions=(self.session.asked_questions or [])[-60:],
                                 ):
                                     if chunk.get("status") == "error":
                                         yield json.dumps(chunk) + "\n"
@@ -1218,7 +1307,7 @@ class NursingTutor:
 
                                         value ={ "status": "quiz_generating",
                                             "requested_total": chunk.get("requested_total"),
-                                            "quiz_settings": {"difficulty": metadata.get("difficulty"), "question_types": metadata.get("question_types"), "scope": metadata.get("user_prompt") or "", "requested_total": chunk.get("requested_total")},
+                                            "quiz_settings": {**quiz_settings, "requested_total": chunk.get("requested_total")},
                                             "quiz_topic": metadata.get("topic"),
                                             "current": chunk.get("current"),
                                             "type":"quiz",
@@ -1254,7 +1343,7 @@ class NursingTutor:
                                             "quota_charged": chunk.get("quota_charged", False),
                                             "requested_total": chunk.get("requested_total"),
                                             "quiz_topic": metadata.get("topic"),
-                                            "quiz_settings": {"difficulty": metadata.get("difficulty"), "question_types": metadata.get("question_types"), "scope": metadata.get("user_prompt") or "", "requested_total": chunk.get("requested_total")},
+                                            "quiz_settings": {**quiz_settings, "requested_total": chunk.get("requested_total")},
                                             "total_generated": chunk.get("total_generated")
                                         }) + "\n"
 
@@ -2392,6 +2481,92 @@ IMPORTANT: If user now says "more", "again", "another":
             'action_type': action_type,
             'topic': topic
         }
+
+    def _apply_practice_profile(self, args: dict, raw_user_input: str, is_continuation: bool) -> dict:
+        """Decide one quiz's arguments from the chat's practice profile.
+
+        The router and analyzer read one message; the profile carries what
+        earlier messages established. This is where "more" inherits the
+        saved scope, formats, total and difficulty, where a targeted-practice
+        button stays a one-quiz focus, and where pasted notes become the
+        source. Updates self.session.practice_profile; the dispatch saves it.
+        """
+        from services import practice_profile as pp
+        before = pp.normalize(self.session.practice_profile)
+        profile = pp.normalize(self.session.practice_profile)
+        changes = pp.parse_changes(raw_user_input)
+        action = (getattr(self, '_analyzer_practice', None) or {}).get('scope_action')
+        focus = pp.focus_topic(raw_user_input)
+        topic = (args.get('topic') or '').strip()
+
+        # ── Source: uploads, or notes pasted into the chat ────────────────
+        has_uploads = bool(self.session.vectorstore) or bool(self.session.documents)
+        pasted = None
+        if not has_uploads:
+            if pp.looks_like_pasted_material(raw_user_input):
+                pasted = {'content': raw_user_input, 'id': None}
+            elif profile['source']['kind'] != 'pasted':
+                # "quiz me on this" right after pasting: the notes are one of
+                # the last two messages before this one.
+                for message in reversed((self._recent_user_messages or [])[-3:]):
+                    content = message.get('content') or ''
+                    if content != raw_user_input and pp.looks_like_pasted_material(content):
+                        pasted = message
+                        break
+        if pasted:
+            text = pasted['content'][:pp.MAX_SOURCE_CHARS]
+            profile['source'] = {'kind': 'pasted', 'files': [], 'pastedText': text,
+                                 'pastedMessageId': pasted.get('id')}
+            profile['sourceTopics'] = pp.outline_topics(text)
+        elif has_uploads:
+            files = [d.get('filename', '') for d in (self.session.documents or []) if isinstance(d, dict) and d.get('filename')]
+            profile['source'] = {**profile['source'], 'kind': 'uploads', 'files': files[:20] or profile['source']['files'],
+                                 'pastedText': None, 'pastedMessageId': None}
+            if not profile['sourceTopics']:
+                insight_topics = []
+                for info in (getattr(self.session, 'file_insights', {}) or {}).values():
+                    for t in (info.get('topics') or []):
+                        if t and t not in insight_topics:
+                            insight_topics.append(t)
+                profile['sourceTopics'] = insight_topics[:40]
+        elif not profile['source']['kind']:
+            profile['source'] = {**profile['source'], 'kind': 'general'}
+
+        # ── Scope: what this quiz is about ────────────────────────────────
+        if focus:
+            args['topic'] = focus
+        elif (is_continuation or action == 'keep') and profile['scope']:
+            args['topic'] = profile['scope']
+        elif action != 'focus' and topic:
+            analyzer_named_scope = action == 'change' and (self._analyzer_practice or {}).get('scope')
+            # The chat's first quiz, freshly pasted notes, or a new subject the
+            # analyzer recognised but didn't name (when it named one, merge()
+            # has already saved it).
+            if not analyzer_named_scope and (not profile['scope'] or pasted or action == 'change'):
+                profile['scope'] = topic[:pp.MAX_SCOPE_CHARS]
+            elif analyzer_named_scope and profile['scope']:
+                # The router picks its topic from recent history, so right
+                # after a targeted drill it hands back that drill's topic:
+                # "50 questions based on the notes" was generated on
+                # serotonin syndrome only. The subject she just named wins.
+                args['topic'] = profile['scope']
+        # Otherwise (analyzer unavailable and a scope already saved): use the
+        # router's topic for this quiz but don't let a guess overwrite scope.
+
+        # ── Formats, total, difficulty ────────────────────────────────────
+        args['question_types'] = pp.effective_formats(profile, args.get('question_types'), raw_user_input)
+        if not focus and not changes.get('requested_total') and profile['requestedTotal']:
+            args['num_questions'] = profile['requestedTotal']
+        if not changes.get('difficulty') and profile['difficulty']:
+            args['difficulty'] = profile['difficulty']
+        # generate_quiz_stream reads the total and mode keywords from this; it
+        # must be her words, not the continuation rewrite.
+        args['user_prompt'] = raw_user_input[:4000]
+
+        self.session.practice_profile = profile
+        self._practice_dirty = profile != before
+        print(f"🧷 PRACTICE PROFILE for this quiz: {pp.summary_line(profile)} | topic={args.get('topic')!r} types={args['question_types']}")
+        return args
 
     def _transform_continuation_message(self, user_input: str, continuation_info: dict) -> str:
         """

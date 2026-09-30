@@ -224,6 +224,34 @@ QUESTION_TYPES DECISION RULES
     "No case study, just regular questions"     -> ["mcq"]
 - If the user is silent on format, set ["mcq"]. Do not invent SATA or
   casestudy just because the topic feels clinical.
+- The context may list "Saved practice settings" for this chat. Formats listed
+  after "never:" stay out of question_types unless THIS message explicitly
+  asks for them again. "NCLEX-style", "ATI-style" or "more" is not a request
+  for a format.
+
+PRACTICE_CHANGES
+Report only what THIS message changes about the chat's ongoing practice. The
+app remembers the rest; an empty object means "same as before".
+- scope_action:
+    "keep"   - no new subject: "more", "harder ones", "stop repeating", a
+               format or quantity change, or a request that names nothing new.
+    "change" - the student names what to practise from now on: new topics,
+               "everything in the PDF", "the whole study guide", a different
+               lecture. Put that subject in scope (short, in her words).
+    "focus"  - a one-off narrow drill that should not replace the ongoing
+               subject ("quickly 5 on digoxin", "Create a short targeted
+               practice on: X").
+- emphasis: a steer on balance within the subject, in a few words
+  ("less pharmacology", "more EKG rhythms"). Omit when there is none.
+- clear_emphasis: true only when she withdraws an earlier steer.
+- excluded_formats: formats she says she does not want. mcq, sata, casestudy
+  (casestudy = ordering / "put in order" / drag-and-drop / bowtie).
+Examples:
+    "more questions"                                  -> {"scope_action": "keep"}
+    "stop focusing so much on pharmacology"           -> {"scope_action": "keep", "emphasis": "less pharmacology"}
+    "i dont want the in order questions"              -> {"scope_action": "keep", "excluded_formats": ["casestudy"]}
+    "now quiz me on wound care and pressure injuries" -> {"scope_action": "change", "scope": "wound care and pressure injuries"}
+    "50 questions based on the notes"                 -> {"scope_action": "change", "scope": "all of the uploaded notes"}
 
 Be decisive. Do not ask the user to clarify - infer from the message. End by
 calling classify_intent. Never respond with plain text.
@@ -371,6 +399,22 @@ CLASSIFY_INTENT_TOOL = {
                 },
                 "additionalProperties": False,
             },
+            "practice_changes": {
+                "type": "object",
+                "description": "What this message changes about the chat's ongoing practice. See PRACTICE_CHANGES.",
+                "properties": {
+                    "scope_action": {"type": "string", "enum": ["keep", "change", "focus"]},
+                    "scope": {"type": ["string", "null"]},
+                    "emphasis": {"type": ["string", "null"]},
+                    "clear_emphasis": {"type": "boolean"},
+                    "excluded_formats": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": ["mcq", "sata", "casestudy"]},
+                        "uniqueItems": True,
+                    },
+                },
+                "additionalProperties": False,
+            },
             "reasoning": {
                 "type": "string",
                 "description": "One sentence explaining the classification.",
@@ -400,10 +444,14 @@ WEB_SEARCH_TOOL = {
 
 
 def _build_context_text(
-    recent_history: list[dict], uploaded_docs: list[str], file_insights: dict
+    recent_history: list[dict], uploaded_docs: list[str], file_insights: dict,
+    saved_practice: str | None = None,
 ) -> str:
     """Build the per-turn context block. Goes AFTER the cached prefix."""
     parts = []
+
+    if saved_practice:
+        parts.append(f"Saved practice settings for this chat: {saved_practice}")
 
     if uploaded_docs:
         parts.append(f"Uploaded documents ({len(uploaded_docs)}): {', '.join(uploaded_docs[-5:])}")
@@ -456,6 +504,7 @@ async def analyze_intent(
     recent_history: list[dict] | None = None,
     uploaded_docs: list[str] | None = None,
     file_insights: dict | None = None,
+    saved_practice: str | None = None,
 ) -> dict:
     """
     Classify the user's intent. Returns a dict matching the classify_intent
@@ -469,7 +518,7 @@ async def analyze_intent(
     uploaded_docs = uploaded_docs or []
     file_insights = file_insights or {}
 
-    context_text = _build_context_text(recent_history, uploaded_docs, file_insights)
+    context_text = _build_context_text(recent_history, uploaded_docs, file_insights, saved_practice)
 
     try:
         client = _get_client()

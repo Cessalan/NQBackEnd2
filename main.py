@@ -3145,6 +3145,18 @@ DIAGNOSTIC_TOPIC_LIMIT = 4       # topics covered at all
 STUDY_QUIZ_TYPES = ["mcq", "sata", "matrix"]
 
 
+async def _study_quiz_types(chat_id: str) -> list:
+    """STUDY_QUIZ_TYPES minus any format the student excluded in this chat.
+
+    A plan is the same chat document as the conversation, so "no SATA" said in
+    chat applies to the plan's quizzes too (services/practice_profile.py).
+    Never returns an empty list; a failed read means the default mix.
+    """
+    from services import practice_profile_store
+    excluded = set((await practice_profile_store.load(chat_id)).get("excludedFormats") or [])
+    return [t for t in STUDY_QUIZ_TYPES if t not in excluded] or ["mcq"]
+
+
 def _format_study_question(q: dict, fallback_topic: str) -> dict:
     """Shape one generated question for the study-mode cards.
 
@@ -4497,7 +4509,7 @@ async def start_study_journey(request: StudyPlanRequest):
                         source=source,
                         session=study_session,
                         chat_id=study_session.chat_id,
-                        question_types=STUDY_QUIZ_TYPES,
+                        question_types=await _study_quiz_types(study_session.chat_id),
                         quiz_mode="knowledge"
                     ):
                         if chunk.get("status") == "question_ready":
@@ -6142,7 +6154,7 @@ async def generate_study_item_stream(request: StudyItemRequest):
                     source=source,
                     session=session,
                     chat_id=session.chat_id,
-                    question_types=STUDY_QUIZ_TYPES,
+                    question_types=await _study_quiz_types(session.chat_id),
                     quiz_mode="knowledge" if request.is_diagnostic else "applied",
                     node_difficulty=request.difficulty,
                 ):
@@ -6700,7 +6712,7 @@ async def _generate_quiz_via_stream(
         source=source,
         session=session,
         chat_id=session.chat_id,
-        question_types=STUDY_QUIZ_TYPES,  # MCQ-weighted, one SATA guaranteed
+        question_types=await _study_quiz_types(session.chat_id),  # MCQ-weighted, one SATA guaranteed
         quiz_mode=quiz_mode,     # "applied" = mixed recall/applied, ratio from difficulty
         node_difficulty=node_difficulty,
     ):

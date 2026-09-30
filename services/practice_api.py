@@ -111,6 +111,31 @@ def finish(uid, request_id, questions):
     run(db.transaction())
 
 
+async def remember_tutor_settings(chat_id, message, settings):
+    """A settings change made through the in-quiz tutor is a change to the chat.
+
+    Formats come from the student's own words (practice_profile.parse_changes),
+    not from the tutor model's settings, so a model paraphrase can't quietly
+    re-enable an excluded format. Returns the settings the quiz should use.
+    """
+    from services import practice_profile as pp, practice_profile_store
+    try:
+        changes = pp.parse_changes(message)
+        if settings.get("difficulty") in ("easy", "medium", "hard"):
+            changes["difficulty"] = settings["difficulty"]
+        if isinstance(settings.get("requested_total"), int):
+            changes["requested_total"] = settings["requested_total"]
+        profile, changed = pp.merge(await practice_profile_store.load(chat_id), changes, updated_by="practice")
+        if changed:
+            await practice_profile_store.save(chat_id, profile)
+        if settings.get("question_types") or any(k in changes for k in ("exclude", "include", "only")):
+            return {**settings, "question_types": pp.effective_formats(profile, settings.get("question_types"), message)}
+        return settings
+    except Exception as e:
+        print(f"practice_profile: tutor settings not remembered for {chat_id}: {e}")
+        return settings
+
+
 def build_router(setup_session):
     router = APIRouter()
     @router.post('/flashcards/tutor')
@@ -142,7 +167,10 @@ def build_router(setup_session):
             session = await setup_session(body.chat_id, body.language)
             if request.url.path.endswith("/study/reasoning"):
                 return await respond(body, session, reasoning=True)
-            return await respond(body, session)
+            result = await respond(body, session)
+            if result.get("action") == "configure":
+                result["settings"] = await remember_tutor_settings(body.chat_id, body.message, result.get("settings") or {})
+            return result
         except HTTPException:
             raise
         except Exception:
@@ -161,15 +189,22 @@ def build_router(setup_session):
                 return
             try:
                 from services.quiz_with_bank import stream_quiz_questions
+                from services import practice_profile as pp, practice_profile_store
                 session = await setup_session(body.chat_id, body.language)
                 settings = sanitize_settings(body.settings)
+                # The chat's saved settings apply to every batch, including a
+                # quiz that was generated before the student excluded a format.
+                profile = await practice_profile_store.load(body.chat_id)
+                session.practice_profile = profile
+                pasted = profile["source"]["pastedText"] if profile["source"]["kind"] == "pasted" and not session.vectorstore else None
                 yield json.dumps({"status": "quiz_generating", "total": allocation["count"]}) + "\n"
                 seen = {q.strip().lower() for q in body.existing_questions}
                 async for chunk in stream_quiz_questions(topic=body.topic, difficulty=settings.get("difficulty", "medium"),
                     num_questions=allocation["count"], source="documents" if session.vectorstore else "scratch", session=session,
-                    chat_id=body.chat_id, question_types=settings.get("question_types", ["mcq", "sata", "casestudy"]),
+                    chat_id=body.chat_id, question_types=pp.effective_formats(profile, settings.get("question_types")),
                     quiz_mode="nclex", learning_objective="exam_prep", existing_questions=body.existing_questions,
-                    index_offset=len(body.existing_questions), user_prompt=settings.get("scope", "")):
+                    index_offset=len(body.existing_questions), user_prompt=settings.get("scope", ""),
+                    source_text=pasted, guidance=pp.generation_guidance(profile)):
                     if chunk.get("status") == "question_ready":
                         q = chunk["question"]
                         key = q.get("question", "").strip().lower()

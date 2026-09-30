@@ -33,3 +33,8 @@ class PersistentSessionContext:
     # in question deduplication. Now each session has its own isolated list.
     previously_generate_questions_in_quiz: List[str] = field(default_factory=list)
     file_insights: Dict[str, Dict] = field(default_factory=dict)  # {filename: {topics, concepts, doc_type}}
+    # The chat's remembered practice settings (services/practice_profile.py),
+    # refreshed from Firestore on every message, plus every question stem the
+    # chat has already asked so a new batch can avoid them.
+    practice_profile: Dict[str, Any] = field(default_factory=dict)
+    asked_questions: List[str] = field(default_factory=list)

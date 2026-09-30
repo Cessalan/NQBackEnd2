@@ -33,13 +33,14 @@ import time
 from firebase_admin import firestore
 
 # ── Tunables — keep identical to FREE_LIMIT / WINDOW_MS in UsageService.js ──
-FREE_LIMIT = 40                      # question-units per window (free tier)
-WINDOW_MS = 7 * 24 * 60 * 60 * 1000  # rolling window length (7 days, in ms)
+# 50 per rolling 30 days since 2026-09-29 (was 40 per 7 days).
+FREE_LIMIT = 50                       # question-units per window (free tier)
+WINDOW_MS = 30 * 24 * 60 * 60 * 1000  # rolling window length (30 days, in ms)
 
 # User-facing rejection copy (the frontend may show its own localized copy;
 # this is the fallback that lands in the error bubble).
 QUOTA_MESSAGE = (
-    "You've used all your free questions for this week. "
+    "You've used all your free questions for this month. "
     "Upgrade to Pro for unlimited practice, or wait for the window to reset."
 )
 

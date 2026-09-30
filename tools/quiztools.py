@@ -434,9 +434,30 @@ async def get_chat_context_from_db(chat_id: str) -> dict:
         conversation_history = []
         quizzes_created = []
         study_sheets_created = []
-        
+        # Practice memory (services/practice_profile.py): the chat's saved
+        # settings, the latest quiz's settings to seed chats that predate them,
+        # every question stem already asked (so a new batch doesn't repeat
+        # one), and the last user messages (to find pasted notes).
+        chat_snapshot = db.collection("chats").document(chat_id).get()
+        chat_data = chat_snapshot.to_dict() if chat_snapshot.exists else {}
+        latest_quiz_settings = None
+        asked_questions = []
+        recent_user_messages = []
+
         for doc in messages:
             message_data = doc.to_dict()
+
+            if message_data.get('role') == 'user' and isinstance(message_data.get('content'), str):
+                recent_user_messages.append({'id': message_data.get('id') or doc.id, 'content': message_data['content']})
+                recent_user_messages = recent_user_messages[-3:]
+            if message_data.get('type') == 'quiz':
+                practice = message_data.get('practice') or {}
+                if isinstance(practice.get('settings'), dict):
+                    latest_quiz_settings = practice['settings']
+                for q in (message_data.get('quizData') or []) + (practice.get('questions') or []):
+                    stem = q.get('question') if isinstance(q, dict) else None
+                    if isinstance(stem, str) and stem.strip() and stem not in asked_questions:
+                        asked_questions.append(stem)
 
             # Regular conversation messages (skip quiz, scenario, and other non-text message types)
             message_type = message_data.get('type', '')
@@ -494,9 +515,13 @@ async def get_chat_context_from_db(chat_id: str) -> dict:
         return {
             'conversation': conversation_history[-20:],
             'quizzes': quizzes_created,
-            'study_sheets': study_sheets_created
+            'study_sheets': study_sheets_created,
+            'practice_profile': chat_data.get('practiceProfile'),
+            'latest_quiz_settings': latest_quiz_settings,
+            'asked_questions': asked_questions[-200:],
+            'recent_user_messages': recent_user_messages,
         }
-        
+
     except Exception as e:
         print(f"Error querying chat context: {e}")
         return {'conversation': [], 'quizzes': [], 'study_sheets': []}
@@ -1129,7 +1154,8 @@ async def generate_quiz_stream(
             - "mcq" = Multiple choice (single answer) - DEFAULT
             - "sata" = Select All That Apply (multiple correct answers)
             - "casestudy" = NGN-style case study with drag-and-drop ordering
-            If None or empty, defaults to ["mcq"]
+            If None or empty, defaults to ["mcq", "sata"]. The chat's saved
+            exclusions (services/practice_profile.py) always apply.
         empathetic_message: Optional empathetic understanding text to show before quiz
         quiz_mode: "knowledge" for factual recall questions (default),
                    "nclex" for clinical judgment questions
@@ -1167,85 +1193,16 @@ async def generate_quiz_stream(
         requested_total = requested_question_total(user_prompt, num_questions)
         num_questions = min(5, requested_total)
 
-        # Normalize question_types - default to MCQ if not specified
-        if question_types is None or len(question_types) == 0:
-            question_types = ["mcq", "sata", "casestudy"]
-
-        # Validate question types
-        valid_types = ["mcq", "sata", "casestudy", "ordering", "bowtie"]
-        question_types = [qt.lower() for qt in question_types if qt.lower() in valid_types]
-
-        # Normalize aliases: ordering and bowtie both map to casestudy
-        question_types = ["casestudy" if qt in ["ordering", "bowtie"] else qt for qt in question_types]
-
-        # Fallback to MCQ if no valid types
-        if not question_types:
-            question_types = ["mcq"]
-
-        # ── Keyword override from user_prompt ──────────────────────────────
-        # The LLM extracts question_types from the user message, but can miss
-        # explicit mentions (e.g. "sata only", "do not use case study").
-        # Scan user_prompt directly and enforce what the user actually said.
-        if user_prompt:
-            prompt_lower = user_prompt.lower()
-
-            # Negative exclusions first (highest priority)
-            no_casestudy = any(kw in prompt_lower for kw in [
-                "no case study", "not case study", "without case study",
-                "do not use case study", "don't use case study", "no casestudy"
-            ])
-            no_sata = any(kw in prompt_lower for kw in [
-                "no sata", "not sata", "without sata",
-                "do not use sata", "don't use sata", "no select all"
-            ])
-
-            # Positive inclusions
-            wants_sata = any(kw in prompt_lower for kw in [
-                "sata", "select all that apply", "select all"
-            ])
-            wants_mcq = any(kw in prompt_lower for kw in [
-                "mcq", "multiple choice", "multiple-choice"
-            ])
-            wants_casestudy = any(kw in prompt_lower for kw in [
-                "case study", "casestudy", "drag and drop", "ordering", "bowtie", "ngn", "next generation"
-            ])
-            wants_mixed = any(kw in prompt_lower for kw in [
-                "mixed format", "mix of", "combination of"
-            ])
-
-            # Build override set
-            override_types = set(question_types)
-
-            if no_casestudy:
-                override_types.discard("casestudy")
-                print(f"🚫 user_prompt excludes case study — removed from question_types")
-            if no_sata:
-                override_types.discard("sata")
-                print(f"🚫 user_prompt excludes SATA — removed from question_types")
-
-            if wants_sata and not no_sata:
-                override_types.add("sata")
-                print(f"✅ user_prompt requests SATA — added to question_types")
-            if wants_mcq:
-                override_types.add("mcq")
-                print(f"✅ user_prompt requests MCQ — added to question_types")
-            if wants_casestudy and not no_casestudy:
-                override_types.add("casestudy")
-                print(f"✅ user_prompt requests case study — added to question_types")
-            if wants_mixed:
-                if not no_sata:
-                    override_types.add("sata")
-                if not no_casestudy:
-                    override_types.add("casestudy")
-                override_types.add("mcq")
-                print(f"✅ user_prompt requests mixed format — expanded question_types")
-
-            # Only update if the override produced something different
-            new_types = list(override_types) if override_types else ["mcq"]
-            if set(new_types) != set(question_types):
-                print(f"📋 question_types overridden by user_prompt: {question_types} → {new_types}")
-                question_types = new_types
-
+        # Formats: the chat's saved practice profile, then this message.
+        # services/practice_profile.effective_formats keeps every exclusion the
+        # student has made in this chat ("no ordering questions" survives
+        # "more"), reads negation correctly, and never returns an empty list.
+        # It replaces a keyword check that only saw the current message and
+        # listed "ordering" as a request, so "no ordering questions" ADDED the
+        # ordering (casestudy) format.
+        from services.practice_profile import effective_formats
+        question_types = effective_formats(
+            getattr(session, "practice_profile", None) or {}, question_types, user_prompt)
         print(f"📋 Question types requested: {question_types}")
 
         # Normalize quiz_mode
@@ -1417,7 +1374,8 @@ async def stream_quiz_questions(
         empathetic_message: Optional empathetic understanding text to stream first
         chat_id: Chat ID for cancellation checking
         question_types: List of question types to generate ["mcq", "sata", "ordering"]
-                       If None or empty, defaults to ["mcq"]
+                       If None or empty, defaults to ["mcq", "sata"]. The chat's saved
+            exclusions (services/practice_profile.py) always apply.
 
     Yields:
         Status updates and complete questions
