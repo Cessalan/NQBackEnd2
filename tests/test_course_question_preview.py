@@ -61,7 +61,8 @@ class QuestionPreviewTests(unittest.TestCase):
         self.assertEqual(events[-1]['status'], 'course_question_ready')
         self.assertEqual(len(events[-1]['questions']), 2)
         self.assertIn('in French', prompts[0])
-        self.assertIn('8-question readiness check', prompts[0])
+        self.assertIn('5-question readiness check', prompts[0])
+        self.assertIn('include every topic at least once', prompts[0])
         self.assertIn('Select all that apply.', prompts[0])
         self.assertIn('1. applied, 2. sata, 3. prioritization, 4. casestudy', prompts[0])
 
@@ -138,10 +139,10 @@ class QuestionPreviewTests(unittest.TestCase):
         ]
         self.assertEqual(len(validate_questions([opener, *refused], sources, ['Topic'])), 1)
 
-    def test_the_check_is_capped_at_eight(self):
+    def test_the_check_is_capped_at_five(self):
         sources = [{'filename': 'lecture.pdf', 'text': PASSAGE}]
         many = [self.item(question=f'Question {i}?') for i in range(12)]
-        self.assertEqual(len(validate_questions(many, sources, ['Topic'])), 8)
+        self.assertEqual(len(validate_questions(many, sources, ['Topic'])), 5)
 
 
 if __name__ == '__main__':
