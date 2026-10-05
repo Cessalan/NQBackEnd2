@@ -1,6 +1,8 @@
 """Production admin API. All data and actions require a verified Firebase identity."""
 import html
 import os
+from threading import Lock
+from time import monotonic
 from datetime import datetime, timezone
 from uuid import uuid4
 from services.email_html import sanitize_email_html
@@ -83,6 +85,30 @@ def user_detail(uid: str):
                       'chats': [{'id': d.id, **{k: d.to_dict().get(k) for k in ['title','updatedAt','createdAt']}} for d in chats[:100]],
                       'truncated': len(chats) > 100 or len(exams) > 100})
 
+
+@router.get('/study-plans')
+def study_plans(cursor: str = ''):
+    from services.admin_study import list_plans
+    return serialize(list_plans(database(), cursor))
+
+
+@router.get('/study-plans/{chat_id}')
+def study_plan_detail(chat_id: str):
+    from services.admin_study import plan_detail
+    return serialize(plan_detail(database(), chat_id))
+
+
+@router.get('/study-plans/{chat_id}/messages')
+def study_plan_messages(chat_id: str, cursor: str = ''):
+    from services.admin_study import message_page
+    return serialize(message_page(database(), chat_id, cursor))
+
+
+@router.get('/study-plans/{chat_id}/messages/{message_id}')
+def study_plan_message(chat_id: str, message_id: str):
+    from services.admin_study import message_detail
+    return serialize(message_detail(database(), chat_id, message_id))
+
 class Grant(BaseModel):
     email: str = Field(min_length=3, max_length=254)
 
@@ -111,6 +137,7 @@ def revoke(uid: str, identity=Depends(require_owner)):
     return {'status': 'revoked'}
 
 class Draft(BaseModel):
+    source_draft_id: str = Field(default='', max_length=128, pattern=r'^[^/]*$')
     uid: str = Field(default='', max_length=128, pattern=r'^[^/]*$')
     email: str = Field(default='', max_length=254)
     subject: str = Field(min_length=1, max_length=180)
@@ -129,6 +156,173 @@ class LayoutPreview(BaseModel):
     subject: str = Field(default='', max_length=180)
     message: str = Field(default='', max_length=10000)
     html: str = Field(default='', max_length=50000)
+
+@router.get('/email/settings')
+def email_settings(identity=Depends(require_admin)):
+    from services import email_sender
+    issues = email_sender.configuration_issues()
+    return {'enabled': email_sender.is_enabled(), 'ready': not issues, 'issues': issues,
+            'from': email_sender._from_address(), 'dailyCap': email_sender.daily_cap(),
+            'remainingToday': email_sender.remaining_today(database()), 'testEmail': identity['email']}
+
+
+class WorkingEmail(LayoutPreview):
+    audience: Literal['one', 'selected', 'all', 'pro', 'free'] = 'one'
+    uid: str = Field(default='', max_length=128, pattern=r'^[^/]*$')
+    email: str = Field(default='', max_length=254)
+    emails: list[str] = Field(default_factory=list, max_length=100)
+    draft_id: str = Field(default='', max_length=128, pattern=r'^[^/]*$')
+
+
+@router.post('/email/drafts')
+def save_working_email(body: WorkingEmail, identity=Depends(require_admin)):
+    from firebase_admin import firestore
+    db = database()
+    draft_id = body.draft_id or str(uuid4())
+    ref = db.collection('adminMail').document(draft_id)
+    data = {'actor': identity['uid'], 'status': 'composing', 'audience': body.audience,
+            'uid': body.uid, 'email': body.email.strip(), 'emails': body.emails,
+            'subject': body.subject.strip(), 'message': body.message, 'html': sanitize_email_html(body.html),
+            'to': body.email.strip() if body.audience == 'one' else {'selected': f'{len(body.emails)} selected students',
+                'all': 'All students', 'pro': 'Pro members', 'free': 'Free members'}[body.audience],
+            'updatedAt': datetime.now(timezone.utc)}
+    if not body.draft_id:
+        ref.create({**data, 'createdAt': data['updatedAt']})
+    else:
+        @firestore.transactional
+        def update(tx):
+            current = ref.get(transaction=tx).to_dict() or {}
+            if current.get('actor') != identity['uid']:
+                raise HTTPException(403, 'This draft belongs to another admin.')
+            if current.get('status') != 'composing':
+                raise HTTPException(409, 'This email has already been reviewed. Save a new draft instead.')
+            tx.update(ref, data)
+        update(db.transaction())
+    return {'id': draft_id}
+
+
+class EmailTemplate(LayoutPreview):
+    name: str = Field(min_length=1, max_length=80)
+
+
+@router.get('/email/templates')
+def email_templates_list(identity=Depends(require_admin)):
+    from firebase_admin import firestore
+    docs = database().collection('adminMailTemplates').where(
+        filter=firestore.FieldFilter('actor', '==', identity['uid'])).limit(100).stream()
+    return serialize({'items': sorted([{'id': d.id, **d.to_dict()} for d in docs], key=lambda d: d['name'].lower())})
+
+
+@router.post('/email/templates')
+def save_email_template(body: EmailTemplate, identity=Depends(require_admin)):
+    if not body.name.strip() or not body.message.strip():
+        raise HTTPException(400, 'Give the template a name and write a message first.')
+    template_id = str(uuid4())
+    database().collection('adminMailTemplates').document(template_id).create({
+        'actor': identity['uid'], 'name': body.name.strip(), 'subject': body.subject.strip(),
+        'message': body.message, 'html': sanitize_email_html(body.html), 'createdAt': datetime.now(timezone.utc)})
+    return {'id': template_id}
+
+
+_student_directory_lock = Lock()
+_student_directory_cache = None
+_student_directory_expires = 0
+
+
+def email_student_directory():
+    """Share a short-lived, projected directory across searches in this worker."""
+    global _student_directory_cache, _student_directory_expires
+    with _student_directory_lock:
+        if _student_directory_cache is not None and monotonic() < _student_directory_expires:
+            return _student_directory_cache
+        docs = database().collection('users').select(
+            ['email', 'displayName', 'name', 'emailPrefs', 'hardBounced']).stream()
+        items = []
+        for doc in docs:
+            data = doc.to_dict() or {}
+            address = (data.get('email') or '').strip()
+            name = data.get('displayName') or data.get('name') or ''
+            prefs = data.get('emailPrefs') or {}
+            if not address or data.get('hardBounced') or prefs.get('unsubscribedAt') or prefs.get('marketing') is False:
+                continue
+            items.append({'uid': doc.id, 'name': name, 'email': address})
+        _student_directory_cache = sorted(items, key=lambda item: item['uid'])
+        _student_directory_expires = monotonic() + 60
+        return _student_directory_cache
+
+
+@router.get('/email/students')
+def email_students(q: str = '', cursor: str = ''):
+    """Search the full directory; paginate matches rather than scanned users."""
+    if len(q) > 100 or len(cursor) > 128 or '/' in cursor:
+        raise HTTPException(400, 'Enter a shorter search.')
+    needle = q.strip().casefold()
+    items = []
+    for student in email_student_directory():
+        if cursor and student['uid'] <= cursor:
+            continue
+        if needle not in f"{student['name']} {student['email']}".casefold():
+            continue
+        items.append(student)
+        if len(items) == 31:
+            break
+    return {'items': items[:30], 'cursor': items[29]['uid'] if len(items) > 30 else None}
+
+
+def check_email_configuration():
+    from services import email_sender
+    if email_sender.is_enabled():
+        issues = email_sender.configuration_issues()
+        if issues:
+            raise HTTPException(409, 'Email setup is incomplete. ' + ' '.join(issues))
+
+
+@router.post('/email/{draft_id}/test')
+def send_email_test(draft_id: str, identity=Depends(require_admin)):
+    """Send the reviewed content only to the authenticated admin, once per preview."""
+    from firebase_admin import auth, firestore
+    from services import email_sender
+    db = database()
+    data = db.collection('adminMail').document(draft_id).get().to_dict() or {}
+    if data.get('actor') != identity['uid']:
+        raise HTTPException(403, 'This email belongs to another admin.')
+    if data.get('status') not in ('draft', 'paused'):
+        raise HTTPException(409, 'Review this email before sending a test.')
+    if not email_sender.is_enabled() or not data.get('sendingEnabled'):
+        raise HTTPException(409, 'Email sending must be enabled before a test can reach your inbox.')
+    if data['status'] == 'draft' and (datetime.now(timezone.utc) - data['createdAt']).total_seconds() > 3600:
+        raise HTTPException(409, 'Preview expired. Create a new preview.')
+    check_email_configuration()
+    try: admin = auth.get_user(identity['uid'])
+    except auth.UserNotFoundError:
+        raise HTTPException(409, 'Your account is unavailable. Sign in again.')
+    if admin.disabled or not admin.email or not admin.email_verified or admin.email.lower() != identity['email'].lower():
+        raise HTTPException(409, 'Your verified email changed. Sign in again before sending a test.')
+    ref = db.collection('adminMailTests').document(draft_id)
+    @firestore.transactional
+    def reserve(tx):
+        previous = ref.get(transaction=tx).to_dict() or {}
+        if previous:
+            if previous.get('result'):
+                return previous['result']
+            raise HTTPException(409, 'This test is already sending or its outcome is uncertain. Check your inbox before creating another preview.')
+        if email_sender.remaining_today(db) <= 0:
+            raise HTTPException(409, 'Today’s sending allowance is used up. Try again tomorrow.')
+        tx.set(ref, {'actor': identity['uid'], 'to': admin.email, 'status': 'sending', 'createdAt': datetime.now(timezone.utc)})
+        return None
+    previous = reserve(db.transaction())
+    if previous:
+        return previous
+    try:
+        result = email_sender.send_email(db, uid=admin.uid, to=admin.email, subject='[Test] ' + data['subject'],
+            html=render_email_body(data), campaign='admin_test',
+            idempotency_key='admin_test_' + draft_id, transactional=True)
+        result = {**result, 'to': admin.email}
+        ref.update({'status': result['status'], 'result': result})
+    except Exception:
+        raise HTTPException(503, 'Test outcome is uncertain. Check your inbox before creating another preview.')
+    audit(identity, 'send_email_test', draft_id)
+    return result
 
 @router.post('/email/layout-preview')
 def layout_preview(body: LayoutPreview):
@@ -159,12 +353,13 @@ def preview(body: Draft, identity=Depends(require_admin)):
     reason = email_sender.is_suppressed(database(), recipient.uid)
     if reason: raise HTTPException(400, 'Email suppressed: ' + reason)
     draft_id = str(uuid4())
-    data = {'actor': identity['uid'], 'uid': recipient.uid, 'to': recipient.email, 'subject': body.subject.strip(),
-            'html': sanitize_email_html(body.html), 'message': body.message.strip(), 'status': 'draft', 'createdAt': datetime.now(timezone.utc)}
+    data = {'actor': identity['uid'], 'sourceDraftId': body.source_draft_id, 'uid': recipient.uid, 'to': recipient.email, 'subject': body.subject.strip(),
+            'html': sanitize_email_html(body.html), 'message': body.message.strip(), 'status': 'draft',
+            'sendingEnabled': email_sender.is_enabled(), 'createdAt': datetime.now(timezone.utc)}
     database().collection('adminMail').document(draft_id).create(data)
     return serialize({'id': draft_id, **data, 'sendingEnabled': email_sender.is_enabled(),
                       'from': email_sender._from_address(),
-                      'html': (data.get('html') or personal_email_html(data['message'])) + email_sender._footer(recipient.uid)})
+                      'html': render_email_body(data) + email_sender._footer(recipient.uid)})
 
 def personal_email_html(message):
     paragraphs = ''.join('<p style="margin:0 0 18px">' + html.escape(p).replace('\n', '<br>') + '</p>'
@@ -173,6 +368,15 @@ def personal_email_html(message):
             'line-height:1.7;color:#292524;overflow-wrap:anywhere">'
             '<div style="font-size:14px;font-weight:bold;color:#bc6a58;margin-bottom:28px">NurseQuizAI</div>'
             + paragraphs + '</div>')
+
+
+def render_email_body(data):
+    """One body for the on-screen preview, admin test, and final delivery."""
+    if not data.get('html'):
+        return personal_email_html(data['message'])
+    return ('<div style="max-width:600px;margin:0 auto;padding:24px;font:16px Arial,sans-serif;'
+            'line-height:1.7;color:#292524;background-color:#ffffff;overflow-wrap:anywhere">'
+            + data['html'] + '</div>')
 
 class CampaignDraft(Draft):
     audience: Literal['selected', 'all', 'pro', 'free']
@@ -213,19 +417,20 @@ def campaign_preview(body: CampaignDraft, identity=Depends(require_admin)):
     if not recipients: raise HTTPException(400, 'No eligible recipients in this audience.')
     if len(json.dumps(recipients).encode()) > 750000: raise HTTPException(400, 'Audience is too large. Choose a smaller group.')
     draft_id = str(uuid4())
-    data = {'kind': 'campaign', 'actor': identity['uid'], 'audience': body.audience,
+    data = {'kind': 'campaign', 'actor': identity['uid'], 'sourceDraftId': body.source_draft_id, 'audience': body.audience,
             'subject': body.subject.strip(), 'html': sanitize_email_html(body.html), 'message': body.message.strip(), 'recipients': recipients,
             'to': str(len(recipients)) + ' students', 'total': len(recipients), 'excluded': excluded,
             'status': 'draft', 'createdAt': datetime.now(timezone.utc), 'sendingEnabled': email_sender.is_enabled()}
     db.collection('adminMail').document(draft_id).create(data)
     return serialize({'id': draft_id, **data, 'from': email_sender._from_address(),
                       'remainingToday': email_sender.remaining_today(db),
-                      'html': (data.get('html') or personal_email_html(data['message'])) + email_sender._footer(recipients[0]['uid'])})
+                      'html': render_email_body(data) + email_sender._footer(recipients[0]['uid'])})
 
 @router.post('/email/{draft_id}/batch')
 def campaign_send(draft_id: str, identity=Depends(require_admin)):
     from firebase_admin import firestore, auth
     from services import email_sender
+    check_email_configuration()
     db = database()
     ref = db.collection('adminMail').document(draft_id)
     @firestore.transactional
@@ -254,7 +459,7 @@ def campaign_send(draft_id: str, identity=Depends(require_admin)):
                 recipient.update(status='skipped', reason='Recipient account changed or is unavailable.')
             else:
                 result = email_sender.send_email(db, uid=recipient['uid'], to=recipient['to'], subject=data['subject'],
-                    html=(data.get('html') or personal_email_html(data['message'])), campaign='admin_announcement',
+                    html=render_email_body(data), campaign='admin_announcement',
                     idempotency_key='admin_' + draft_id + '_' + recipient['uid'])
                 if result.get('reason', '').startswith('daily_cap_reached'):
                     reason = 'Daily sending limit reached. Resume later.'
@@ -272,7 +477,7 @@ def campaign_send(draft_id: str, identity=Depends(require_admin)):
 
 @router.post('/email/{draft_id}/send')
 def send(draft_id: str, identity=Depends(require_admin)):
-    from firebase_admin import firestore
+    from firebase_admin import firestore, auth
     from services import email_sender
     db = database()
     ref = db.collection('adminMail').document(draft_id)
@@ -283,13 +488,20 @@ def send(draft_id: str, identity=Depends(require_admin)):
         if data.get('actor') != identity['uid']: raise HTTPException(403, 'This draft belongs to another admin.')
         if data.get('kind') == 'campaign': raise HTTPException(400, 'Use campaign sending for this draft.')
         if data.get('status') != 'draft': raise HTTPException(409, 'This send was already requested. Check its history before sending again.')
+        if data.get('sendingEnabled') != email_sender.is_enabled():
+            raise HTTPException(409, 'Sending mode changed. Create a new preview.')
         if (datetime.now(timezone.utc) - data['createdAt']).total_seconds() > 3600: raise HTTPException(409, 'Preview expired. Create a new preview.')
+        check_email_configuration()
+        try: user = auth.get_user(data['uid'])
+        except auth.UserNotFoundError: user = None
+        if not user or user.disabled or user.email != data['to']:
+            raise HTTPException(409, 'Recipient account changed or is unavailable. Create a new preview.')
         tx.update(ref, {'status': 'sending'})
         return data
     data = reserve(db.transaction())
     try:
         result = email_sender.send_email(db, uid=data['uid'], to=data['to'], subject=data['subject'],
-            html=(data.get('html') or personal_email_html(data['message'])),
+            html=render_email_body(data),
             campaign='admin_personal', idempotency_key='admin_' + draft_id)
         ref.update({'status': result['status'], 'result': result, 'sentAt': datetime.now(timezone.utc)})
     except Exception:
@@ -302,6 +514,26 @@ def send(draft_id: str, identity=Depends(require_admin)):
 def history():
     docs = database().collection('adminMail').order_by('createdAt', direction='DESCENDING').limit(100).stream()
     return serialize({'items': [{'id': d.id, **d.to_dict()} for d in docs]})
+
+
+@router.get('/email/{draft_id}/preview')
+def saved_email_preview(draft_id: str, identity=Depends(require_admin)):
+    from services import email_sender
+    data = database().collection('adminMail').document(draft_id).get().to_dict() or {}
+    if not data:
+        raise HTTPException(404, 'Email not found.')
+    if data.get('actor') != identity['uid']:
+        raise HTTPException(403, 'This email belongs to another admin.')
+    if data.get('status') not in ('draft', 'paused'):
+        raise HTTPException(409, 'This email is already processing or finished. Refresh history.')
+    if data.get('sendingEnabled') != email_sender.is_enabled():
+        raise HTTPException(409, 'Sending mode changed. Create a new preview.')
+    if data['status'] == 'draft' and (datetime.now(timezone.utc) - data['createdAt']).total_seconds() > 3600:
+        raise HTTPException(409, 'Preview expired. Restore the email and create a new preview.')
+    uid = data['recipients'][0]['uid'] if data.get('kind') == 'campaign' else data['uid']
+    return serialize({'id': draft_id, **data, 'from': email_sender._from_address(),
+                      'remainingToday': email_sender.remaining_today(database()),
+                      'html': render_email_body(data) + email_sender._footer(uid)})
 
 @router.get('/exams')
 def upcoming_exams(days: int = 30):

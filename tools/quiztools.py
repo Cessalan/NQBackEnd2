@@ -443,9 +443,11 @@ async def get_chat_context_from_db(chat_id: str) -> dict:
         latest_quiz_settings = None
         asked_questions = []
         recent_user_messages = []
+        study_evidence_messages = []
 
         for doc in messages:
             message_data = doc.to_dict()
+            study_evidence_messages.append({**message_data, 'id': message_data.get('id') or doc.id})
 
             if message_data.get('role') == 'user' and isinstance(message_data.get('content'), str):
                 recent_user_messages.append({'id': message_data.get('id') or doc.id, 'content': message_data['content']})
@@ -464,6 +466,7 @@ async def get_chat_context_from_db(chat_id: str) -> dict:
             skip_types = ['quiz',
                           'scenario',
                           'study_sheet',
+                          'studysheet',
                           'flashcards',
                           'suggested_prompts',
                           'upload_loading']
@@ -506,12 +509,15 @@ async def get_chat_context_from_db(chat_id: str) -> dict:
                 })
             
             # Extract study sheets separately to build the context
-            if message_data.get('html'):
+            if message_data.get('html') or message_data.get('type') in ('studysheet', 'study_sheet'):
                 study_sheets_created.append({
                     'timestamp': message_data.get('timestamp'),
-                    'html_content': message_data['html']
+                    'html_content': message_data.get('html'),
+                    'content': message_data.get('content'),
+                    'studySheet': message_data.get('studySheet')
                 })
         
+        from services.study_sheet_context import build_chat_evidence
         return {
             'conversation': conversation_history[-20:],
             'quizzes': quizzes_created,
@@ -520,6 +526,7 @@ async def get_chat_context_from_db(chat_id: str) -> dict:
             'latest_quiz_settings': latest_quiz_settings,
             'asked_questions': asked_questions[-200:],
             'recent_user_messages': recent_user_messages,
+            'study_sheet_context': build_chat_evidence(study_evidence_messages, chat_data.get('practiceProfile')),
         }
 
     except Exception as e:

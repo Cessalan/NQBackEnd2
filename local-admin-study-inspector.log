@@ -1,0 +1,245 @@
+INFO:     Started server process [37672]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+✅ OPENAI_API_KEY found
+   Length: 164
+   First 15 chars: sk-proj-cIM8Pnc
+   Last 4 chars: ...GWUA
+   Type: <class 'str'>
+   Contains whitespace: False
+🚀 Started periodic cleanup task (30s interval, 60s timeout)
+INFO:     127.0.0.1:65375 - "OPTIONS /admin/workspace/me HTTP/1.1" 200 OK
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1790893962.253969   30664 alts_credentials.cc:93] ALTS creds ignored. Not running on GCP and untrusted ALTS is not enabled.
+INFO:     127.0.0.1:65375 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53515 - "OPTIONS /admin/question-bank-stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53515 - "GET /admin/question-bank-stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53515 - "OPTIONS /admin/workspace/study-plans HTTP/1.1" 200 OK
+C:\Users\Billion\Desktop\NQBackEnd\NQBackEnd2\venv\Lib\site-packages\google\cloud\firestore_v1\base_collection.py:304: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  return query.where(field_path, op_string, value)
+INFO:     127.0.0.1:53515 - "GET /admin/workspace/study-plans HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53515 - "OPTIONS /admin/workspace/admins HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53515 - "GET /admin/workspace/admins HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53515 - "OPTIONS /admin/workspace/email HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53515 - "GET /admin/workspace/email HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53515 - "OPTIONS /admin/workspace/users HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53515 - "GET /admin/workspace/users HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59745 - "OPTIONS /admin/workspace/exams?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59745 - "GET /admin/workspace/exams?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59745 - "GET /admin/workspace/users HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62078 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62078 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57822 - "OPTIONS /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57822 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57822 - "OPTIONS /admin/workspace/users HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57822 - "GET /admin/workspace/users HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57822 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57822 - "OPTIONS /admin/workspace/study-plans HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57822 - "GET /admin/workspace/study-plans HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57822 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57822 - "OPTIONS /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57822 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57822 - "OPTIONS /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57822 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57822 - "OPTIONS /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages/83ca5af6-c0c3-42ed-867a-c9e788fda8e5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57822 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages/83ca5af6-c0c3-42ed-867a-c9e788fda8e5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53731 - "OPTIONS /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages/60509fad-1083-49bd-9a0e-8446cc968d89 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53731 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages/60509fad-1083-49bd-9a0e-8446cc968d89 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53731 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages/83ca5af6-c0c3-42ed-867a-c9e788fda8e5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56125 - "OPTIONS /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages/bXfbNVhPu6jAiOw70yzz HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56125 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages/bXfbNVhPu6jAiOw70yzz HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57886 - "OPTIONS /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages/fBk9GyHO6KZdzk6XOHnZ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57886 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages/fBk9GyHO6KZdzk6XOHnZ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57886 - "OPTIONS /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages/45RtMvS4UvcfX9VMfcbd HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57886 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages/45RtMvS4UvcfX9VMfcbd HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63627 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages/83ca5af6-c0c3-42ed-867a-c9e788fda8e5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51890 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages/60509fad-1083-49bd-9a0e-8446cc968d89 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61532 - "GET /admin/workspace/study-plans HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49849 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49849 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49849 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages/83ca5af6-c0c3-42ed-867a-c9e788fda8e5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49849 - "GET /admin/workspace/study-plans HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61532 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61532 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61532 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages/83ca5af6-c0c3-42ed-867a-c9e788fda8e5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55119 - "OPTIONS /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55119 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55119 - "OPTIONS /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55119 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55119 - "OPTIONS /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55119 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55119 - "OPTIONS /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages/83ca5af6-c0c3-42ed-867a-c9e788fda8e5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55119 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages/83ca5af6-c0c3-42ed-867a-c9e788fda8e5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57648 - "OPTIONS /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages/45RtMvS4UvcfX9VMfcbd HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57648 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages/45RtMvS4UvcfX9VMfcbd HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57648 - "OPTIONS /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages/bXfbNVhPu6jAiOw70yzz HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57648 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages/bXfbNVhPu6jAiOw70yzz HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57648 - "OPTIONS /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages/fBk9GyHO6KZdzk6XOHnZ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57648 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages/fBk9GyHO6KZdzk6XOHnZ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57648 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages/83ca5af6-c0c3-42ed-867a-c9e788fda8e5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57853 - "OPTIONS /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages/60509fad-1083-49bd-9a0e-8446cc968d89 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57853 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages/60509fad-1083-49bd-9a0e-8446cc968d89 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63060 - "OPTIONS /admin/workspace/study-plans HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63060 - "GET /admin/workspace/study-plans HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61551 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61551 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63060 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63060 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61551 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages/83ca5af6-c0c3-42ed-867a-c9e788fda8e5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63060 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages/83ca5af6-c0c3-42ed-867a-c9e788fda8e5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64549 - "GET /admin/workspace/study-plans HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53729 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53729 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64549 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64549 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54076 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages/60509fad-1083-49bd-9a0e-8446cc968d89 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54076 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54076 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62862 - "GET /admin/workspace/study-plans HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56944 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54076 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages/83ca5af6-c0c3-42ed-867a-c9e788fda8e5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56944 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62996 - "GET /admin/workspace/study-plans HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49732 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49732 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62996 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62996 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51923 - "OPTIONS /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52548 - "OPTIONS /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52493 - "OPTIONS /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52548 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52548 - "OPTIONS /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52493 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51923 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51923 - "OPTIONS /admin/workspace/study-plans HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51923 - "GET /admin/workspace/study-plans HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52548 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52548 - "OPTIONS /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52548 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51923 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51923 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51923 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51923 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51923 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52327 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52327 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53540 - "OPTIONS /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53540 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53540 - "OPTIONS /admin/workspace/users HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53540 - "GET /admin/workspace/users HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53540 - "OPTIONS /admin/workspace/email HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51612 - "OPTIONS /admin/workspace/email/settings HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53540 - "GET /admin/workspace/email/settings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51612 - "GET /admin/workspace/email HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52012 - "OPTIONS /admin/workspace/email/layout-preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52012 - "POST /admin/workspace/email/layout-preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57136 - "OPTIONS /admin/workspace/email HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55509 - "OPTIONS /admin/workspace/email/settings HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57136 - "GET /admin/workspace/email/settings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:55509 - "GET /admin/workspace/email HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53219 - "GET /admin/workspace/email/settings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:61646 - "GET /admin/workspace/email HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58821 - "GET /admin/workspace/email/settings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:63839 - "GET /admin/workspace/email HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60414 - "OPTIONS /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60414 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59805 - "GET /admin/workspace/email/settings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60414 - "GET /admin/workspace/email HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51508 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54351 - "GET /admin/workspace/email/settings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51508 - "GET /admin/workspace/email HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60269 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65465 - "GET /admin/workspace/email/settings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60269 - "GET /admin/workspace/email HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54588 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57971 - "GET /admin/workspace/email/settings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50307 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50307 - "OPTIONS /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57971 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54588 - "GET /admin/workspace/email HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57971 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54588 - "GET /admin/workspace/email/settings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:57971 - "GET /admin/workspace/email HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50307 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50307 - "OPTIONS /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50307 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57971 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57971 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54653 - "OPTIONS /admin/workspace/email HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65421 - "OPTIONS /admin/workspace/email/templates HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49992 - "OPTIONS /admin/workspace/email/settings HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49992 - "GET /admin/workspace/email/templates HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:54653 - "GET /admin/workspace/email/settings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:65421 - "GET /admin/workspace/email HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50851 - "GET /admin/workspace/email/templates HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:65209 - "GET /admin/workspace/email/settings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:61535 - "GET /admin/workspace/email HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63403 - "OPTIONS /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60739 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60739 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63403 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60739 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63403 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60739 - "GET /admin/workspace/email/templates HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:57532 - "OPTIONS /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51605 - "OPTIONS /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56709 - "GET /admin/workspace/email/settings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:63403 - "GET /admin/workspace/email HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51605 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51605 - "OPTIONS /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51605 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63403 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63403 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56958 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51376 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56958 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51376 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59709 - "GET /admin/workspace/email/templates HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50309 - "GET /admin/workspace/email/settings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:56958 - "GET /admin/workspace/email HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51376 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51376 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50309 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50309 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62429 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55810 - "GET /admin/workspace/email/templates HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:54623 - "GET /admin/workspace/email/settings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:62429 - "GET /admin/workspace/email HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59550 - "OPTIONS /admin/workspace/email/students?q= HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59550 - "GET /admin/workspace/email/students?q= HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:56580 - "OPTIONS /admin/workspace/users HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56580 - "GET /admin/workspace/users HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59179 - "GET /admin/workspace/email/templates HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:56666 - "GET /admin/workspace/email/settings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:56580 - "GET /admin/workspace/email HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53128 - "OPTIONS /admin/workspace/email/drafts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53128 - "POST /admin/workspace/email/drafts HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:53309 - "OPTIONS /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53309 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53309 - "OPTIONS /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49523 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49523 - "OPTIONS /admin/workspace/email HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60617 - "OPTIONS /admin/workspace/email/templates HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55353 - "OPTIONS /admin/workspace/email/settings HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55353 - "GET /admin/workspace/email/templates HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49523 - "GET /admin/workspace/email/settings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60617 - "GET /admin/workspace/email HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53309 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53309 - "OPTIONS /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53309 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53309 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49523 - "GET /admin/workspace/email/templates HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:55353 - "GET /admin/workspace/email/settings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60617 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53309 - "GET /admin/workspace/email HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60617 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60617 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56581 - "OPTIONS /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56581 - "POST /warm_up HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53049 - "OPTIONS /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53049 - "GET /admin/workspace/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53049 - "OPTIONS /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53049 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53049 - "OPTIONS /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53049 - "GET /admin/workspace/study-plans/01aBB4ezEwkLs7xg1i95/messages HTTP/1.1" 200 OK

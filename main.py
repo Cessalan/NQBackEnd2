@@ -3100,6 +3100,8 @@ async def generate_section(request: SectionRequest):
 
 from models.requests import StudyPlanRequest, StudyItemRequest, StudyAudioRequest, StudyReviewPlanRequest, DiagnosticQuizRequest, StudyMindmapRequest, StudyInterpretRequest, StudyExamRequest, NodeDebriefRequest, NarrationRequest, CourseIntelligenceRequest
 from services import course_intelligence
+from services import student_emphasis
+from services import student_emphasis_store
 from models.requests import ExamDebriefTurnRequest
 from services.exam_debrief import run_debrief_turn as run_exam_debrief_turn
 import hashlib
@@ -3263,11 +3265,25 @@ async def generate_study_plan(request: StudyPlanRequest):
         # STEP 3: ALWAYS extract topics from actual document content
         # ------------------------------------------
         document_content = ""
+        all_document_text = ""
         if session.session.vectorstore:
             # Get comprehensive document content
             docs = session.session.vectorstore.similarity_search("main topics concepts definitions", k=1000)
-            document_content = "\n\n".join([doc.page_content for doc in docs])[:15000]
+            all_document_text = "\n\n".join([doc.page_content for doc in docs])
+            document_content = all_document_text[:15000]
             print(f"📄 Retrieved {len(docs)} document chunks for topic extraction")
+
+        # What she told us matters: notes pasted into the chat, the exam flags
+        # inside them and inside her uploads, and her remembered steer. Until
+        # 2026-10-01 none of it reached the planner. See student_emphasis.py.
+        student_signals = await student_emphasis_store.load(
+            request.chat_id, document_text=all_document_text)
+        student_brief = student_emphasis.prompt_block(student_signals)
+        extraction_text = student_emphasis.extraction_material(document_content, student_signals)
+        extraction_flags = (
+            f"\n{student_brief}\nAny flagged subject that appears in the material MUST be one of the "
+            f"main topics, listed first.\n"
+        ) if student_brief else ""
 
         # Extract CORE topics from the actual document
         llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.3)
@@ -3281,9 +3297,9 @@ DO NOT invent topics. DO NOT add general knowledge.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 DOCUMENT CONTENT:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-{document_content[:8000]}
+{extraction_text}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
+{extraction_flags}
 RULES:
 1. Identify the 3-5 MAIN TOPICS/SECTIONS in this document
 2. Name the topics based on the document content, but EXPRESS THEM IN {prompt_language}
@@ -3316,7 +3332,7 @@ Return ONLY valid JSON (all strings must be in {prompt_language}):
             key_terms = unique_concepts[:10]
 
         if not unique_topics:
-            unique_topics = ["Document Overview"]
+            unique_topics = student_emphasis.fallback_topics(student_signals) or ["Document Overview"]
 
         unique_topics = _restore_diagnostic_topics(unique_topics, request.diagnostic)
 
@@ -3327,9 +3343,17 @@ Return ONLY valid JSON (all strings must be in {prompt_language}):
         # happens to work.
         ci_report = request.courseIntelligence or None
         if ci_report:
-            unique_topics = course_intelligence.planner_topics(ci_report, unique_topics)
+            # Read past the usual five so a flagged topic ranked sixth can
+            # still be promoted; with nothing flagged the cut below gives
+            # exactly the five planner_topics always returned.
+            unique_topics = course_intelligence.planner_topics(
+                ci_report, unique_topics, limit=MAX_CURRICULUM_TOPICS * 2)
+            unique_topics, student_flags = student_emphasis.apply_to_topics(
+                unique_topics, student_signals, limit=5)
+        else:
+            unique_topics, student_flags = student_emphasis.apply_to_topics(unique_topics, student_signals)
         unique_topics = _restore_diagnostic_topics(unique_topics, request.diagnostic)
-        course_brief = course_intelligence.planner_context_block(ci_report)
+        course_brief = _join_briefs(course_intelligence.planner_context_block(ci_report), student_brief)
 
         # ------------------------------------------
         # STEP 4: Generate learning path with LLM
@@ -3378,6 +3402,7 @@ Return ONLY valid JSON (all strings must be in {prompt_language}):
             request.diagnostic,
             unique_topics,
             _days_to_exam(user_prefs),
+            flagged_topics=[f["topic"] for f in student_flags],
         )
         if not request.diagnostic:
             nodes = _order_units_by_priority(nodes, unique_topics, unique_topics)
@@ -3397,9 +3422,13 @@ Return ONLY valid JSON (all strings must be in {prompt_language}):
             "estimated_time_minutes": len(nodes) * 3,  # ~3 min per node
             "archetype": _plan_archetype(_days_to_exam(user_prefs)),
             "tiers": _summarize_tiers(nodes, unique_topics),
-            "recommended_start": _actual_recommended_start(nodes, unique_topics, request.diagnostic),
+            "recommended_start": _actual_recommended_start(
+                nodes, unique_topics, request.diagnostic, student_flags),
             "quickCheckId": quick_check.checkId if quick_check else None,
             "course_intelligence": bool(ci_report),
+            # The evidence behind every topic her own words promoted, so the
+            # plan can quote it back: [{topic, quote, source, confidence}].
+            "student_flags": student_flags,
         }
 
     except Exception as e:
@@ -3918,6 +3947,11 @@ def _summarize_tiers(nodes, unique_topics):
     return out
 
 
+def _join_briefs(*blocks):
+    """Planner briefings, skipping the empty ones."""
+    return (chr(10) + chr(10)).join(b for b in blocks if b)
+
+
 def _order_units_by_priority(nodes, ordered_topics, unique_topics):
     """Put the generated path into course-intelligence priority order.
 
@@ -3966,18 +4000,24 @@ def _order_units_by_priority(nodes, ordered_topics, unique_topics):
     return out
 
 
-def _actual_recommended_start(nodes, unique_topics, diagnostic=None):
-    """The final path, including calibration, is the authority on where to start."""
+def _actual_recommended_start(nodes, unique_topics, diagnostic=None, student_flags=None):
+    """The final path, including calibration, is the authority on where to start.
+
+    `basis` says why: a measured diagnostic, her own exam flag (with the quote
+    that flagged it), or the course ordering."""
     first = next((node for node in nodes if node.get("type") != "section_banner"), None)
     if not first:
         return None
-    return {
-        "topic": _topic_of_node(first, unique_topics),
-        "basis": "diagnostic" if diagnostic else "course",
-    }
+    topic = _topic_of_node(first, unique_topics)
+    flag = next((f for f in (student_flags or []) if f.get("topic") == topic), None)
+    if diagnostic:
+        return {"topic": topic, "basis": "diagnostic"}
+    if flag:
+        return {"topic": topic, "basis": "student_flag", "quote": flag["quote"], "source": flag["source"]}
+    return {"topic": topic, "basis": "course"}
 
 
-def _weight_path_by_diagnostic(nodes, diagnostic, unique_topics, days_to_exam=None):
+def _weight_path_by_diagnostic(nodes, diagnostic, unique_topics, days_to_exam=None, flagged_topics=None):
     """Reshape a generated path using what the diagnostic learned.
 
     Pure and deterministic — no LLM call, no network, sub-millisecond. That is
@@ -4071,9 +4111,14 @@ def _weight_path_by_diagnostic(nodes, diagnostic, unique_topics, days_to_exam=No
         })
         seq += len(wanted)
 
-    # Worst first, solid last. Ties break on score so the weakest gap opens.
+    # Worst first, solid last. Inside a tier, a topic she flagged as on the
+    # exam goes first (services/student_emphasis.py); then ties break on
+    # score so the weakest gap opens. A flag never lifts a topic past a
+    # measured gap: what she got wrong outranks what she was told matters.
+    flagged = set(flagged_topics or [])
     units.sort(key=lambda u: (
         TIER_ORDER[u["tier"]],
+        0 if u["topic"] in flagged else 1,
         scores.get(u["topic"]) if scores.get(u["topic"]) is not None else 999,
     ))
 
@@ -4354,7 +4399,17 @@ async def start_study_journey(request: StudyPlanRequest):
                     all_topics.extend(insights.get("topics", []))
                     all_concepts.extend(insights.get("concepts", []))
 
-            fallback_topics = list(set(all_topics))[:5] or ["Document Overview"]
+            # What she told us matters: pasted notes, the exam flags in them
+            # and in her uploads, her remembered steer. See student_emphasis.py.
+            student_signals = await student_emphasis_store.load(
+                request.chat_id, vectorstore=session_wrapper.session.vectorstore)
+
+            # Uncut here; the five-topic cut happens after her flags have had
+            # a chance to promote something. With nothing flagged the result
+            # is the same five this always produced.
+            fallback_topics = (list(set(all_topics))
+                               or student_emphasis.fallback_topics(student_signals)
+                               or ["Document Overview"])
             key_terms = list(set(all_concepts))[:10]
 
             # ── Course intelligence, if she ran it ────────────────────────
@@ -4363,9 +4418,14 @@ async def start_study_journey(request: StudyPlanRequest):
             # This is the single change that stops a plan following the
             # sequence of her PowerPoint.
             ci_report = request.courseIntelligence or None
-            unique_topics = course_intelligence.planner_topics(ci_report, fallback_topics)
+            unique_topics = course_intelligence.planner_topics(
+                ci_report, fallback_topics, limit=MAX_CURRICULUM_TOPICS * 2)
+            unique_topics, student_flags = student_emphasis.apply_to_topics(
+                unique_topics, student_signals, limit=5)
             unique_topics = _restore_diagnostic_topics(unique_topics, request.diagnostic)
-            course_brief = course_intelligence.planner_context_block(ci_report)
+            course_brief = _join_briefs(
+                course_intelligence.planner_context_block(ci_report),
+                student_emphasis.prompt_block(student_signals))
 
             print(f"📊 /study/start using topics: {unique_topics}")
             if ci_report:
@@ -4434,7 +4494,8 @@ async def start_study_journey(request: StudyPlanRequest):
                 return
 
             nodes = _weight_path_by_diagnostic(
-                nodes, request.diagnostic, unique_topics, days_to_exam
+                nodes, request.diagnostic, unique_topics, days_to_exam,
+                flagged_topics=[f["topic"] for f in student_flags],
             )
             if not request.diagnostic:
                 nodes = _order_units_by_priority(nodes, unique_topics, unique_topics)
@@ -4457,9 +4518,13 @@ async def start_study_journey(request: StudyPlanRequest):
                 # the same recommendation the reveal already showed her. A plan
                 # that starts somewhere other than the promised topic is the
                 # one bug this whole feature cannot survive.
-                "recommended_start": _actual_recommended_start(nodes, unique_topics, request.diagnostic),
+                "recommended_start": _actual_recommended_start(
+                    nodes, unique_topics, request.diagnostic, student_flags),
                 "quickCheckId": quick_check.checkId if quick_check else None,
                 "course_intelligence": bool(request.courseIntelligence),
+                # The evidence behind every topic her own words promoted, so the
+                # plan can quote it back: [{topic, quote, source, confidence}].
+                "student_flags": student_flags,
             }
             yield f"data: {json.dumps({'status': 'plan_ready', 'plan': plan_payload})}\n\n"
 

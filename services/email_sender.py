@@ -129,6 +129,20 @@ def daily_cap():
         return 50
 
 
+def configuration_issues():
+    """Actionable setup failures, without exposing credentials."""
+    issues = []
+    if not _api_key():
+        issues.append('Set RESEND_API_KEY in the backend environment.')
+    if not _postal_address():
+        issues.append('Set EMAIL_POSTAL_ADDRESS for the email footer.')
+    if _secret() == 'dev-only-insecure':
+        issues.append('Set EMAIL_TOKEN_SECRET to secure unsubscribe links.')
+    if daily_cap() <= 0:
+        issues.append('Set EMAIL_DAILY_CAP to a positive number.')
+    return issues
+
+
 # ── Unsubscribe tokens ────────────────────────────────────────────────────
 # Signed with a dedicated secret so a link cannot be forged and uids cannot be
 # enumerated by walking the URL space. Falls back to the Stripe webhook secret
@@ -356,6 +370,9 @@ def send_email(db, uid: str, to: str, subject: str, html: str, campaign: str,
     # Dry runs log under their own namespace so reviewing a campaign can never
     # consume the key the real send needs.
     key = real_key if is_enabled() else f"dryrun_{real_key}"
+
+    if is_enabled() and configuration_issues():
+        return {"status": "failed", "reason": ' '.join(configuration_issues()), "key": key}
 
     reason = is_suppressed(db, uid, transactional=transactional)
     if reason:

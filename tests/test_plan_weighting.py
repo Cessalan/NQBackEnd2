@@ -287,6 +287,26 @@ check("an empty path makes no recommendation", mod._actual_recommended_start([],
 tied = weight(generated_path(), {"Renal": 0, "Cardiac": 0}, course_order, 14)
 check("course priority breaks equal diagnostic results", topics_in_order(tied)[0] == "Cardiac")
 
+print("\n=== her own exam flags (services/student_emphasis.py) ===")
+two_gaps = {"Cardiac": 10, "Renal": 30, "Endocrine": 90}
+flagged = weight(generated_path(), two_gaps, TOPICS, 14, flagged_topics=["Renal"])
+check("inside a tier, the topic she flagged opens", topics_in_order(flagged)[0] == "Renal", topics_in_order(flagged))
+solid_flag = weight(generated_path(), two_gaps, TOPICS, 14, flagged_topics=["Endocrine"])
+check("a flag never lifts a solid topic past a measured gap",
+      topics_in_order(solid_flag)[-1] == "Endocrine", topics_in_order(solid_flag))
+check("no flags: identical to the unflagged ordering",
+      topics_in_order(weight(generated_path(), two_gaps, TOPICS, 14, flagged_topics=[]))
+      == topics_in_order(weight(generated_path(), two_gaps, TOPICS, 14)))
+course_path = generated_path()
+flag_start = mod._actual_recommended_start(course_path, course_order, None,
+                                           [{"topic": "Cardiac", "quote": "Cardiac will be on the exam", "source": "chat"}])
+check("a flagged opening says so and carries her quote",
+      flag_start["basis"] == "student_flag" and flag_start["quote"] == "Cardiac will be on the exam", flag_start)
+check("a diagnostic opening still says diagnostic even when flagged",
+      mod._actual_recommended_start(calibrated, course_order, {"Renal": 0},
+                                    [{"topic": "Renal", "quote": "q", "source": "chat"}])["basis"] == "diagnostic")
+check("no flags: basis is the course, as before", mod._actual_recommended_start(course_path, course_order)["basis"] == "course")
+
 print("\n" + "=" * 62)
 if FAILURES:
     print("FAILED (%d): %s" % (len(FAILURES), ", ".join(FAILURES)))

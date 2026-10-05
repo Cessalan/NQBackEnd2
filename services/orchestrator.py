@@ -1017,8 +1017,13 @@ class NursingTutor:
                             generator = SimpleStudySheetGenerator(self.session)
 
                             # Stream the study sheet
-                            async for chunk in generator.generate_study_sheet_stream(topic, language):
-                                yield chunk
+                            try:
+                                async for chunk in generator.generate_study_sheet_stream(
+                                    topic, language, user_request=user_input, chat_context=full_context_from_db
+                                ):
+                                    yield chunk
+                            finally:
+                                await generator.aclose()
 
                             return
                                                        
