@@ -2235,8 +2235,8 @@ async def _generate_single_question(
         learning_objective_instruction=learning_objective_instruction
     )
 
-    # Use OpenAI gpt-4.1-nano for quiz generation (cheapest model with reliable JSON output)
-    llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.7)
+    # Cheap model with reliable JSON output; QUIZ_GENERATION_MODEL overrides it.
+    llm = ChatOpenAI(model=os.getenv("QUIZ_GENERATION_MODEL", "gpt-4.1-mini"), temperature=0.7)
     chain = prompt | llm | StrOutputParser()
 
     try:

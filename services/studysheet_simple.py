@@ -206,7 +206,7 @@ class SimpleStudySheetGenerator:
                 yield self._event(status="study_sheet_complete", studySheet=sheet, content=sheet_to_text(sheet))
                 return
             except Exception as error:
-                print(f"Study sheet provider attempt {i + 1} failed: {type(error).__name__}")
+                print(f"Study sheet provider attempt {i + 1} failed: {type(error).__name__}: {str(error)[:300]}")
         message = ("La fiche n’a pas pu être terminée. Réessayez pour obtenir une version complète."
                    if language == "french" else "The study sheet could not be completed. Please retry for a complete version.")
         yield self._event(status="study_sheet_error", message=message)
@@ -276,7 +276,7 @@ class SimpleStudySheetGenerator:
                     if row.get('personalFeedback') is True:
                         personal.add(id(originals[key]))
             except Exception as error:
-                print(f'Study sheet attribution unavailable: {type(error).__name__}')
+                print(f'Study sheet attribution unavailable: {type(error).__name__}: {str(error)[:300]}')
                 reviewed, personal = {}, set()
         for key, block in proposed:
             block['sourceIds'] = reviewed.get(key, [])
@@ -305,9 +305,9 @@ class SimpleStudySheetGenerator:
                 raise ValueError('Incomplete study sheet plan')
             return self._validate_scope_plan(json.loads(result.choices[0].message.content), payload)
         except Exception as error:
-            print(f'Study sheet primary planning failed: {type(error).__name__}')
+            print(f'Study sheet primary planning failed: {type(error).__name__}: {str(error)[:300]}')
             result = await self.client.messages.create(
-                model=os.getenv('ANTHROPIC_STUDY_SHEET_MODEL', 'claude-sonnet-4-20250514'),
+                model=os.getenv('ANTHROPIC_STUDY_SHEET_MODEL', 'claude-sonnet-4-6'),
                 max_tokens=3000, temperature=0, system=PLAN_SYSTEM,
                 messages=[{'role': 'user', 'content': prompt}])
             if result.stop_reason != 'end_turn':
@@ -389,7 +389,7 @@ class SimpleStudySheetGenerator:
 
     async def _stream_with_anthropic(self, prompt):
         async with self.client.messages.stream(
-            model=os.getenv("ANTHROPIC_STUDY_SHEET_MODEL", "claude-sonnet-4-20250514"),
+            model=os.getenv("ANTHROPIC_STUDY_SHEET_MODEL", "claude-sonnet-4-6"),
             max_tokens=12000, system=SYSTEM, messages=[{"role": "user", "content": prompt}]) as stream:
             async for text in stream.text_stream:
                 yield text

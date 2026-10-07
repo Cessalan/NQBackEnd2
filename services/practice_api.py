@@ -121,6 +121,9 @@ async def remember_tutor_settings(chat_id, message, settings):
     from services import practice_profile as pp, practice_profile_store
     try:
         changes = pp.parse_changes(message)
+        if 'match_examples' in changes:
+            current = await practice_profile_store.load(chat_id)
+            changes['generation_instructions'] = (current.get('generationInstructions') or '')[:2500] + '\nLatest correction: ' + message[:1400]
         if settings.get("difficulty") in ("easy", "medium", "hard"):
             changes["difficulty"] = settings["difficulty"]
         if isinstance(settings.get("requested_total"), int):
@@ -196,15 +199,17 @@ def build_router(setup_session):
                 # quiz that was generated before the student excluded a format.
                 profile = await practice_profile_store.load(body.chat_id)
                 session.practice_profile = profile
-                pasted = profile["source"]["pastedText"] if profile["source"]["kind"] == "pasted" and not session.vectorstore else None
+                pasted = profile["source"]["pastedText"] if profile["source"]["kind"] == "pasted" else None
                 yield json.dumps({"status": "quiz_generating", "total": allocation["count"]}) + "\n"
                 seen = {q.strip().lower() for q in body.existing_questions}
                 async for chunk in stream_quiz_questions(topic=body.topic, difficulty=settings.get("difficulty", "medium"),
-                    num_questions=allocation["count"], source="documents" if session.vectorstore else "scratch", session=session,
+                    num_questions=allocation["count"], source="documents" if session.vectorstore or profile['source']['kind'] == 'uploads' else "scratch", session=session,
                     chat_id=body.chat_id, question_types=pp.effective_formats(profile, settings.get("question_types")),
                     quiz_mode="nclex", learning_objective="exam_prep", existing_questions=body.existing_questions,
                     index_offset=len(body.existing_questions), user_prompt=settings.get("scope", ""),
-                    source_text=pasted, guidance=pp.generation_guidance(profile)):
+                    source_text=pasted, guidance=pp.generation_guidance(profile),
+                    requested_total=settings.get('requested_total') or profile.get('requestedTotal'),
+                    plan_id=settings.get('plan_id')):
                     if chunk.get("status") == "question_ready":
                         q = chunk["question"]
                         key = q.get("question", "").strip().lower()
@@ -212,8 +217,11 @@ def build_router(setup_session):
                             questions.append(q)
                             seen.add(key)
                             yield json.dumps({"status": "question_ready", "question": q}) + "\n"
+                    elif chunk.get("status") in ('practice_plan_ready', 'material_analyzing'):
+                        yield json.dumps(chunk) + '\n'
                     elif chunk.get("status") == "error":
-                        raise RuntimeError("Question generation failed")
+                        yield json.dumps(chunk) + '\n'
+                        return
                 if not questions:
                     raise RuntimeError("No new questions returned")
                 await asyncio.to_thread(finish, uid, body.request_id, questions)
@@ -246,7 +254,7 @@ async def metered_chat_quiz_stream(**kwargs):
         yield {"status": "error", "message": exc.detail, "code": "quota_exceeded" if exc.status_code == 429 else "practice_failed"}
         return
     questions = []
-    kwargs.pop("requested_total", None)
+    kwargs['requested_total'] = allowed
     kwargs["num_questions"] = allocation["count"]
     try:
         async for chunk in stream_quiz_questions(**kwargs):

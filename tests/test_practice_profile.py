@@ -1,3 +1,4 @@
+import unittest
 # -*- coding: utf-8 -*-
 """
 Practice profile — what a student asked for must survive the next batch.
@@ -110,7 +111,7 @@ check("'only' saves an allow-list", profile3["formats"] == ["mcq", "sata"] and p
 check("allow-list beats the model's guess", effective_formats(profile3, ["casestudy", "mcq"]) == ["mcq", "sata"])
 check("a one-off 'give me SATA' narrows nothing it wasn't asked to", effective_formats(profile3, None, "give me SATA") == ["mcq", "sata"])
 
-all_off, _ = merge({}, {"exclude": ["mcq", "sata", "casestudy"]})
+all_off, _ = merge({}, {"exclude": ["mcq", "sata", "casestudy", "true_false", "matrix", "unfoldingcase"]})
 check("excluding everything still yields a format", effective_formats(all_off) == ["mcq"])
 
 _, changed = merge(profile, {})
@@ -163,3 +164,14 @@ if failures:
     print(f"{len(failures)} FAILED")
     sys.exit(1)
 print("All checks passed.")
+
+
+class SourceTopicGroupTests(unittest.TestCase):
+    def test_groups_survive_normalize_and_drop_bad_rows(self):
+        from services import practice_profile as pp
+        profile = pp.normalize({'sourceTopicGroups': [
+            {'title': 'Examen primaire', 'subtopics': ['C — Circulation', '', 'A — Airway']},
+            {'title': '', 'subtopics': ['orphan']}, 'not a dict']})
+        self.assertEqual(profile['sourceTopicGroups'],
+                         [{'title': 'Examen primaire', 'subtopics': ['C — Circulation', 'A — Airway']}])
+        self.assertEqual(pp.normalize({})['sourceTopicGroups'], [])

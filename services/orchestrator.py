@@ -1308,6 +1308,12 @@ class NursingTutor:
                                             "full_message": chunk.get("full_message")
                                         }) + "\n"
 
+                                    elif chunk.get('status') in ('material_analyzing', 'practice_plan_ready', 'quiz_planning'):
+                                        if chunk.get('plan'):
+                                            quiz_settings['plan_id'] = chunk['plan']['id']
+                                            quiz_settings['practice_plan'] = chunk['plan']
+                                        yield json.dumps(chunk) + '\n'
+
                                     elif chunk.get("status") == "generating":
 
                                         value ={ "status": "quiz_generating",
@@ -2534,6 +2540,13 @@ IMPORTANT: If user now says "more", "again", "another":
                         if t and t not in insight_topics:
                             insight_topics.append(t)
                 profile['sourceTopics'] = insight_topics[:40]
+            if not profile.get('sourceTopicGroups'):
+                groups = []
+                for info in (getattr(self.session, 'file_insights', {}) or {}).values():
+                    for group in (info.get('mainTopics') or []):
+                        if isinstance(group, dict) and group.get('title') and all(g['title'] != group['title'] for g in groups):
+                            groups.append({'title': group['title'], 'subtopics': list(group.get('subtopics') or [])})
+                profile['sourceTopicGroups'] = groups[:40]
         elif not profile['source']['kind']:
             profile['source'] = {**profile['source'], 'kind': 'general'}
 
@@ -2567,6 +2580,19 @@ IMPORTANT: If user now says "more", "again", "another":
         # generate_quiz_stream reads the total and mode keywords from this; it
         # must be her words, not the continuation rewrite.
         args['user_prompt'] = raw_user_input[:4000]
+        # Keep the original requirements and explicit style corrections for
+        # later batches. A short "more" must not replace the source contract.
+        if not profile['generationInstructions'] or action == 'change':
+            profile['generationInstructions'] = raw_user_input[:4000]
+        elif 'match_examples' in changes:
+            profile['generationInstructions'] = (profile['generationInstructions'][:2500]
+                + '\nLatest correction: ' + raw_user_input[:1400])
+        if 'match_examples' in changes:
+            profile['matchExamples'] = changes['match_examples']
+        if changes.get('requested_total'):
+            profile['requestedTotal'] = changes['requested_total']
+        if changes.get('include'):
+            profile['formats'] = pp.effective_formats(profile, args['question_types'], raw_user_input)
 
         self.session.practice_profile = profile
         self._practice_dirty = profile != before

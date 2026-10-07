@@ -11,10 +11,11 @@ class HTTPException(Exception):
 source = pathlib.Path(__file__).parents[1] / 'services' / 'practice_debrief.py'
 tree = ast.parse(source.read_text(encoding='utf-8'))
 namespace = {'HTTPException': HTTPException, 're': re}
-functions = {'session_evidence', '_short', 'format_reflection'}
+functions = {'session_evidence', '_sentences', 'format_note'}
+namespace['NOTE_MAX_WORDS'] = 60
 exec(compile(ast.Module(body=[n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in functions], type_ignores=[]), str(source), 'exec'), namespace)
 evidence = namespace['session_evidence']
-format_reflection = namespace['format_reflection']
+format_note = namespace['format_note']
 
 class EvidenceTests(unittest.TestCase):
     def quiz(self):
@@ -41,23 +42,35 @@ class EvidenceTests(unittest.TestCase):
         q = self.quiz(); q['practice']['questions'] = [{'question': ' first? '}]
         self.assertEqual(len(evidence(q)), 1)
 
-    def test_debrief_is_three_short_scan_lines(self):
-        text = format_reflection({'good': 'You noticed the airway priority correctly and stayed focused throughout the entire long question.',
-                                  'review': 'Look again at circulation assessments and the complete set of actions required.',
-                                  'next': 'First say what the question asks you to decide before reading every option.'}, 'fallback')
-        lines = text.splitlines()
-        self.assertEqual(len(lines), 3)
-        self.assertTrue(all(len(re.sub(r'[-*:]','', line).split()) <= 16 for line in lines))
+    def test_note_is_two_plain_paragraphs_with_no_labels_or_score(self):
+        text = format_note({'strength': 'You have the cardiac arrest call down: no central pulse means CPR straight away.',
+                            'focus': 'The one to work on is the order of the primary survey. Catastrophic bleeding comes before the airway, and two of your misses started at A.'},
+                           'fallback')
+        paragraphs = text.split('\n\n')
+        self.assertEqual(len(paragraphs), 2)
+        self.assertTrue(paragraphs[0].startswith('You have the cardiac arrest call down'))
+        self.assertTrue(paragraphs[1].endswith('started at A.'))
+        self.assertNotIn('**', text)
+        self.assertNotIn('Good:', text)
 
-    def test_invalid_model_shape_uses_short_fallback(self):
-        self.assertEqual(format_reflection({'good': 'Only one field'}, 'fallback'), 'fallback')
+    def test_sentences_are_never_cut_mid_thought(self):
+        long_second = 'word ' * 70
+        text = format_note({'strength': '', 'focus': 'Bleeding comes before the airway. ' + long_second + 'end.'}, 'fallback')
+        self.assertEqual(text, 'Bleeding comes before the airway.')
+        self.assertEqual(format_note({'strength': '', 'focus': long_second}, 'fallback'), 'fallback')
 
-    def test_zero_score_drops_model_good_claim(self):
-        text = format_reflection({'good': 'You understood neurological monitoring.',
-                                  'review': 'Look again at question one.',
-                                  'next': 'Name the priority before choosing.'}, 'fallback', include_good=False)
-        self.assertNotIn('Good', text)
+    def test_invalid_model_shape_uses_fallback(self):
+        self.assertEqual(format_note({'strength': 'Only a strength'}, 'fallback'), 'fallback')
+        self.assertEqual(format_note('not json', 'fallback'), 'fallback')
+
+    def test_zero_score_drops_model_strength_claim(self):
+        text = format_note({'strength': 'You understood neurological monitoring.',
+                            'focus': 'Name the priority before choosing.'}, 'fallback', include_strength=False)
         self.assertNotIn('neurological', text)
-        self.assertEqual(len(text.splitlines()), 2)
+        self.assertEqual(text, 'Name the priority before choosing.')
+
+    def test_french_closing_quotes_count_as_sentence_end(self):
+        text = format_note({'strength': '', 'focus': 'Revois l’ordre « C, puis A ». Le saignement passe avant les voies aériennes.'}, 'fallback')
+        self.assertEqual(text, 'Revois l’ordre « C, puis A ». Le saignement passe avant les voies aériennes.')
 
 if __name__ == '__main__': unittest.main()

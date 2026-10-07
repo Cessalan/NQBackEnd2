@@ -28,6 +28,7 @@ Usage:
     ):
         yield chunk
 """
+import os
 
 import asyncio
 import random
@@ -71,7 +72,7 @@ async def extract_concepts_from_content(
     earlier batch HERE — a second call with no memory would happily re-extract
     the same high-yield concepts and ask the same things again.
     """
-    llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.7)
+    llm = ChatOpenAI(model=os.getenv("QUIZ_GENERATION_MODEL", "gpt-4.1-mini"), temperature=0.7)
 
     # ── Intent-aware selection instructions ───────────────────────────────
     objective_instructions = {
@@ -350,6 +351,8 @@ async def stream_quiz_questions(
     node_difficulty: int = None,
     source_text: str = None,
     guidance: str = None,
+    requested_total: int = None,
+    plan_id: str = None,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Generate quiz questions fresh from document content via LLM.
@@ -407,6 +410,43 @@ async def stream_quiz_questions(
         ...     if chunk["status"] == "question_ready":
         ...         print(f"Got question: {chunk['question']['question'][:50]}...")
     """
+    # Source-backed quizzes: the proven generator below writes the questions,
+    # but it is handed a brief built from the document analysis first — the
+    # student's example questions, her explicit instructions, and the
+    # "important / excluded" markers inside her uploads. Until 2026-10-05 this
+    # branch diverted to material_practice.stream_material_practice, whose
+    # support-only verifier rewarded verbatim list-copying, and the quality
+    # dropped visibly. Analysis failures fall OPEN:
+    # the generator still runs on the raw document text, as it always has.
+    profile = getattr(session, 'practice_profile', {}) or {}
+    if profile.get('source', {}).get('kind') == 'pasted' and not source_text:
+        source_text = profile['source'].get('pastedText')
+    if source == 'documents' or source_text or profile.get('source', {}).get('kind') in ('uploads', 'pasted'):
+        from services.document_understanding import MaterialError, understand_session
+        from services.material_context import example_formats, material_brief
+        yield {'status': 'material_analyzing',
+               'message': 'Reading your learning objectives, instructions and example questions…'}
+        try:
+            analyses = await understand_session(session, source_text)
+        except MaterialError as exc:
+            logger.warning(f"Material analysis unavailable, generating from raw text: {exc}")
+            analyses = []
+        except Exception as exc:  # noqa: BLE001 — never let analysis block a quiz
+            logger.exception(f"Material analysis crashed, generating from raw text: {exc}")
+            analyses = []
+        brief = material_brief(analyses, profile, user_prompt, match_examples=profile.get('matchExamples', True) is not False)
+        if brief:
+            guidance = f"{brief}\n\n{guidance}" if guidance else brief
+            logger.info(f"📎 Material brief attached ({len(brief)} chars, {sum(len(a.get('examples', [])) for a in analyses)} examples)")
+        # Her own examples decide the mix only when she has not chosen formats
+        # herself and the caller sent nothing more specific than the default.
+        if profile.get('matchExamples', True) is not False and not profile.get('formats') \
+                and (not question_types or question_types == ['mcq']):
+            from_examples = [f for f in example_formats(analyses) if f not in (profile.get('excludedFormats') or [])]
+            if from_examples:
+                question_types = from_examples
+                logger.info(f"📎 Question types taken from the student's examples: {question_types}")
+
     # Import SATA, Case Study, and Unfolding Case Study generators for mixed type quizzes
     from tools.sata_prompts import (
         generate_sata_question,
@@ -607,6 +647,10 @@ async def stream_quiz_questions(
         # STEP 1: Extract unique concepts FIRST
         # This guarantees no duplicate questions!
         # ==========================================
+        # A real stage for the student's waiting screen: concept picking is
+        # silent and can take several seconds, and without this the quiz
+        # sat on "reading your notes" while it was already choosing ideas.
+        yield {"status": "quiz_planning", "total": questions_to_generate}
         logger.info(f"🧠 Step 1: Extracting {questions_to_generate} unique concepts...")
         print(f"\n{'='*60}")
         print(f"🧠 [CONCEPT-FIRST] Extracting {questions_to_generate} concepts from content...")

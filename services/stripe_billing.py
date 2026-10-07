@@ -207,6 +207,9 @@ def handle_event(event) -> dict:
             # Start of the CURRENT Pro run. Reset on every upgrade, so a
             # returning subscriber's tenure is measured from their comeback.
             "proSince": at,
+            # Only new checkout activations get the member welcome. Its
+            # acknowledgement lives outside the protected billing fields.
+            "welcomeVersion": 1,
             "cancelAtPeriodEnd": False,
         }
         # Never overwritten: the day this person first paid, which is what

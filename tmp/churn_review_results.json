@@ -1,0 +1,2083 @@
+{
+  "checked_at": "2026-10-07T01:54:28.728016+00:00",
+  "users": [
+    {
+      "subscription_id": "sub_1UMvXaJW0VHDSVXk3XJLzbOI",
+      "customer_id": "cus_VNguAXqyfvVusv",
+      "name": "Joe Monem",
+      "email": "josephmonem@gmail.com",
+      "status": "active",
+      "live": true,
+      "started": "2026-10-04T15:57:44-04:00",
+      "canceled_at": null,
+      "cancel_at": null,
+      "cancel_at_period_end": false,
+      "cancellation_details": {
+        "comment": null,
+        "feedback": null,
+        "feedback_option": null,
+        "reason": null
+      },
+      "items": [
+        {
+          "amount": 4017,
+          "currency": "usd",
+          "interval": {
+            "aggregate_usage": null,
+            "interval": "month",
+            "interval_count": 4,
+            "meter": null,
+            "trial_period_days": null,
+            "usage_type": "licensed"
+          },
+          "period_end": "2027-02-04T14:57:44-05:00"
+        }
+      ],
+      "uid": "HvzeQds3zFT5Dce7rRARqx5egPi1",
+      "user_metadata": {
+        "usage": {
+          "tier": "pro",
+          "count": 4,
+          "windowStart": 1791143703529
+        },
+        "createdAt": "2026-10-04T15:52:36.009000-04:00",
+        "billing": {
+          "status": "pro",
+          "firstProAt": "2026-10-04T15:57:48-04:00",
+          "cancelAtPeriodEnd": false,
+          "proSince": "2026-10-04T15:57:48-04:00"
+        },
+        "displayName": "Joe Monem",
+        "progress": {
+          "lastLoginDate": "2026-10-05T00:00:00-04:00"
+        },
+        "email": "josephmonem@gmail.com"
+      },
+      "activity": {
+        "chats": 2,
+        "messages": 13,
+        "typed_messages": 4,
+        "first_activity": "2026-10-04T15:59:16.887000-04:00",
+        "last_activity": "2026-10-04T16:23:18.004000-04:00",
+        "days_since_last_activity": 2.2,
+        "weekly": [
+          {
+            "days_ago": "0-7",
+            "messages": 13,
+            "active_days": 1
+          },
+          {
+            "days_ago": "7-14",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "14-21",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "21-28",
+            "messages": 0,
+            "active_days": 0
+          }
+        ],
+        "recent_days": {
+          "2026-10-04": 13
+        }
+      }
+    },
+    {
+      "subscription_id": "sub_1UL4TLJW0VHDSVXkKNP3u3yp",
+      "customer_id": "cus_VLm0vfqGFVKxIU",
+      "name": "hope n taylor",
+      "email": "hopetaylor8910@aol.com",
+      "status": "active",
+      "live": true,
+      "started": "2026-09-29T13:05:40-04:00",
+      "canceled_at": null,
+      "cancel_at": null,
+      "cancel_at_period_end": false,
+      "cancellation_details": {
+        "comment": null,
+        "feedback": null,
+        "feedback_option": null,
+        "reason": null
+      },
+      "items": [
+        {
+          "amount": 8307,
+          "currency": "usd",
+          "interval": {
+            "aggregate_usage": null,
+            "interval": "year",
+            "interval_count": 1,
+            "meter": null,
+            "trial_period_days": null,
+            "usage_type": "licensed"
+          },
+          "period_end": "2027-09-29T13:05:40-04:00"
+        }
+      ],
+      "uid": "3YpSKth4ZbY50pzoXvjhZEPKRKr1",
+      "user_metadata": {
+        "usage": {
+          "tier": "pro",
+          "count": 4,
+          "windowStart": 1790657591586
+        },
+        "createdAt": "2026-09-29T00:49:47.319000-04:00",
+        "billing": {
+          "status": "pro",
+          "firstProAt": "2026-09-29T13:05:45-04:00",
+          "cancelAtPeriodEnd": false,
+          "proSince": "2026-09-29T13:05:45-04:00"
+        },
+        "displayName": "Hope Taylor",
+        "progress": {
+          "lastLoginDate": "2026-09-29T13:19:52.693000-04:00"
+        },
+        "email": "hopetaylor8910@aol.com"
+      },
+      "activity": {
+        "chats": 3,
+        "messages": 15,
+        "typed_messages": 3,
+        "first_activity": "2026-09-29T00:50:15.489000-04:00",
+        "last_activity": "2026-09-29T13:35:16.235000-04:00",
+        "days_since_last_activity": 7.3,
+        "weekly": [
+          {
+            "days_ago": "0-7",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "7-14",
+            "messages": 15,
+            "active_days": 1
+          },
+          {
+            "days_ago": "14-21",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "21-28",
+            "messages": 0,
+            "active_days": 0
+          }
+        ],
+        "recent_days": {
+          "2026-09-29": 15
+        }
+      }
+    },
+    {
+      "subscription_id": "sub_1UJIwSJW0VHDSVXkjSjdGYOI",
+      "customer_id": "cus_VJwqdN2FFC4Iye",
+      "name": "Janet Bamidele ",
+      "email": "bamidelejanet081@gmail.com",
+      "status": "active",
+      "live": true,
+      "started": "2026-09-24T16:08:25-04:00",
+      "canceled_at": null,
+      "cancel_at": null,
+      "cancel_at_period_end": false,
+      "cancellation_details": {
+        "comment": null,
+        "feedback": null,
+        "feedback_option": null,
+        "reason": null
+      },
+      "items": [
+        {
+          "amount": 1334,
+          "currency": "usd",
+          "interval": {
+            "aggregate_usage": null,
+            "interval": "month",
+            "interval_count": 1,
+            "meter": null,
+            "trial_period_days": null,
+            "usage_type": "licensed"
+          },
+          "period_end": "2026-10-24T16:08:25-04:00"
+        }
+      ],
+      "uid": "oZmVhV7BG8Pffd6KVbIGUn1sQHa2",
+      "user_metadata": {
+        "usage": {
+          "tier": "pro",
+          "count": 49,
+          "windowStart": 1790257533864
+        },
+        "createdAt": "2026-09-24T09:31:28.223000-04:00",
+        "billing": {
+          "status": "pro",
+          "firstProAt": "2026-09-24T16:08:30-04:00",
+          "cancelAtPeriodEnd": false,
+          "proSince": "2026-09-24T16:08:30-04:00"
+        },
+        "displayName": "Bamidele Janet",
+        "progress": {
+          "lastLoginDate": "2026-09-27T00:00:00-04:00"
+        },
+        "email": "bamidelejanet081@gmail.com"
+      },
+      "activity": {
+        "chats": 1,
+        "messages": 28,
+        "typed_messages": 0,
+        "first_activity": "2026-09-24T09:48:58.452000-04:00",
+        "last_activity": "2026-09-24T18:33:02.847000-04:00",
+        "days_since_last_activity": 12.1,
+        "weekly": [
+          {
+            "days_ago": "0-7",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "7-14",
+            "messages": 28,
+            "active_days": 1
+          },
+          {
+            "days_ago": "14-21",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "21-28",
+            "messages": 0,
+            "active_days": 0
+          }
+        ],
+        "recent_days": {
+          "2026-09-24": 28
+        }
+      }
+    },
+    {
+      "subscription_id": "sub_1UIZFGJW0VHDSVXkhFZHMPiQ",
+      "customer_id": "cus_VJBc4lfvo4FsiI",
+      "name": "shayne",
+      "email": "swellen@lions.molloy.edu",
+      "status": "active",
+      "live": true,
+      "started": "2026-09-22T15:20:45-04:00",
+      "canceled_at": null,
+      "cancel_at": null,
+      "cancel_at_period_end": false,
+      "cancellation_details": {
+        "comment": null,
+        "feedback": null,
+        "feedback_option": null,
+        "reason": null
+      },
+      "items": [
+        {
+          "amount": 1334,
+          "currency": "usd",
+          "interval": {
+            "aggregate_usage": null,
+            "interval": "month",
+            "interval_count": 1,
+            "meter": null,
+            "trial_period_days": null,
+            "usage_type": "licensed"
+          },
+          "period_end": "2026-10-22T15:20:45-04:00"
+        }
+      ],
+      "uid": "02AHE7HkUhQ8XIYFsQHx5iaZ7Wr2",
+      "user_metadata": {
+        "usage": {
+          "tier": "pro",
+          "count": 20,
+          "windowStart": 1790103900088
+        },
+        "createdAt": "2026-04-23T11:31:54.658000-04:00",
+        "billing": {
+          "status": "pro",
+          "firstProAt": "2026-09-22T15:20:51-04:00",
+          "cancelAtPeriodEnd": false,
+          "proSince": "2026-09-22T15:20:51-04:00"
+        },
+        "displayName": "",
+        "progress": {
+          "lastLoginDate": "2026-09-30T00:00:00-04:00"
+        },
+        "email": "swellen@lions.molloy.edu"
+      },
+      "activity": {
+        "chats": 13,
+        "messages": 89,
+        "typed_messages": 27,
+        "first_activity": "2026-04-23T11:31:51.782000-04:00",
+        "last_activity": "2026-09-29T15:38:41.370000-04:00",
+        "days_since_last_activity": 7.3,
+        "weekly": [
+          {
+            "days_ago": "0-7",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "7-14",
+            "messages": 43,
+            "active_days": 4
+          },
+          {
+            "days_ago": "14-21",
+            "messages": 30,
+            "active_days": 1
+          },
+          {
+            "days_ago": "21-28",
+            "messages": 0,
+            "active_days": 0
+          }
+        ],
+        "recent_days": {
+          "2026-09-22": 30,
+          "2026-09-24": 5,
+          "2026-09-27": 5,
+          "2026-09-28": 26,
+          "2026-09-29": 7
+        }
+      }
+    },
+    {
+      "subscription_id": "sub_1UIE98JW0VHDSVXkNc9D2kjJ",
+      "customer_id": "cus_VIpoPI1rjjr9ML",
+      "name": "Carisa Andrews ",
+      "email": "iceskate10@hotmail.com",
+      "status": "active",
+      "live": true,
+      "started": "2026-09-21T16:49:03-04:00",
+      "canceled_at": null,
+      "cancel_at": null,
+      "cancel_at_period_end": false,
+      "cancellation_details": {
+        "comment": null,
+        "feedback": null,
+        "feedback_option": null,
+        "reason": null
+      },
+      "items": [
+        {
+          "amount": 4017,
+          "currency": "usd",
+          "interval": {
+            "aggregate_usage": null,
+            "interval": "month",
+            "interval_count": 4,
+            "meter": null,
+            "trial_period_days": null,
+            "usage_type": "licensed"
+          },
+          "period_end": "2027-01-21T15:49:03-05:00"
+        }
+      ],
+      "uid": "uH8Wj960KXXXPC2tzxNynlUmc2z2",
+      "user_metadata": {
+        "usage": {
+          "tier": "pro",
+          "count": 26,
+          "windowStart": 1789311832292
+        },
+        "createdAt": "2026-09-13T11:00:21.225000-04:00",
+        "billing": {
+          "status": "pro",
+          "firstProAt": "2026-09-21T16:49:07-04:00",
+          "cancelAtPeriodEnd": false,
+          "proSince": "2026-09-21T16:49:07-04:00"
+        },
+        "displayName": "",
+        "progress": {
+          "lastLoginDate": "2026-09-22T00:00:00-04:00"
+        },
+        "email": "candr2@stu.mcphs.edu"
+      },
+      "activity": {
+        "chats": 3,
+        "messages": 52,
+        "typed_messages": 0,
+        "first_activity": "2026-09-13T11:01:02.400000-04:00",
+        "last_activity": "2026-09-22T00:57:10.741000-04:00",
+        "days_since_last_activity": 14.9,
+        "weekly": [
+          {
+            "days_ago": "0-7",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "7-14",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "14-21",
+            "messages": 38,
+            "active_days": 2
+          },
+          {
+            "days_ago": "21-28",
+            "messages": 14,
+            "active_days": 1
+          }
+        ],
+        "recent_days": {
+          "2026-09-13": 14,
+          "2026-09-21": 20,
+          "2026-09-22": 18
+        }
+      }
+    },
+    {
+      "subscription_id": "sub_1UHsGJJW0VHDSVXkKFkbWmpk",
+      "customer_id": "cus_VITCQnA5OzyHkQ",
+      "name": "Zorah Ndunda",
+      "email": "znnmk2.0@gmail.com",
+      "status": "active",
+      "live": true,
+      "started": "2026-09-20T17:26:58-04:00",
+      "canceled_at": "2026-10-04T20:21:34-04:00",
+      "cancel_at": "2026-10-20T17:26:58-04:00",
+      "cancel_at_period_end": false,
+      "cancellation_details": {
+        "comment": null,
+        "feedback": "too_expensive",
+        "feedback_option": null,
+        "reason": "cancellation_requested"
+      },
+      "items": [
+        {
+          "amount": 1334,
+          "currency": "usd",
+          "interval": {
+            "aggregate_usage": null,
+            "interval": "month",
+            "interval_count": 1,
+            "meter": null,
+            "trial_period_days": null,
+            "usage_type": "licensed"
+          },
+          "period_end": "2026-10-20T17:26:58-04:00"
+        }
+      ],
+      "uid": "QFXJnimGz8bVwJb8yhEvlmkQ0N02",
+      "user_metadata": {
+        "usage": {
+          "tier": "pro",
+          "count": 6,
+          "windowStart": 1789939140926
+        },
+        "createdAt": "2026-05-13T21:21:09.135000-04:00",
+        "billing": {
+          "status": "pro",
+          "firstProAt": "2026-09-20T17:27:06-04:00",
+          "cancelAtPeriodEnd": false,
+          "proSince": "2026-09-20T17:27:06-04:00"
+        },
+        "displayName": "Zorah Ndunda",
+        "progress": {
+          "lastLoginDate": "2026-10-04T01:00:00-04:00"
+        },
+        "email": "znnmk2.0@gmail.com"
+      },
+      "activity": {
+        "chats": 29,
+        "messages": 152,
+        "typed_messages": 7,
+        "first_activity": "2026-05-13T21:21:49.149000-04:00",
+        "last_activity": "2026-09-28T01:51:21.540000-04:00",
+        "days_since_last_activity": 8.8,
+        "weekly": [
+          {
+            "days_ago": "0-7",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "7-14",
+            "messages": 9,
+            "active_days": 1
+          },
+          {
+            "days_ago": "14-21",
+            "messages": 12,
+            "active_days": 3
+          },
+          {
+            "days_ago": "21-28",
+            "messages": 27,
+            "active_days": 3
+          }
+        ],
+        "recent_days": {
+          "2026-09-09": 2,
+          "2026-09-13": 19,
+          "2026-09-14": 6,
+          "2026-09-16": 3,
+          "2026-09-20": 3,
+          "2026-09-21": 6,
+          "2026-09-28": 9
+        }
+      }
+    },
+    {
+      "subscription_id": "sub_1UHroeJW0VHDSVXkuIjViWK3",
+      "customer_id": "cus_VISk4XEEMQTtNo",
+      "name": "Jeffery Cobb",
+      "email": "ethancobb00@icloud.com",
+      "status": "active",
+      "live": true,
+      "started": "2026-09-20T16:58:25-04:00",
+      "canceled_at": "2026-09-20T16:59:28-04:00",
+      "cancel_at": "2026-10-20T16:58:25-04:00",
+      "cancel_at_period_end": false,
+      "cancellation_details": {
+        "comment": null,
+        "feedback": "other",
+        "feedback_option": null,
+        "reason": "cancellation_requested"
+      },
+      "items": [
+        {
+          "amount": 1334,
+          "currency": "usd",
+          "interval": {
+            "aggregate_usage": null,
+            "interval": "month",
+            "interval_count": 1,
+            "meter": null,
+            "trial_period_days": null,
+            "usage_type": "licensed"
+          },
+          "period_end": "2026-10-20T16:58:25-04:00"
+        }
+      ],
+      "uid": "LuYlMcyFTLW9vAPq6Zw3N9rBxUf1",
+      "user_metadata": {
+        "usage": {
+          "tier": "pro",
+          "count": 40,
+          "windowStart": 1789933595502
+        },
+        "createdAt": "2026-09-20T15:42:18.404000-04:00",
+        "billing": {
+          "status": "pro",
+          "firstProAt": "2026-09-20T16:58:29-04:00",
+          "cancelAtPeriodEnd": false,
+          "proSince": "2026-09-20T16:58:29-04:00"
+        },
+        "displayName": "",
+        "progress": {
+          "lastLoginDate": "2026-10-01T01:00:00-04:00"
+        },
+        "email": "ethancobb00@icloud.com"
+      },
+      "activity": {
+        "chats": 2,
+        "messages": 16,
+        "typed_messages": 5,
+        "first_activity": "2026-09-20T21:20:20.502000-04:00",
+        "last_activity": "2026-10-02T15:49:24.561000-04:00",
+        "days_since_last_activity": 4.3,
+        "weekly": [
+          {
+            "days_ago": "0-7",
+            "messages": 8,
+            "active_days": 2
+          },
+          {
+            "days_ago": "7-14",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "14-21",
+            "messages": 8,
+            "active_days": 2
+          },
+          {
+            "days_ago": "21-28",
+            "messages": 0,
+            "active_days": 0
+          }
+        ],
+        "recent_days": {
+          "2026-09-20": 6,
+          "2026-09-21": 2,
+          "2026-10-01": 7,
+          "2026-10-02": 1
+        }
+      }
+    },
+    {
+      "subscription_id": "sub_1UGneFJW0VHDSVXkhgS6lou1",
+      "customer_id": "cus_VHMMBtjFjf8FrU",
+      "name": "TAMERIAN HAMMOND",
+      "email": "tamerianhammond91@gmail.com",
+      "status": "active",
+      "live": true,
+      "started": "2026-09-17T18:19:16-04:00",
+      "canceled_at": null,
+      "cancel_at": null,
+      "cancel_at_period_end": false,
+      "cancellation_details": {
+        "comment": null,
+        "feedback": null,
+        "feedback_option": null,
+        "reason": null
+      },
+      "items": [
+        {
+          "amount": 4017,
+          "currency": "usd",
+          "interval": {
+            "aggregate_usage": null,
+            "interval": "month",
+            "interval_count": 4,
+            "meter": null,
+            "trial_period_days": null,
+            "usage_type": "licensed"
+          },
+          "period_end": "2027-01-17T17:19:16-05:00"
+        }
+      ],
+      "uid": "FQf2JUZ9R9elA0h37hTTC9Uvfwm2",
+      "user_metadata": {
+        "usage": {
+          "tier": "pro"
+        },
+        "createdAt": "2026-09-17T18:15:57.026000-04:00",
+        "billing": {
+          "status": "pro",
+          "firstProAt": "2026-09-17T18:19:21-04:00",
+          "cancelAtPeriodEnd": false,
+          "proSince": "2026-09-17T18:19:21-04:00"
+        },
+        "displayName": "Tamerian Hammond",
+        "progress": {
+          "lastLoginDate": "2026-10-06T01:00:00-04:00"
+        },
+        "email": "tamerianhammond91@gmail.com"
+      },
+      "activity": {
+        "chats": 5,
+        "messages": 104,
+        "typed_messages": 5,
+        "first_activity": "2026-09-17T18:16:33.970000-04:00",
+        "last_activity": "2026-10-06T13:41:12.583000-04:00",
+        "days_since_last_activity": 0.3,
+        "weekly": [
+          {
+            "days_ago": "0-7",
+            "messages": 68,
+            "active_days": 4
+          },
+          {
+            "days_ago": "7-14",
+            "messages": 7,
+            "active_days": 1
+          },
+          {
+            "days_ago": "14-21",
+            "messages": 29,
+            "active_days": 3
+          },
+          {
+            "days_ago": "21-28",
+            "messages": 0,
+            "active_days": 0
+          }
+        ],
+        "recent_days": {
+          "2026-09-17": 14,
+          "2026-09-18": 7,
+          "2026-09-20": 8,
+          "2026-09-24": 7,
+          "2026-10-03": 10,
+          "2026-10-04": 9,
+          "2026-10-05": 44,
+          "2026-10-06": 5
+        }
+      }
+    },
+    {
+      "subscription_id": "sub_1UGk1zJW0VHDSVXkuANISqGo",
+      "customer_id": "cus_VHId63fCqzU0dd",
+      "name": "Emily Rachel Gomez Luna",
+      "email": "gomezemily2527@gmail.com",
+      "status": "active",
+      "live": true,
+      "started": "2026-09-17T14:27:32-04:00",
+      "canceled_at": null,
+      "cancel_at": null,
+      "cancel_at_period_end": false,
+      "cancellation_details": {
+        "comment": null,
+        "feedback": null,
+        "feedback_option": null,
+        "reason": null
+      },
+      "items": [
+        {
+          "amount": 1334,
+          "currency": "usd",
+          "interval": {
+            "aggregate_usage": null,
+            "interval": "month",
+            "interval_count": 1,
+            "meter": null,
+            "trial_period_days": null,
+            "usage_type": "licensed"
+          },
+          "period_end": "2026-10-17T14:27:32-04:00"
+        }
+      ],
+      "uid": "Gsc3iMJOAnekDuUycIO1OryV8pV2",
+      "user_metadata": {
+        "usage": {
+          "tier": "pro",
+          "count": 72,
+          "windowStart": 1789342386398
+        },
+        "createdAt": "2026-09-13T19:24:00.934000-04:00",
+        "billing": {
+          "status": "pro",
+          "firstProAt": "2026-09-17T14:27:36-04:00",
+          "cancelAtPeriodEnd": false,
+          "proSince": "2026-09-17T14:27:36-04:00"
+        },
+        "displayName": "Emily Gomez",
+        "progress": {
+          "lastLoginDate": "2026-10-04T01:00:00-04:00"
+        },
+        "email": "gomezemily2527@gmail.com"
+      },
+      "activity": {
+        "chats": 11,
+        "messages": 87,
+        "typed_messages": 6,
+        "first_activity": "2026-09-13T19:24:44.726000-04:00",
+        "last_activity": "2026-10-04T23:48:30.122000-04:00",
+        "days_since_last_activity": 1.9,
+        "weekly": [
+          {
+            "days_ago": "0-7",
+            "messages": 5,
+            "active_days": 1
+          },
+          {
+            "days_ago": "7-14",
+            "messages": 17,
+            "active_days": 2
+          },
+          {
+            "days_ago": "14-21",
+            "messages": 36,
+            "active_days": 1
+          },
+          {
+            "days_ago": "21-28",
+            "messages": 29,
+            "active_days": 1
+          }
+        ],
+        "recent_days": {
+          "2026-09-13": 29,
+          "2026-09-17": 36,
+          "2026-09-26": 3,
+          "2026-09-28": 14,
+          "2026-10-04": 5
+        }
+      }
+    },
+    {
+      "subscription_id": "sub_1UEXIAJW0VHDSVXkNe2sWqFS",
+      "customer_id": "cus_VF1Kl9AzJ3msL0",
+      "name": "Shashana Deligny",
+      "email": "shashanadeligny@yahoo.com",
+      "status": "active",
+      "live": true,
+      "started": "2026-09-11T12:27:07-04:00",
+      "canceled_at": "2026-09-21T09:40:14-04:00",
+      "cancel_at": "2026-10-11T12:27:07-04:00",
+      "cancel_at_period_end": false,
+      "cancellation_details": {
+        "comment": null,
+        "feedback": "too_expensive",
+        "feedback_option": null,
+        "reason": "cancellation_requested"
+      },
+      "items": [
+        {
+          "amount": 1334,
+          "currency": "usd",
+          "interval": {
+            "aggregate_usage": null,
+            "interval": "month",
+            "interval_count": 1,
+            "meter": null,
+            "trial_period_days": null,
+            "usage_type": "licensed"
+          },
+          "period_end": "2026-10-11T12:27:07-04:00"
+        }
+      ],
+      "uid": "GZKKHysC03S7pu8Jz7CEDw4Kj4T2",
+      "user_metadata": {
+        "usage": {
+          "tier": "pro"
+        },
+        "createdAt": "2026-09-11T12:16:00.463000-04:00",
+        "billing": {
+          "status": "pro",
+          "firstProAt": "2026-09-11T12:27:11-04:00",
+          "cancelAtPeriodEnd": false,
+          "proSince": "2026-09-11T12:27:11-04:00"
+        },
+        "displayName": "",
+        "progress": {
+          "lastLoginDate": "2026-09-29T00:00:00-04:00"
+        },
+        "email": "shashanadeligny@yahoo.com"
+      },
+      "activity": {
+        "chats": 8,
+        "messages": 40,
+        "typed_messages": 8,
+        "first_activity": "2026-09-11T12:16:45.680000-04:00",
+        "last_activity": "2026-09-29T12:27:08.507000-04:00",
+        "days_since_last_activity": 7.4,
+        "weekly": [
+          {
+            "days_ago": "0-7",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "7-14",
+            "messages": 8,
+            "active_days": 2
+          },
+          {
+            "days_ago": "14-21",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "21-28",
+            "messages": 32,
+            "active_days": 4
+          }
+        ],
+        "recent_days": {
+          "2026-09-11": 20,
+          "2026-09-12": 6,
+          "2026-09-14": 2,
+          "2026-09-15": 4,
+          "2026-09-28": 4,
+          "2026-09-29": 4
+        }
+      }
+    },
+    {
+      "subscription_id": "sub_1UEJYBJW0VHDSVXkJKR8sXhC",
+      "customer_id": "cus_VEn8pgM9ZMtDda",
+      "name": "Kirsten Krysiak",
+      "email": "kirstenok1017@gmail.com",
+      "status": "active",
+      "live": true,
+      "started": "2026-09-10T21:46:44-04:00",
+      "canceled_at": null,
+      "cancel_at": null,
+      "cancel_at_period_end": false,
+      "cancellation_details": {
+        "comment": null,
+        "feedback": null,
+        "feedback_option": null,
+        "reason": null
+      },
+      "items": [
+        {
+          "amount": 1334,
+          "currency": "usd",
+          "interval": {
+            "aggregate_usage": null,
+            "interval": "month",
+            "interval_count": 1,
+            "meter": null,
+            "trial_period_days": null,
+            "usage_type": "licensed"
+          },
+          "period_end": "2026-10-10T21:46:44-04:00"
+        }
+      ],
+      "uid": "UdO9WOsUVjRj7zto8mSxhTIOLwL2",
+      "user_metadata": {
+        "usage": {
+          "tier": "pro"
+        },
+        "createdAt": "2026-04-26T20:06:50.944000-04:00",
+        "billing": {
+          "status": "pro",
+          "firstProAt": "2026-09-10T21:46:48-04:00",
+          "cancelAtPeriodEnd": false,
+          "proSince": "2026-09-10T21:46:48-04:00"
+        },
+        "displayName": "",
+        "progress": {
+          "lastLoginDate": "2026-10-04T00:00:00-04:00"
+        },
+        "email": "kirstenok1017@gmail.com"
+      },
+      "activity": {
+        "chats": 6,
+        "messages": 38,
+        "typed_messages": 10,
+        "first_activity": "2026-04-26T20:07:29.719000-04:00",
+        "last_activity": "2026-10-04T16:11:28.772000-04:00",
+        "days_since_last_activity": 2.2,
+        "weekly": [
+          {
+            "days_ago": "0-7",
+            "messages": 4,
+            "active_days": 1
+          },
+          {
+            "days_ago": "7-14",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "14-21",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "21-28",
+            "messages": 32,
+            "active_days": 2
+          }
+        ],
+        "recent_days": {
+          "2026-09-10": 30,
+          "2026-09-13": 2,
+          "2026-10-04": 4
+        }
+      }
+    },
+    {
+      "subscription_id": "sub_1UDw5mJW0VHDSVXk9au4BqhZ",
+      "customer_id": "cus_VEOtN916CGYpwJ",
+      "name": "ADDISON BOHNSACK",
+      "email": "addisonbohnsack@icloud.com",
+      "status": "active",
+      "live": true,
+      "started": "2026-09-09T20:43:51-04:00",
+      "canceled_at": "2026-09-30T16:08:40-04:00",
+      "cancel_at": "2026-10-09T20:43:51-04:00",
+      "cancel_at_period_end": false,
+      "cancellation_details": {
+        "comment": null,
+        "feedback": "switched_service",
+        "feedback_option": null,
+        "reason": "cancellation_requested"
+      },
+      "items": [
+        {
+          "amount": 1334,
+          "currency": "usd",
+          "interval": {
+            "aggregate_usage": null,
+            "interval": "month",
+            "interval_count": 1,
+            "meter": null,
+            "trial_period_days": null,
+            "usage_type": "licensed"
+          },
+          "period_end": "2026-10-09T20:43:51-04:00"
+        }
+      ],
+      "uid": "8YVFUKMQ8cUcIZNaFPFXAQv8ny93",
+      "user_metadata": {
+        "usage": {
+          "tier": "pro"
+        },
+        "createdAt": "2026-09-09T20:35:10.592000-04:00",
+        "billing": {
+          "status": "pro",
+          "firstProAt": "2026-09-09T20:43:56-04:00",
+          "cancelAtPeriodEnd": false,
+          "proSince": "2026-09-09T20:43:56-04:00"
+        },
+        "displayName": "",
+        "progress": {
+          "lastLoginDate": "2026-09-30T01:00:00-04:00"
+        },
+        "email": "addisonbohnsack@icloud.com"
+      },
+      "activity": {
+        "chats": 2,
+        "messages": 29,
+        "typed_messages": 7,
+        "first_activity": "2026-09-20T18:41:02.507000-04:00",
+        "last_activity": "2026-09-20T19:13:03.976000-04:00",
+        "days_since_last_activity": 16.1,
+        "weekly": [
+          {
+            "days_ago": "0-7",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "7-14",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "14-21",
+            "messages": 29,
+            "active_days": 1
+          },
+          {
+            "days_ago": "21-28",
+            "messages": 0,
+            "active_days": 0
+          }
+        ],
+        "recent_days": {
+          "2026-09-20": 29
+        }
+      }
+    },
+    {
+      "subscription_id": "sub_1UDl87JW0VHDSVXkSGm3j3nV",
+      "customer_id": "cus_VEDZumZmIlnJKf",
+      "name": "Kiewana Menefield",
+      "email": "kiewanalane@gmail.com",
+      "status": "active",
+      "live": true,
+      "started": "2026-09-09T09:01:32-04:00",
+      "canceled_at": null,
+      "cancel_at": null,
+      "cancel_at_period_end": false,
+      "cancellation_details": {
+        "comment": null,
+        "feedback": null,
+        "feedback_option": null,
+        "reason": null
+      },
+      "items": [
+        {
+          "amount": 1334,
+          "currency": "usd",
+          "interval": {
+            "aggregate_usage": null,
+            "interval": "month",
+            "interval_count": 1,
+            "meter": null,
+            "trial_period_days": null,
+            "usage_type": "licensed"
+          },
+          "period_end": "2026-10-09T09:01:32-04:00"
+        }
+      ],
+      "uid": "lWnF753rYzfq4yfxkDsK11WEFF62",
+      "user_metadata": {
+        "usage": {
+          "tier": "pro",
+          "count": 2,
+          "windowStart": 1788528120492
+        },
+        "createdAt": "2026-08-05T18:50:59.079000-04:00",
+        "billing": {
+          "status": "pro",
+          "firstProAt": "2026-09-09T09:01:37-04:00",
+          "cancelAtPeriodEnd": false,
+          "proSince": "2026-09-09T09:01:37-04:00"
+        },
+        "progress": {
+          "lastLoginDate": "2026-09-18T00:00:00-04:00"
+        }
+      },
+      "activity": {
+        "chats": 10,
+        "messages": 26,
+        "typed_messages": 4,
+        "first_activity": "2026-09-04T09:16:10.095000-04:00",
+        "last_activity": "2026-09-10T08:12:50.017000-04:00",
+        "days_since_last_activity": 26.6,
+        "weekly": [
+          {
+            "days_ago": "0-7",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "7-14",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "14-21",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "21-28",
+            "messages": 18,
+            "active_days": 2
+          }
+        ],
+        "recent_days": {
+          "2026-09-04": 8,
+          "2026-09-09": 2,
+          "2026-09-10": 16
+        }
+      }
+    },
+    {
+      "subscription_id": "sub_1UDF10JW0VHDSVXkNEcb0OIo",
+      "customer_id": "cus_VDgND65gIl5sSj",
+      "name": "SANDY CASTILLO",
+      "email": "sandycm1268@gmail.com",
+      "status": "active",
+      "live": true,
+      "started": "2026-09-07T22:44:04-04:00",
+      "canceled_at": null,
+      "cancel_at": null,
+      "cancel_at_period_end": false,
+      "cancellation_details": {
+        "comment": null,
+        "feedback": null,
+        "feedback_option": null,
+        "reason": null
+      },
+      "items": [
+        {
+          "amount": 833,
+          "currency": "usd",
+          "interval": {
+            "aggregate_usage": null,
+            "interval": "month",
+            "interval_count": 1,
+            "meter": null,
+            "trial_period_days": null,
+            "usage_type": "licensed"
+          },
+          "period_end": "2026-10-07T22:44:04-04:00"
+        }
+      ],
+      "uid": "YIp8dZAllmaxy51Zo6YPCf472ae2",
+      "user_metadata": {
+        "usage": {
+          "tier": "pro",
+          "count": 70,
+          "windowStart": 1788812163752
+        },
+        "createdAt": "2026-09-07T16:14:52.667000-04:00",
+        "billing": {
+          "status": "pro",
+          "firstProAt": "2026-09-07T22:44:08-04:00",
+          "cancelAtPeriodEnd": false,
+          "proSince": "2026-09-07T22:44:08-04:00"
+        },
+        "displayName": "Sandy Castillo",
+        "progress": {
+          "lastLoginDate": "2026-09-27T00:00:00-04:00"
+        },
+        "email": "sandycm1268@gmail.com"
+      },
+      "activity": {
+        "chats": 6,
+        "messages": 41,
+        "typed_messages": 0,
+        "first_activity": "2026-09-07T16:15:16.557000-04:00",
+        "last_activity": "2026-09-27T22:52:46.428000-04:00",
+        "days_since_last_activity": 9.0,
+        "weekly": [
+          {
+            "days_ago": "0-7",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "7-14",
+            "messages": 17,
+            "active_days": 1
+          },
+          {
+            "days_ago": "14-21",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "21-28",
+            "messages": 0,
+            "active_days": 0
+          }
+        ],
+        "recent_days": {
+          "2026-09-07": 18,
+          "2026-09-08": 6,
+          "2026-09-27": 17
+        }
+      }
+    },
+    {
+      "subscription_id": "sub_1UCSGnJW0VHDSVXkHSvU4nRJ",
+      "customer_id": "cus_VCs038Rc0noYM1",
+      "name": "Rebecca Barnes",
+      "email": "thebarnesbunch2@gmail.com",
+      "status": "active",
+      "live": true,
+      "started": "2026-09-05T18:41:06-04:00",
+      "canceled_at": "2026-10-06T15:17:42-04:00",
+      "cancel_at": "2026-11-05T17:41:06-05:00",
+      "cancel_at_period_end": false,
+      "cancellation_details": {
+        "comment": null,
+        "feedback": "unused",
+        "feedback_option": null,
+        "reason": "cancellation_requested"
+      },
+      "items": [
+        {
+          "amount": 833,
+          "currency": "usd",
+          "interval": {
+            "aggregate_usage": null,
+            "interval": "month",
+            "interval_count": 1,
+            "meter": null,
+            "trial_period_days": null,
+            "usage_type": "licensed"
+          },
+          "period_end": "2026-11-05T17:41:06-05:00"
+        }
+      ],
+      "uid": "NcNjawgy0YSdmhoaMT7WYNXMr603",
+      "user_metadata": {
+        "usage": {
+          "tier": "pro",
+          "count": 28,
+          "windowStart": 1788358761258
+        },
+        "createdAt": "2026-09-02T10:06:54.074000-04:00",
+        "billing": {
+          "status": "pro",
+          "firstProAt": "2026-09-05T18:41:10-04:00",
+          "cancelAtPeriodEnd": false,
+          "proSince": "2026-09-05T18:41:10-04:00"
+        },
+        "displayName": "",
+        "progress": {
+          "lastLoginDate": "2026-10-06T02:00:00-04:00"
+        },
+        "email": "sara.barnes027@gmail.com"
+      },
+      "activity": {
+        "chats": 7,
+        "messages": 52,
+        "typed_messages": 12,
+        "first_activity": "2026-09-02T10:14:36.644000-04:00",
+        "last_activity": "2026-09-05T18:45:34.010000-04:00",
+        "days_since_last_activity": 31.1,
+        "weekly": [
+          {
+            "days_ago": "0-7",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "7-14",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "14-21",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "21-28",
+            "messages": 0,
+            "active_days": 0
+          }
+        ],
+        "recent_days": {
+          "2026-09-02": 42,
+          "2026-09-05": 10
+        }
+      }
+    },
+    {
+      "subscription_id": "sub_1UBwTHJW0VHDSVXkee1qeHRg",
+      "customer_id": "cus_VCL9XOhocxDxXm",
+      "name": "Shanice Lowe",
+      "email": "shanice34.lowe@gmail.com",
+      "status": "active",
+      "live": true,
+      "started": "2026-09-04T08:43:49-04:00",
+      "canceled_at": null,
+      "cancel_at": null,
+      "cancel_at_period_end": false,
+      "cancellation_details": {
+        "comment": null,
+        "feedback": null,
+        "feedback_option": null,
+        "reason": null
+      },
+      "items": [
+        {
+          "amount": 833,
+          "currency": "usd",
+          "interval": {
+            "aggregate_usage": null,
+            "interval": "month",
+            "interval_count": 1,
+            "meter": null,
+            "trial_period_days": null,
+            "usage_type": "licensed"
+          },
+          "period_end": "2026-11-04T07:43:49-05:00"
+        }
+      ],
+      "uid": "eMzhZavHtBTSx50DeZVEZwrQS9j2",
+      "user_metadata": {
+        "usage": {
+          "tier": "pro",
+          "count": 6,
+          "windowStart": 1788520257090
+        },
+        "createdAt": "2026-05-23T17:15:13.951000-04:00",
+        "billing": {
+          "status": "pro",
+          "firstProAt": "2026-09-04T08:43:57-04:00",
+          "cancelAtPeriodEnd": false,
+          "proSince": "2026-09-04T08:43:57-04:00"
+        },
+        "displayName": "",
+        "progress": {
+          "lastLoginDate": "2026-10-04T00:00:00-04:00"
+        },
+        "email": "shanice34.lowe@gmail.com"
+      },
+      "activity": {
+        "chats": 20,
+        "messages": 188,
+        "typed_messages": 0,
+        "first_activity": "2026-06-13T20:26:20.271000-04:00",
+        "last_activity": "2026-10-01T00:47:31.355000-04:00",
+        "days_since_last_activity": 5.9,
+        "weekly": [
+          {
+            "days_ago": "0-7",
+            "messages": 7,
+            "active_days": 2
+          },
+          {
+            "days_ago": "7-14",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "14-21",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "21-28",
+            "messages": 33,
+            "active_days": 3
+          }
+        ],
+        "recent_days": {
+          "2026-09-04": 11,
+          "2026-09-08": 2,
+          "2026-09-09": 11,
+          "2026-09-10": 20,
+          "2026-09-30": 1,
+          "2026-10-01": 6
+        }
+      }
+    },
+    {
+      "subscription_id": "sub_1UAftPJW0VHDSVXkf0V8DNnp",
+      "customer_id": "cus_VB1xIL0tztopRq",
+      "name": "Sarina Castro",
+      "email": "castro.sarina816@gmail.com",
+      "status": "active",
+      "live": true,
+      "started": "2026-08-31T20:49:29-04:00",
+      "canceled_at": null,
+      "cancel_at": null,
+      "cancel_at_period_end": false,
+      "cancellation_details": {
+        "comment": null,
+        "feedback": null,
+        "feedback_option": null,
+        "reason": null
+      },
+      "items": [
+        {
+          "amount": 5000,
+          "currency": "usd",
+          "interval": {
+            "aggregate_usage": null,
+            "interval": "year",
+            "interval_count": 1,
+            "meter": null,
+            "trial_period_days": null,
+            "usage_type": "licensed"
+          },
+          "period_end": "2027-08-31T20:49:29-04:00"
+        }
+      ],
+      "uid": "BXGIqFzVGsMZulrfU788kwxHa3P2",
+      "user_metadata": {
+        "usage": {
+          "tier": "pro",
+          "count": 70,
+          "windowStart": 1788218481797
+        },
+        "createdAt": "2026-08-31T19:14:27.326000-04:00",
+        "billing": {
+          "status": "pro",
+          "firstProAt": "2026-08-31T20:49:42-04:00",
+          "cancelAtPeriodEnd": false,
+          "proSince": "2026-08-31T20:49:42-04:00"
+        },
+        "displayName": "sarina castro",
+        "progress": {
+          "lastLoginDate": "2026-10-01T03:00:00-04:00"
+        },
+        "email": "castro.sarina816@gmail.com"
+      },
+      "activity": {
+        "chats": 13,
+        "messages": 101,
+        "typed_messages": 0,
+        "first_activity": "2026-08-31T19:17:13.673000-04:00",
+        "last_activity": "2026-10-01T21:22:41.433000-04:00",
+        "days_since_last_activity": 5.0,
+        "weekly": [
+          {
+            "days_ago": "0-7",
+            "messages": 1,
+            "active_days": 1
+          },
+          {
+            "days_ago": "7-14",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "14-21",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "21-28",
+            "messages": 2,
+            "active_days": 1
+          }
+        ],
+        "recent_days": {
+          "2026-09-03": 29,
+          "2026-09-04": 39,
+          "2026-09-11": 2,
+          "2026-10-01": 1
+        }
+      }
+    },
+    {
+      "subscription_id": "sub_1UANt6JW0VHDSVXkr6ipNIVu",
+      "customer_id": "cus_VAjLNquc7Ipp0S",
+      "name": "Amanda Mack",
+      "email": "mandy2113@gmail.com",
+      "status": "active",
+      "live": true,
+      "started": "2026-08-31T01:36:03-04:00",
+      "canceled_at": null,
+      "cancel_at": null,
+      "cancel_at_period_end": false,
+      "cancellation_details": {
+        "comment": null,
+        "feedback": null,
+        "feedback_option": null,
+        "reason": null
+      },
+      "items": [
+        {
+          "amount": 833,
+          "currency": "usd",
+          "interval": {
+            "aggregate_usage": null,
+            "interval": "month",
+            "interval_count": 1,
+            "meter": null,
+            "trial_period_days": null,
+            "usage_type": "licensed"
+          },
+          "period_end": "2026-10-31T01:36:03-04:00"
+        }
+      ],
+      "uid": "FBiG8k5DxpeZ3BVECxn0O3aJxaD3",
+      "user_metadata": {
+        "usage": {
+          "tier": "pro",
+          "count": 74,
+          "windowStart": 1787724924237
+        },
+        "createdAt": "2026-08-18T10:14:38.383000-04:00",
+        "billing": {
+          "status": "pro",
+          "firstProAt": "2026-08-31T01:36:09-04:00",
+          "cancelAtPeriodEnd": false,
+          "proSince": "2026-08-31T01:36:09-04:00"
+        },
+        "displayName": "Amanda Mack",
+        "progress": {
+          "lastLoginDate": "2026-10-05T00:00:00-04:00"
+        },
+        "email": "mandy2113@gmail.com"
+      },
+      "activity": {
+        "chats": 13,
+        "messages": 146,
+        "typed_messages": 16,
+        "first_activity": "2026-08-18T10:16:49.469000-04:00",
+        "last_activity": "2026-09-30T22:58:48.867000-04:00",
+        "days_since_last_activity": 6.0,
+        "weekly": [
+          {
+            "days_ago": "0-7",
+            "messages": 15,
+            "active_days": 1
+          },
+          {
+            "days_ago": "7-14",
+            "messages": 10,
+            "active_days": 3
+          },
+          {
+            "days_ago": "14-21",
+            "messages": 16,
+            "active_days": 3
+          },
+          {
+            "days_ago": "21-28",
+            "messages": 21,
+            "active_days": 4
+          }
+        ],
+        "recent_days": {
+          "2026-09-02": 3,
+          "2026-09-03": 1,
+          "2026-09-04": 5,
+          "2026-09-07": 1,
+          "2026-09-09": 7,
+          "2026-09-12": 2,
+          "2026-09-14": 4,
+          "2026-09-15": 8,
+          "2026-09-17": 2,
+          "2026-09-21": 8,
+          "2026-09-22": 12,
+          "2026-09-23": 2,
+          "2026-09-24": 2,
+          "2026-09-30": 15
+        }
+      }
+    },
+    {
+      "subscription_id": "sub_1U9wuQJW0VHDSVXkt1ecUeh3",
+      "customer_id": "cus_VAHTF74PH2Nacy",
+      "name": "Ben Stephenson",
+      "email": "benjaminestephenson73@gmail.com",
+      "status": "active",
+      "live": true,
+      "started": "2026-08-29T20:47:39-04:00",
+      "canceled_at": null,
+      "cancel_at": null,
+      "cancel_at_period_end": false,
+      "cancellation_details": {
+        "comment": null,
+        "feedback": null,
+        "feedback_option": null,
+        "reason": null
+      },
+      "items": [
+        {
+          "amount": 833,
+          "currency": "cad",
+          "interval": {
+            "aggregate_usage": null,
+            "interval": "month",
+            "interval_count": 1,
+            "meter": null,
+            "trial_period_days": null,
+            "usage_type": "licensed"
+          },
+          "period_end": "2026-10-29T20:47:39-04:00"
+        }
+      ],
+      "uid": "ZeEv6wXeYucgfhQMqmksu1rdJ9K2",
+      "user_metadata": {
+        "usage": {
+          "tier": "pro",
+          "count": 27,
+          "windowStart": 1787701381200
+        },
+        "createdAt": "2026-08-25T19:37:07.503000-04:00",
+        "displayName": "",
+        "progress": {
+          "lastLoginDate": "2026-09-07T01:00:00-04:00"
+        },
+        "email": "bbstephenson1@buffs.wtamu.edu"
+      },
+      "activity": {
+        "chats": 8,
+        "messages": 35,
+        "typed_messages": 0,
+        "first_activity": "2026-08-27T13:41:42.572000-04:00",
+        "last_activity": "2026-08-31T20:38:13.866000-04:00",
+        "days_since_last_activity": 36.1,
+        "weekly": [
+          {
+            "days_ago": "0-7",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "7-14",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "14-21",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "21-28",
+            "messages": 0,
+            "active_days": 0
+          }
+        ],
+        "recent_days": {}
+      }
+    },
+    {
+      "subscription_id": "sub_1U8vpIJW0VHDSVXkDgZwO0hN",
+      "customer_id": "cus_V9EH5L1HjrQxsE",
+      "name": "Chelsea  Yates",
+      "email": "cyates1214@icloud.com",
+      "status": "past_due",
+      "live": true,
+      "started": "2026-08-27T01:26:09-04:00",
+      "canceled_at": null,
+      "cancel_at": null,
+      "cancel_at_period_end": false,
+      "cancellation_details": {
+        "comment": null,
+        "feedback": null,
+        "feedback_option": null,
+        "reason": null
+      },
+      "items": [
+        {
+          "amount": 833,
+          "currency": "cad",
+          "interval": {
+            "aggregate_usage": null,
+            "interval": "month",
+            "interval_count": 1,
+            "meter": null,
+            "trial_period_days": null,
+            "usage_type": "licensed"
+          },
+          "period_end": "2026-10-27T01:26:09-04:00"
+        }
+      ],
+      "uid": "P5Occbq6O2TrcrMtJhuhn58bVdF2",
+      "user_metadata": {
+        "usage": {
+          "tier": "pro",
+          "count": 25,
+          "windowStart": 1787455662422
+        },
+        "createdAt": "2026-08-05T00:11:28.027000-04:00",
+        "displayName": "",
+        "progress": {
+          "lastLoginDate": "2026-09-27T01:00:00-04:00"
+        },
+        "email": "cyates2010@aol.com"
+      },
+      "activity": {
+        "chats": 6,
+        "messages": 54,
+        "typed_messages": 0,
+        "first_activity": "2026-09-04T04:19:25.310000-04:00",
+        "last_activity": "2026-09-24T03:41:34.943000-04:00",
+        "days_since_last_activity": 12.8,
+        "weekly": [
+          {
+            "days_ago": "0-7",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "7-14",
+            "messages": 2,
+            "active_days": 1
+          },
+          {
+            "days_ago": "14-21",
+            "messages": 11,
+            "active_days": 3
+          },
+          {
+            "days_ago": "21-28",
+            "messages": 19,
+            "active_days": 2
+          }
+        ],
+        "recent_days": {
+          "2026-09-04": 3,
+          "2026-09-06": 13,
+          "2026-09-07": 6,
+          "2026-09-10": 2,
+          "2026-09-13": 17,
+          "2026-09-17": 2,
+          "2026-09-19": 2,
+          "2026-09-21": 7,
+          "2026-09-24": 2
+        }
+      }
+    },
+    {
+      "subscription_id": "sub_1U8ZloJW0VHDSVXkRRc4FIlW",
+      "customer_id": "cus_V8rUISe4CqOj6z",
+      "name": "Danielle Lewis",
+      "email": "danilewis0402@gmail.com",
+      "status": "past_due",
+      "live": true,
+      "started": "2026-08-26T01:53:01-04:00",
+      "canceled_at": null,
+      "cancel_at": null,
+      "cancel_at_period_end": false,
+      "cancellation_details": {
+        "comment": null,
+        "feedback": null,
+        "feedback_option": null,
+        "reason": null
+      },
+      "items": [
+        {
+          "amount": 833,
+          "currency": "cad",
+          "interval": {
+            "aggregate_usage": null,
+            "interval": "month",
+            "interval_count": 1,
+            "meter": null,
+            "trial_period_days": null,
+            "usage_type": "licensed"
+          },
+          "period_end": "2026-10-26T01:53:01-04:00"
+        }
+      ],
+      "uid": "egQ5oJwFxaRSqCHFhn7l77PpRv43",
+      "user_metadata": {
+        "usage": {
+          "tier": "pro",
+          "count": 39,
+          "windowStart": 1787720988088
+        },
+        "createdAt": "2026-08-26T01:08:21.727000-04:00",
+        "displayName": "",
+        "progress": {
+          "lastLoginDate": "2026-10-01T01:00:00-04:00"
+        },
+        "email": "danilewis0402@gmail.com"
+      },
+      "activity": {
+        "chats": 15,
+        "messages": 96,
+        "typed_messages": 0,
+        "first_activity": "2026-08-26T01:08:49.533000-04:00",
+        "last_activity": "2026-09-30T01:08:49.518000-04:00",
+        "days_since_last_activity": 6.9,
+        "weekly": [
+          {
+            "days_ago": "0-7",
+            "messages": 22,
+            "active_days": 2
+          },
+          {
+            "days_ago": "7-14",
+            "messages": 2,
+            "active_days": 1
+          },
+          {
+            "days_ago": "14-21",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "21-28",
+            "messages": 41,
+            "active_days": 2
+          }
+        ],
+        "recent_days": {
+          "2026-09-13": 30,
+          "2026-09-14": 11,
+          "2026-09-29": 10,
+          "2026-09-30": 14
+        }
+      }
+    },
+    {
+      "subscription_id": "sub_1U86QMJW0VHDSVXkYvWN0leX",
+      "customer_id": "cus_V8NAMLrehZGHgq",
+      "name": "Hailey  Hoye",
+      "email": "heyhey.hoye@gmail.com",
+      "status": "active",
+      "live": true,
+      "started": "2026-08-24T18:32:59-04:00",
+      "canceled_at": null,
+      "cancel_at": null,
+      "cancel_at_period_end": false,
+      "cancellation_details": {
+        "comment": null,
+        "feedback": null,
+        "feedback_option": null,
+        "reason": null
+      },
+      "items": [
+        {
+          "amount": 833,
+          "currency": "cad",
+          "interval": {
+            "aggregate_usage": null,
+            "interval": "month",
+            "interval_count": 1,
+            "meter": null,
+            "trial_period_days": null,
+            "usage_type": "licensed"
+          },
+          "period_end": "2026-10-24T18:32:59-04:00"
+        }
+      ],
+      "uid": "cGj72ztoomXzEP3xle2rtcJd5ub2",
+      "user_metadata": {
+        "usage": {
+          "tier": "pro"
+        },
+        "createdAt": "2026-08-24T18:31:46.620000-04:00",
+        "displayName": "Hailey Hoye",
+        "progress": {
+          "lastLoginDate": "2026-08-24T18:33:08.085000-04:00"
+        },
+        "email": "hoyehailey@gmail.com"
+      },
+      "activity": {
+        "chats": 2,
+        "messages": 7,
+        "typed_messages": 0,
+        "first_activity": "2026-08-24T18:32:30.270000-04:00",
+        "last_activity": "2026-08-24T18:46:11.296000-04:00",
+        "days_since_last_activity": 43.1,
+        "weekly": [
+          {
+            "days_ago": "0-7",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "7-14",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "14-21",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "21-28",
+            "messages": 0,
+            "active_days": 0
+          }
+        ],
+        "recent_days": {}
+      }
+    },
+    {
+      "subscription_id": "sub_1U6XZRJW0VHDSVXkKBL018vd",
+      "customer_id": "cus_V6l5Riu3EPBIjy",
+      "name": "Patricia ntumba",
+      "email": "patriciantumba25@gmail.com",
+      "status": "active",
+      "live": true,
+      "started": "2026-08-20T11:07:55-04:00",
+      "canceled_at": null,
+      "cancel_at": null,
+      "cancel_at_period_end": false,
+      "cancellation_details": {
+        "comment": null,
+        "feedback": null,
+        "feedback_option": null,
+        "reason": null
+      },
+      "items": [
+        {
+          "amount": 833,
+          "currency": "cad",
+          "interval": {
+            "aggregate_usage": null,
+            "interval": "month",
+            "interval_count": 1,
+            "meter": null,
+            "trial_period_days": null,
+            "usage_type": "licensed"
+          },
+          "period_end": "2026-10-20T11:07:55-04:00"
+        }
+      ],
+      "uid": "yTujE4TmTzL00wIs3rWsKCgKdLv1",
+      "user_metadata": {
+        "usage": {
+          "tier": "pro",
+          "count": 40,
+          "windowStart": 1787236392386
+        },
+        "createdAt": "2026-08-20T01:30:50.575000-04:00",
+        "displayName": "",
+        "progress": {
+          "lastLoginDate": "2026-08-26T01:00:00-04:00"
+        },
+        "email": "patriciantumba25@gmail.com"
+      },
+      "activity": {
+        "chats": 7,
+        "messages": 26,
+        "typed_messages": 2,
+        "first_activity": "2026-08-20T01:46:22.471000-04:00",
+        "last_activity": "2026-08-26T16:45:27.030000-04:00",
+        "days_since_last_activity": 41.2,
+        "weekly": [
+          {
+            "days_ago": "0-7",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "7-14",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "14-21",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "21-28",
+            "messages": 0,
+            "active_days": 0
+          }
+        ],
+        "recent_days": {}
+      }
+    },
+    {
+      "subscription_id": "sub_1U44l1JW0VHDSVXkhhV6uKgb",
+      "customer_id": "cus_V4DBP1Yk3J4uIc",
+      "name": "Jessica Martin",
+      "email": "jessicamartin@cdrewu.edu",
+      "status": "active",
+      "live": true,
+      "started": "2026-08-13T15:57:38-04:00",
+      "canceled_at": null,
+      "cancel_at": null,
+      "cancel_at_period_end": false,
+      "cancellation_details": {
+        "comment": null,
+        "feedback": null,
+        "feedback_option": null,
+        "reason": null
+      },
+      "items": [
+        {
+          "amount": 833,
+          "currency": "cad",
+          "interval": {
+            "aggregate_usage": null,
+            "interval": "month",
+            "interval_count": 1,
+            "meter": null,
+            "trial_period_days": null,
+            "usage_type": "licensed"
+          },
+          "period_end": "2026-10-13T15:57:38-04:00"
+        }
+      ],
+      "uid": "VsiqNt2O95Sswxirb4kMTZWFrAo2",
+      "user_metadata": {
+        "usage": {
+          "tier": "pro",
+          "count": 10,
+          "windowStart": 1786648348550
+        },
+        "createdAt": "2026-08-13T15:10:54.533000-04:00",
+        "displayName": "",
+        "progress": {
+          "lastLoginDate": "2026-08-18T03:00:00-04:00"
+        },
+        "email": "jessicamartin@cdrewu.edu"
+      },
+      "activity": {
+        "chats": 6,
+        "messages": 77,
+        "typed_messages": 34,
+        "first_activity": "2026-08-13T15:11:39.519000-04:00",
+        "last_activity": "2026-08-19T01:45:21.998000-04:00",
+        "days_since_last_activity": 48.8,
+        "weekly": [
+          {
+            "days_ago": "0-7",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "7-14",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "14-21",
+            "messages": 0,
+            "active_days": 0
+          },
+          {
+            "days_ago": "21-28",
+            "messages": 0,
+            "active_days": 0
+          }
+        ],
+        "recent_days": {}
+      }
+    }
+  ]
+}

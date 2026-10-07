@@ -4,7 +4,7 @@ import re
 
 
 def requested_question_total(text, fallback=5):
-    match = re.search(r"\b(?:give|make|create|generate|ask|want|need)\s+(?:me\s+)?(?:a\s+)?(\d{1,5})(?:[-\s]+(?:hard|difficult|nclex|style|clinical|practice|multiple.choice|case.study|scenario.based))*[-\s]+(?:questions?|items?)\b", text or "", re.I)
+    match = re.search(r"\b(?:give|provide|make|create|generate|ask|want|need)\s+(?:me\s+)?(?:a\s+)?(\d{1,5})(?:[-\s]+(?:hard|difficult|nclex|style|clinical|practice|multiple.choice|case.study|scenario.based))*[-\s]+(?:questions?|items?)\b", text or "", re.I)
     return max(1, min(200, int(match.group(1)) if match else int(fallback or 5)))
 
 
@@ -27,13 +27,15 @@ def sanitize_settings(settings):
         clean["difficulty"] = settings["difficulty"]
     types = settings.get("question_types")
     if isinstance(types, list):
-        types = list(dict.fromkeys(t for t in types if t in ("mcq", "sata", "casestudy")))
+        types = list(dict.fromkeys(t.lower() for t in types if isinstance(t, str) and t.lower() in ("mcq", "sata", "casestudy", "true_false", "matrix", "unfoldingcase")))
         if types:
             clean["question_types"] = types
     if isinstance(settings.get("scope"), str):
         clean["scope"] = settings["scope"][:2000]
     if isinstance(settings.get("requested_total"), int) and not isinstance(settings["requested_total"], bool):
         clean["requested_total"] = max(1, min(200, settings["requested_total"]))
+    if isinstance(settings.get('plan_id'), str) and re.fullmatch(r'[a-f0-9]{64}', settings['plan_id']):
+        clean['plan_id'] = settings['plan_id']
     return clean
 
 
@@ -79,7 +81,7 @@ Explain the ACTIVE question, selected answer, case data, and follow-up history. 
 If they ask why, say idk, ask for a lesson/review/analogy, or challenge an answer, EXPLAIN. Do not require them to paste the current question.
 Check the reasoning independently; do not blindly defend the answer key. If evidence conflicts, acknowledge uncertainty.
 Only explicit requests for MORE questions use extend. Requests to change difficulty, format, scope or total use configure.
-Settings may contain difficulty easy/medium/hard, question_types array mcq/sata/casestudy, scope, requested_total.
+Settings may contain difficulty easy/medium/hard, question_types array mcq/sata/casestudy/true_false/matrix, scope, requested_total.
 Preserve explicit MCQ-only/SATA-only requests. A case study is a clinical case with ordered nursing actions.
 Never claim a total has been generated, that changes already happened, or that quotas are unlimited. The app applies settings within the user's allowance.
 For readiness, distinguish answered performance from untested topics; do not promise exam success or complete coverage.

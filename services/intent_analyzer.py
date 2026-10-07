@@ -2,8 +2,8 @@
 Intent Analyzer
 ===============
 
-Runs BEFORE any content-generating tool fires. Uses Claude Sonnet 4.6 with
-adaptive thinking + server-side web search to classify what the user actually
+Runs BEFORE any content-generating tool fires. Uses Claude Sonnet 5.5 with
+adaptive thinking at low effort to classify what the user actually
 wants, at what quality bar, from which source, and whether the AI needs to be
 honest about not having something (e.g. real past papers).
 
@@ -20,12 +20,17 @@ override on per-tool kwargs (quiz_mode, difficulty, learning_objective,
 source_preference, etc.). It also returns an optional one-sentence honesty
 preamble the orchestrator streams before the quiz starts.
 
-Latency budget
+Latency budget (measured 2026-10-07, tools/time_analyzer_sonnet55.py)
 --------------
-- Simple requests ("quiz me on diabetes"): ~400-600ms (adaptive thinking
-  decides not to think hard, no web search).
-- Quality-loaded requests ("UK NMC past papers on sickle cell"): ~2-4s
-  (one round of thinking + one web_search call).
+Every quiz waits on this call before it can start, so its latency is the
+student's wait. On Sonnet 4.6 with web search it measured 8.5-16s per request
+(the old "~500ms" claim here was never true): all of it output tokens, since
+web search never fired and the prompt cache hit. Sonnet 5.5 at low effort
+measured 3.0-3.7s and about $0.005-0.006 per call, with the same tool chosen
+on every test message.
+
+No web search: the analyzer never needed it to route a request, and exam-board
+research has its own step (services/exam_research.py, NEEDS_RESEARCH below).
 
 Prompt caching halves the cost after the first call of a 5-min window.
 """
@@ -67,9 +72,10 @@ Core principles:
    "in here", "take out the answers", "the questions in this paper" mean the
    user wants content extracted/used from their upload, NOT new content
    generated from scratch.
-5. Research when uncertain. If the user names a specific exam standard, board,
-   country-specific format, or curriculum you are not confident about, call
-   web_search FIRST to verify the format, then classify.
+5. Don't guess an unfamiliar standard. If the user names a specific exam
+   standard, board, country-specific format, or curriculum you are not
+   confident about, classify from what the message says and apply the
+   NEEDS_RESEARCH rule below; a separate research step verifies the format.
 
 Decision rules:
 
@@ -262,7 +268,7 @@ CLASSIFY_INTENT_TOOL = {
     "name": "classify_intent",
     "description": (
         "Emit the final structured classification of the user's intent. "
-        "Call this exactly once, at the end, after any web_search calls."
+        "Call this exactly once, at the end."
     ),
     "input_schema": {
         "type": "object",
@@ -434,13 +440,10 @@ CLASSIFY_INTENT_TOOL = {
 }
 
 
-WEB_SEARCH_TOOL = {
-    "type": "web_search_20260209",
-    "name": "web_search",
-    # Cap the searches Claude can do in one analysis turn. Two is enough to
-    # verify an exam board's format; more than that is the wrong tool.
-    "max_uses": 2,
-}
+# Sonnet 5.5's effort levels are recalibrated from earlier models; routing a
+# message is a classification and holds at "low" (see the latency note above).
+ANALYZER_MODEL = "claude-sonnet-5-5"
+ANALYZER_EFFORT = "low"
 
 
 def _build_context_text(
@@ -523,7 +526,7 @@ async def analyze_intent(
     try:
         client = _get_client()
         response = await client.messages.create(
-            model="claude-sonnet-4-6",
+            model=ANALYZER_MODEL,
             max_tokens=4096,
             thinking={"type": "adaptive"},
             system=[
@@ -533,11 +536,13 @@ async def analyze_intent(
                     "cache_control": {"type": "ephemeral"},
                 }
             ],
-            tools=[WEB_SEARCH_TOOL, CLASSIFY_INTENT_TOOL],
-            # Force a final structured emission. Claude can still call
-            # web_search in earlier turns of the same response; tool_choice
-            # only constrains the FINAL stop reason.
+            tools=[CLASSIFY_INTENT_TOOL],
+            # Sonnet 5.5 rejects forced tool_choice ("any"/"tool"); the prompt
+            # and the tool description already require exactly one call.
             tool_choice={"type": "auto"},
+            # This SDK version has no output_config keyword, so effort goes in
+            # the request body.
+            extra_body={"output_config": {"effort": ANALYZER_EFFORT}},
             messages=[
                 {
                     "role": "user",
@@ -561,12 +566,6 @@ async def analyze_intent(
                 classification = dict(block.input or {})
                 classification.setdefault("tool_args_overrides", {})
                 classification["_fallback"] = False
-                # Useful in logs to see how often web_search fired.
-                classification["_web_searched"] = any(
-                    getattr(b, "type", None) == "server_tool_use"
-                    and getattr(b, "name", None) == "web_search"
-                    for b in response.content
-                )
                 return classification
 
         print(

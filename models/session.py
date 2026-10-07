@@ -38,3 +38,4 @@ class PersistentSessionContext:
     # chat has already asked so a new batch can avoid them.
     practice_profile: Dict[str, Any] = field(default_factory=dict)
     asked_questions: List[str] = field(default_factory=list)
+    material_analysis: Dict[str, Any] = field(default_factory=dict)

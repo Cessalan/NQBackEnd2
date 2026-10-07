@@ -34,17 +34,20 @@ import re
 from datetime import datetime, timezone
 
 PROFILE_VERSION = 1
-FORMATS = ("mcq", "sata", "casestudy")
+FORMATS = ("mcq", "sata", "casestudy", "true_false", "matrix", "unfoldingcase")
 # What a chat quiz generates when nobody has said anything about format and
 # no model suggested one. Ordering (casestudy) is opt-in: it is the format
 # students push back on, and a request for NGN / case studies still adds it.
 DEFAULT_FORMATS = ["mcq", "sata"]
-MAX_SOURCE_CHARS = 12000
+MAX_SOURCE_CHARS = 200000
 MAX_SCOPE_CHARS = 600
 # A message this long with no upload is study material, not a request.
 PASTE_MIN_CHARS = 800
 
 _FORMAT_PATTERNS = {
+    "matrix": re.compile(r"\bmatrix\b|\bmatrice\b", re.I),
+    "unfoldingcase": re.compile(r"\bunfolding[\s_-]*(?:case[\s_-]*stud(?:y|ies))?\b", re.I),
+    "true_false": re.compile(r"true[\s/-]*(?:or[\s/-]*)?false|vrai[\s/-]*(?:ou[\s/-]*)?faux", re.I),
     "casestudy": re.compile(
         r"case[\s-]?stud(?:y|ies)|casestudy|\bordering\b|\bin\s+order\b|\bin\s+the\s+(?:right|correct)\s+order\b"
         r"|\b(?:put|place|arrange|rank|sort)\w*\s+(?:\w+\s+){0,3}in\s+(?:the\s+)?(?:right\s+|correct\s+)?order"
@@ -64,7 +67,7 @@ _CLAUSE_SPLIT = re.compile(r"[.;!?\n,]+|\bbut\b|\binstead\b|\bplus\b", re.I)
 # A number counts as a request only next to a verb of asking, "make it N" or
 # "N more": "my exam has 50 questions" describes the exam, not the practice.
 _TOTAL = re.compile(
-    r"\b(?:give|make|create|generate|ask|want|need|do|write|send)\s+(?:me\s+|us\s+)?(?:a\s+|another\s+|like\s+)?(\d{1,3})\b"
+    r"\b(?:give|provide|make|create|generate|ask|want|need|do|write|send)\s+(?:me\s+|us\s+)?(?:a\s+|another\s+|like\s+)?(\d{1,3})\b"
     r"|\bmake\s+it\s+(\d{1,3})\b|\b(\d{1,3})\s+more\b", re.I)
 # Difficulty is a change only when it describes the QUESTIONS she wants, not
 # how she feels about a topic ("I find SATA difficult").
@@ -108,6 +111,10 @@ def parse_changes(text):
         edges = (text[:400] + "\n" + text[-400:]).splitlines()
         text = "\n".join(l for l in edges if not _BULLET.match(l) and not _HEADING.match(l))
     changes = {}
+    if re.search(r'(?:match|align|like|similar|same|structure).{0,100}(?:example|sample|notes)|(?:example|sample).{0,80}(?:style|format|wording)', text, re.I):
+        changes['match_examples'] = True
+    if re.search(r'(?:do not|don\x27t|stop|ignore).{0,30}(?:match|copy|follow).{0,40}(?:example|sample)', text, re.I):
+        changes['match_examples'] = False
     exclude, include = [], []
     only_hit = False
     for clause in _clauses(text):
@@ -177,10 +184,20 @@ def normalize(profile):
         "scope": (str(profile.get("scope") or "").strip()[:MAX_SCOPE_CHARS]) or None,
         "emphasis": (str(profile.get("emphasis") or "").strip()[:300]) or None,
         "sourceTopics": [str(t)[:120] for t in (profile.get("sourceTopics") or []) if str(t).strip()][:40],
+        # Main topic -> the subtopics questions are tagged with. Without it a
+        # question on "C - Circulation" never counted toward "Primary survey",
+        # and the debrief told her she had not practised what she just did.
+        "sourceTopicGroups": [
+            {"title": str(g.get("title"))[:120],
+             "subtopics": [str(t)[:120] for t in (g.get("subtopics") or []) if str(t).strip()][:30]}
+            for g in (profile.get("sourceTopicGroups") or [])
+            if isinstance(g, dict) and str(g.get("title") or "").strip()][:40],
         "formats": _clean_formats(profile.get("formats")) or None,
         "excludedFormats": _clean_formats(profile.get("excludedFormats")),
         "difficulty": profile.get("difficulty") if profile.get("difficulty") in ("easy", "medium", "hard") else None,
         "requestedTotal": max(1, min(200, int(total))) if isinstance(total, int) and not isinstance(total, bool) else None,
+        "matchExamples": profile.get('matchExamples', True) is not False,
+        "generationInstructions": str(profile.get('generationInstructions') or '')[:4000] or None,
         "updatedAt": profile.get("updatedAt"),
         "updatedBy": profile.get("updatedBy"),
     }
@@ -222,6 +239,10 @@ def merge(profile, changes, *, analyzer_changes=None, updated_by="chat"):
         after["requestedTotal"] = changes["requested_total"]
     if changes.get("difficulty"):
         after["difficulty"] = changes["difficulty"]
+    if 'match_examples' in changes:
+        after['matchExamples'] = changes['match_examples']
+    if changes.get('generation_instructions'):
+        after['generationInstructions'] = str(changes['generation_instructions'])[:4000]
 
     scope = str(analyzer_changes.get("scope") or "").strip()
     if scope:
@@ -260,7 +281,7 @@ def effective_formats(profile, guess=None, text=None):
     base += [f for f in changes.get("include", []) if f not in base]
     result = [f for f in base if f not in excluded]
     if not result:
-        result = [f for f in ("mcq", "sata", "casestudy") if f not in excluded][:1] or ["mcq"]
+        result = [f for f in FORMATS if f not in excluded][:1] or ["mcq"]
     return result
 
 

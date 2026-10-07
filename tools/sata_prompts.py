@@ -25,6 +25,7 @@ Usage in quiztools.py:
 @author NurseQuiz Team
 @version 1.0.0
 """
+import os
 
 from langchain.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
@@ -449,7 +450,7 @@ async def generate_sata_question(
     )
 
     # Use GPT-4o for high-quality NCLEX questions
-    llm = ChatOpenAI(model="gpt-4.1", temperature=0.7)
+    llm = ChatOpenAI(model=os.getenv("SATA_GENERATION_MODEL", "gpt-4.1"), temperature=0.7)
     chain = prompt | llm | StrOutputParser()
 
     try:

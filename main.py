@@ -221,8 +221,11 @@ class SimplePowerPointLoader:
         return documents
 
 # to load documents
-def get_loader_for_file(path):
-    ext = os.path.splitext(path)[-1].lower()        
+def get_loader_for_file(path, *, service_tier='default'):
+    ext = os.path.splitext(path)[-1].lower()
+    if ext in ('.docx', '.pptx', '.pdf', '.png', '.jpg', '.jpeg', '.webp'):
+        from core.material_loader import TeachingMaterialLoader
+        return TeachingMaterialLoader(path, service_tier=service_tier)
     if ext == ".pdf":# pdf file support
         #Detect if PDF is scanned or text-based
         if is_scanned_pdf(path):
@@ -2006,7 +2009,7 @@ async def upload_multiple_files(
                                     all_doc_types.append(doc_type)
                         
                         # Deduplicate
-                        unique_topics = list(set(all_topics))
+                        unique_topics = list(dict.fromkeys(all_topics))
                         unique_doc_types = list(set(all_doc_types))
                         
                         # Generate summary with LLM
@@ -2131,14 +2134,20 @@ async def upload_multiple_files(
                         # -----------------------------------------
                         all_topics = []
                         all_insights = []
+                        all_main_topics = []
                         for filename, insights in file_insights.items():
                             if insights and insights.get("topics"):
                                 all_topics.extend(insights.get("topics", []))
                             if insights and insights.get("insights"):
                                 all_insights.extend(insights.get("insights", []))
+                            if insights and insights.get("mainTopics"):
+                                all_main_topics.extend(insights.get("mainTopics", []))
 
-                        # Remove duplicates, keep max 5 topics and 3 insights for readability
-                        unique_topics = list(set(all_topics))[:5]
+                        # Remove duplicates IN DOCUMENT ORDER, keep max 5 topics and 3 insights.
+                        # set() here used to pick five arbitrary topics: an ABCDE upload
+                        # was announced as radiography, MIST and SAMPLE (its last pages),
+                        # and that list became the chat's practice scope.
+                        unique_topics = list(dict.fromkeys(all_topics))[:5]
                         # Deduplicate insights by topic
                         seen_topics = set()
                         unique_insights = []
@@ -2147,7 +2156,9 @@ async def upload_multiple_files(
                             if topic not in seen_topics:
                                 seen_topics.add(topic)
                                 unique_insights.append(insight)
-                            if len(unique_insights) >= 3:
+                            # One insight per main topic so the card can show coverage for
+                            # every chapter it names, not just the first three.
+                            if len(unique_insights) >= 8:
                                 break
 
                         filenames = [f["filename"] for f in valid_files]
@@ -2179,6 +2190,7 @@ async def upload_multiple_files(
                             "message": friendly_message,
                             "topics": unique_topics,
                             "insights": unique_insights,  # Educational insights for orientation flow
+                            "main_topics": [g for g in all_main_topics if g.get("title") in unique_topics],
                             "filenames": filenames,
                             "file_count": file_count,
                             "actions": actions
@@ -2368,176 +2380,22 @@ def _language_for_prompt(lang_code: str) -> str:
     return mapping.get(code, lang_code)
 
 
-async def extract_file_insights_from_text(
-    text: str, 
-    filename: str, 
-    chat_id: str, 
-    file_id: str, 
-    updates: list,
-    language: str = "english"
-) -> dict:
-    """
-    Extract key topics and concepts from document text using random sampling.
-    Runs in parallel with embedding for speed.
-    
-    Args:
-        text: Full document text
-        filename: Name of the file
-        chat_id: Chat ID
-        file_id: File ID for progress updates
-        updates: List to append progress updates to
-        language: Browser language for localized insights
-    
-    Returns:
-        Dict with topics, concepts, and document_type
-    """
-    try:
-        updates.append({
-            "type": "insight_extraction_start",
-            "file_id": file_id,
-            "filename": filename
-        })
-        
-        # ========================================
-        # FRAMEWORK DETECTION — on the FULL text
-        # ========================================
-        # Deliberately BEFORE the sampling below. That sampling reads three
-        # random 1,000-char windows, and a framework (the nursing process,
-        # Maslow, ABCDE...) is typically defined once, in one place — random
-        # windows miss it. This pass is pure keyword matching: no model call,
-        # no added latency, and it can afford to read everything.
-        #
-        # Frameworks are the closed set in constants/nursing_frameworks.py.
-        # An empty list is the normal result and means "this document teaches
-        # no framework we can test" — never a reason to loosen the thresholds.
-        detected_frameworks = detect_frameworks(text)
-        if detected_frameworks:
-            print(f"🧭 Frameworks in {filename}: " + ", ".join(
-                f'{f["id"]}({f["confidence"]})' for f in detected_frameworks))
-
-        # Sample random sections for fast analysis
-        text_length = len(text)
-        
-        if text_length < 5000:
-            # Small file - use all text
-            sample_text = text
-        else:
-            # Large file - sample 3 random sections (1000 chars each)
-            import random
-            samples = []
-            for _ in range(3):
-                start_pos = random.randint(0, max(0, text_length - 1000))
-                samples.append(text[start_pos:start_pos + 1000])
-            sample_text = "\n\n---\n\n".join(samples)
-        
-        # Convert to a clearer label for the prompt (e.g., "fr" -> "French")
-        prompt_language = _language_for_prompt(language)
-
-        # Use GPT-4o-mini for fast, cheap analysis                
-        llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.3)
-        
-        # Determine response language
-        prompt = f"""Analyze this document and identify its CORE PURPOSE in {prompt_language}.
-
-        Document: {filename}
-        Content sample:
-        {sample_text[:2500]}
-
-        CRITICAL: Focus on the MAIN THESIS or CENTRAL QUESTION of this document.
-        - What is the document trying to teach or prove?
-        - What is the key relationship or concept being explored?
-        - Ignore metadata (demographics, methodology details, sample sizes) - focus on the CONCLUSION or MAIN TEACHING POINT.
-
-        Example of what we want:
-        - Document about sleep and testosterone → Topic: "Sleep deprivation reduces testosterone levels"
-        - Document about pressure injuries → Topic: "Staging pressure injuries and preventing them"
-        - NOT: "Demographics, education levels, sample characteristics" (these are details, not the core topic)
-
-        Keep a named framework NAMED. If the document teaches the nursing process,
-        Maslow's hierarchy, ABCDE, SBAR or similar, say so by name rather than
-        paraphrasing it into a description — those names are how the student's
-        course and exam refer to it.
-
-        Identify:
-        1. Core topic (1-3 MAIN subjects this document is fundamentally about - the central thesis)
-        2. Key concepts (5-10 important terms or findings the student needs to remember)
-        3. Document type (research paper, textbook, clinical guide, lecture notes, etc.)
-        4. Key insights - For each core topic, extract what the student MUST learn:
-           - topic: The main subject (e.g. "Sleep and Testosterone", "ABCDE Assessment")
-           - insight: The key finding or teaching point (1 sentence - what should the student remember?)
-           - key_points: 2-4 specific facts, steps, or conclusions FROM the document
-           - context: Where/when this knowledge applies
-
-        IMPORTANT:
-        - Topics should answer "What is this document ABOUT?" not "What variables were measured?"
-        - key_points should be actionable knowledge, not methodology details
-
-        Return ONLY valid JSON with content in {prompt_language}:
-        {{
-        "topics": ["Core topic 1", "Core topic 2"],
-        "concepts": ["key term 1", "key term 2", ...],
-        "document_type": "type",
-        "insights": [
-            {{
-                "topic": "Main subject of document",
-                "insight": "The key finding or teaching point",
-                "key_points": ["Important fact 1", "Important fact 2", "Important fact 3"],
-                "context": "Where this knowledge is applied"
-            }}
-        ]
-        }}
-        """
-        
-        response = await llm.ainvoke([
-            {"role": "system", "content": f"You are an expert tutor who identifies the CORE PURPOSE and MAIN THESIS of educational documents. Focus on what the student needs to LEARN, not on research methodology or metadata. Return only valid JSON with all content in {prompt_language}."},
-            {"role": "user", "content": prompt}
-        ])
-        
-        # Parse response
-        try:
-            insights = json.loads(response.content.strip().strip("```json").strip("```"))
-        except json.JSONDecodeError:
-            print(f"⚠️ Failed to parse insights JSON for {filename}")
-            default_topic = "contenu médical" if language.lower() in ["fr", "french", "français"] else "medical content"
-            default_type = "document"
-            insights = {
-                "topics": [default_topic],
-                "concepts": [],
-                "document_type": default_type,
-                "insights": []
-            }
-        
-        # Attached after the parse so the fallback path keeps them too: detection
-        # is deterministic and independent of whether the model returned valid JSON.
-        insights["frameworks"] = detected_frameworks
-
-        print(f"✅ Extracted insights from {filename}:")
-        print(f"   Topics: {insights.get('topics', [])}")
-        print(f"   Concepts: {insights.get('concepts', [])[:3]}...")
-        print(f"   Educational insights: {len(insights.get('insights', []))} generated")
-
-        # Stream insight batch to frontend
-        updates.append({
-            "type": "insight_batch",
-            "file_id": file_id,
-            "filename": filename,
-            "topics": insights.get("topics", []),
-            "concepts": insights.get("concepts", [])[:5],  # Limit to 5 for UX
-            "document_type": insights.get("document_type", ""),
-            "insights": insights.get("insights", [])[:3],  # Limit to 3 educational insights
-            # Only what a consumer needs to act: which framework, and how sure we
-            # are. The matched vocabulary stays server-side for debugging.
-            "frameworks": [
-                {"id": f["id"], "name": f["name"], "confidence": f["confidence"]}
-                for f in detected_frameworks
-            ]
-        })
-        
-        return insights
-        
-    except Exception as e:
-        print(f"⚠️ Insight extraction failed for {filename}: {e}")
-        return None
+async def extract_file_insights_from_text(text, filename, chat_id, file_id, updates, language="english"):
+    """Analyse the full ordered material; project legacy insights for existing UI."""
+    from services.document_understanding import analyse_document, display_insights
+    updates.append({"type": "insight_extraction_start", "file_id": file_id, "filename": filename})
+    def progress(section, total):
+        updates.append({"type": "material_analysis_progress", "file_id": file_id,
+                        "filename": filename, "section": section, "total": total})
+    analysis = await analyse_document(text, filename, chat_id=chat_id,
+                                      language=language, progress=progress)
+    if chat_id in ACTIVE_SESSIONS:
+        ACTIVE_SESSIONS[chat_id].session.material_analysis[filename] = analysis
+    insights = display_insights(analysis)
+    insights['frameworks'] = detect_frameworks(text)
+    updates.append({"type": "insight_batch", "file_id": file_id, "filename": filename,
+                    **insights})
+    return insights
 
 async def firebase_upload_task_simple(file_bytes: bytes, filename: str, chat_id: str):
     """Simple file upload to Firebase Storage (for background task)."""
@@ -2678,7 +2536,9 @@ async def embed_document_task(temp_path: str, filename: str, chat_id: str, file_
         # Load document in a worker thread — PDF parsing/OCR is blocking CPU/IO
         # work that would otherwise freeze the event loop and stall the
         # progress stream for every connected client
-        loader = get_loader_for_file(temp_path)
+        from core.material_model import service_tier_for_chat
+        tier = await asyncio.to_thread(service_tier_for_chat, chat_id)
+        loader = get_loader_for_file(temp_path, service_tier=tier)
         pages = await asyncio.to_thread(loader.load)
 
         print(f"✅ Loaded {len(pages)} pages from {filename}")
@@ -2706,12 +2566,10 @@ async def embed_document_task(temp_path: str, filename: str, chat_id: str, file_
         # ========================================
         # CONTINUE WITH EMBEDDING (PARALLEL)
         # ========================================
-        text_splitter = CharacterTextSplitter(
-            separator="\n",
-            chunk_size=1000,
-            chunk_overlap=200
-        )
-        chunks = text_splitter.split_text(text)
+        from services.document_understanding import fingerprint
+        revision = fingerprint(text)
+        # Exact offsets preserve all extracted text across reloads.
+        chunks = [text[start:start + 1000] for start in range(0, len(text), 800)]
         
         print(f"✂️ Split into {len(chunks)} chunks")
         
@@ -2724,8 +2582,9 @@ async def embed_document_task(temp_path: str, filename: str, chat_id: str, file_
         
         # Create documents
         documents = [
-            Document(page_content=chunk, metadata={"source": filename})
-            for chunk in chunks
+            Document(page_content=chunk, metadata={"source": filename,
+                "chunk_index": index, "start_index": index * 800, "material_revision": revision})
+            for index, chunk in enumerate(chunks)
         ]
         
         print(f"🔤 Creating embeddings for {len(documents)} documents...")
@@ -2738,6 +2597,10 @@ async def embed_document_task(temp_path: str, filename: str, chat_id: str, file_
         metadatas = [doc.metadata for doc in documents]
         vectors = await embeddings.aembed_documents(texts)
         text_embeddings = list(zip(texts, vectors))
+
+        # Analysis must pass before committing the upload or telling the UI it
+        # is ready. Embedding and analysis still run concurrently above.
+        insights = await insight_task
 
         # Get session
         if chat_id not in ACTIVE_SESSIONS:
@@ -2767,15 +2630,6 @@ async def embed_document_task(temp_path: str, filename: str, chat_id: str, file_
             "chunks": len(documents)
         })
         
-        # ========================================
-        # 🆕 WAIT FOR INSIGHTS (SHOULD BE READY)
-        # ========================================
-        try:
-            insights = await asyncio.wait_for(insight_task, timeout=20.0)
-        except asyncio.TimeoutError:
-            print(f"⚠️ Insight extraction timed out for {filename}")
-            insights = None
-        
         # Return documents + insights
         return {
             "word_count": word_count,
@@ -2786,9 +2640,19 @@ async def embed_document_task(temp_path: str, filename: str, chat_id: str, file_
         
     except Exception as e:
         print(f"❌ Embedding error for {filename}: {e}")
+        if 'insight_task' in locals() and not insight_task.done():
+            insight_task.cancel()
         import traceback
         traceback.print_exc()
         raise
+
+    finally:
+        # Drain failures and cancellation as well as success; a failed upload
+        # must not leave analysis/retries running in the background.
+        if 'insight_task' in locals():
+            if not insight_task.done():
+                insight_task.cancel()
+            await asyncio.gather(insight_task, return_exceptions=True)
 
 async def firebase_upload_task(file_bytes, filename, chat_id, file_id, updates):
     """Upload to Firebase - appends progress to updates list"""
@@ -3255,8 +3119,8 @@ async def generate_study_plan(request: StudyPlanRequest):
                 all_concepts.extend(insights.get("concepts", []))
 
         # Remove duplicates
-        unique_topics = list(set(all_topics))[:8]  # Max 8 topics for manageable path
-        unique_concepts = list(set(all_concepts))[:15]
+        unique_topics = list(dict.fromkeys(all_topics))[:8]  # Max 8 topics for manageable path
+        unique_concepts = list(dict.fromkeys(all_concepts))[:15]
 
         print(f"📊 Found {len(unique_topics)} topics: {unique_topics}")
         print(f"📊 Found {len(unique_concepts)} concepts")
@@ -4407,10 +4271,10 @@ async def start_study_journey(request: StudyPlanRequest):
             # Uncut here; the five-topic cut happens after her flags have had
             # a chance to promote something. With nothing flagged the result
             # is the same five this always produced.
-            fallback_topics = (list(set(all_topics))
+            fallback_topics = (list(dict.fromkeys(all_topics))
                                or student_emphasis.fallback_topics(student_signals)
                                or ["Document Overview"])
-            key_terms = list(set(all_concepts))[:10]
+            key_terms = list(dict.fromkeys(all_concepts))[:10]
 
             # ── Course intelligence, if she ran it ────────────────────────
             # The report's ordering replaces the arbitrary `set()` ordering
@@ -4667,7 +4531,7 @@ async def generate_diagnostic_quiz(request: DiagnosticQuizRequest):
                 all_topics.extend(insights.get("topics", []))
                 all_concepts.extend(insights.get("concepts", []))
         unique_topics = list(dict.fromkeys(t for t in all_topics if isinstance(t, str) and t.strip()))[:10]
-        unique_concepts = list(set(all_concepts))[:20]
+        unique_concepts = list(dict.fromkeys(all_concepts))[:20]
 
         # Get document content from vectorstore (same as /study/plan, no hard fail)
         document_content = ""
