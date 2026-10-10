@@ -109,7 +109,41 @@ check("the analyzer cannot re-enable a format", merge(profile, {}, analyzer_chan
 profile3, _ = merge({}, parse_changes("Give me 40 questions from these slides, MCQ and SATA only, no ordering questions."))
 check("'only' saves an allow-list", profile3["formats"] == ["mcq", "sata"] and profile3["requestedTotal"] == 40, profile3)
 check("allow-list beats the model's guess", effective_formats(profile3, ["casestudy", "mcq"]) == ["mcq", "sata"])
-check("a one-off 'give me SATA' narrows nothing it wasn't asked to", effective_formats(profile3, None, "give me SATA") == ["mcq", "sata"])
+# 2026-10-10: naming a format is a switch, not an addition (the owner asked for
+# case studies and kept getting 4 select-all in 5). "give me SATA" means SATA.
+check("a one-off 'give me SATA' gives SATA", effective_formats(profile3, None, "give me SATA") == ["sata"])
+check("...naming an excluded format brings it back, as before", effective_formats({"excludedFormats": ["sata"]}, None, "give me SATA") == ["sata"])
+check("...while an excluded format she does not name stays out",
+      "casestudy" not in effective_formats({"excludedFormats": ["casestudy"]}, None, "also add some SATA"))
+
+print("\nNaming a format switches to it; adding words add (2026-10-10)")
+check("'give me case study questions' is case studies only",
+      effective_formats({}, None, "give me case study questions") == ["casestudy"])
+check("'give me 10 case study questions on heart failure' too",
+      effective_formats({}, None, "give me 10 case study questions on heart failure") == ["casestudy"])
+check("the owner's chat (saved SATA + case study) asking for case studies gets case studies",
+      effective_formats({"formats": ["sata", "casestudy"]}, None, "give me case study questions") == ["casestudy"])
+check("'also add some case studies' adds",
+      effective_formats({}, None, "also add some case studies") == ["mcq", "sata", "casestudy"])
+check("'mix in a few ordering questions' adds",
+      effective_formats({}, None, "mix in a few ordering questions") == ["mcq", "sata", "casestudy"])
+c = parse_changes("please make me NCLEX and ATI style , including case studies , NGN-CLEX on cardiac problems")
+check("'including case studies' stays an addition", "only" not in c and "casestudy" in c.get("include", []), c)
+profile_saved, _ = merge({}, parse_changes("give me case study questions"))
+check("the switch is saved for the next batch", profile_saved["formats"] == ["casestudy"], profile_saved)
+check("'more questions' afterwards keeps it", effective_formats(profile_saved, None, "more questions") == ["casestudy"])
+
+print("\nPrioritization is a request for ordering questions (2026-10-10)")
+for phrase in ("quiz me on prioritization", "prioritization questions please", "I want prioritization questions",
+               "give me questions on prioritization and delegation", "who to see first questions",
+               "which patient should the nurse see first questions", "help me prioritize"):
+    check(f"{phrase!r} gives ordering", effective_formats({}, None, phrase) == ["casestudy"], effective_formats({}, None, phrase))
+check("'priority nursing diagnoses for heart failure' is a topic, not a format",
+      parse_changes("give me questions on priority nursing diagnoses for heart failure") == {})
+check("'no prioritization questions' excludes ordering",
+      parse_changes("no prioritization questions").get("exclude") == ["casestudy"])
+check("'add some prioritization' adds",
+      effective_formats({}, None, "add some prioritization questions too") == ["mcq", "sata", "casestudy"])
 
 all_off, _ = merge({}, {"exclude": ["mcq", "sata", "casestudy", "true_false", "matrix", "unfoldingcase"]})
 check("excluding everything still yields a format", effective_formats(all_off) == ["mcq"])

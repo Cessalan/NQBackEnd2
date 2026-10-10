@@ -7138,6 +7138,7 @@ from services.glossary import get_term_definition
 from services.explain import explain_selection
 from services.quiz_rationale import generate_rationale as generate_quiz_rationale
 from services.quiz_walkthrough import generate_walkthrough as generate_quiz_walkthrough
+from services.order_walkthrough import generate_order_walkthrough
 
 class GlossaryRequest(_GlossaryBaseModel):
     term: str
@@ -7205,6 +7206,17 @@ class QuizWalkthroughRequest(_GlossaryBaseModel):
     question: str
     options: _RationaleList[str]
     correct_indices: _RationaleList[int]
+    language: _ExplainOptional[str] = "en"
+
+class OrderWalkthroughRequest(_GlossaryBaseModel):
+    """'Who first?' on a missed ordering question (services/order_walkthrough.py).
+    `items` are the action texts in the stored CORRECT order; the model explains
+    that order, never sets it. `chart` is the plain-text nurse's notes the
+    student saw, which breakdown quotes are checked against."""
+    question: str
+    chart: _ExplainOptional[str] = ""
+    vitals: _ExplainOptional[str] = ""
+    items: _RationaleList[str]
     language: _ExplainOptional[str] = "en"
 
 class QuizExtendRequest(_GlossaryBaseModel):
@@ -7329,6 +7341,24 @@ async def quiz_walkthrough(request: QuizWalkthroughRequest):
         raise HTTPException(status_code=400, detail="correct_indices out of range")
     result = await generate_quiz_walkthrough(
         question, list(request.options), list(request.correct_indices), request.language or "en")
+    return {"walkthrough": result}
+
+@app.post("/quiz/order-walkthrough")
+async def quiz_order_walkthrough(request: OrderWalkthroughRequest):
+    """The "Who first?" walkthrough for one missed ordering question. Like
+    /quiz/walkthrough, `walkthrough: null` is a normal outcome (the model would
+    not defend the key, or its ladder contradicted it)."""
+    question = (request.question or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="question is required")
+    if len(question) > 1500 or len(request.chart or "") > 4000 or len(request.vitals or "") > 2000:
+        raise HTTPException(status_code=400, detail="question or chart too long")
+    if not request.items or not 3 <= len(request.items) <= 8:
+        raise HTTPException(status_code=400, detail="3 to 8 items required")
+    if any(len(i or "") > 300 for i in request.items):
+        raise HTTPException(status_code=400, detail="item too long")
+    result = await generate_order_walkthrough(
+        question, request.chart or "", list(request.items), request.vitals or "", request.language or "en")
     return {"walkthrough": result}
 
 # ============================================================================

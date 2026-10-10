@@ -76,6 +76,41 @@ class NursingTutor:
         re.IGNORECASE
     )
 
+    # A short message that ASKS FOR a question format is a quiz request, even
+    # without the word "quiz": "give me case study" matched no fast pattern,
+    # went to the routing model, and came back as a written scenario with
+    # discussion questions instead of an interactive case-study card (owner,
+    # 2026-10-10). The format words are practice_profile's own, so routing and
+    # the format that gets generated cannot drift apart. A question ABOUT a
+    # format ("how do I answer case study questions?") is not a request.
+    FORMAT_REQUEST_VERB = re.compile(
+        r"\b(?:give|make|create|generate|send|want|need|do|can\s+i\s+(?:have|get)|let'?s|practice|practise|"
+        r"more|another|some|drill|quiz|test|questions?|donne|fais|cr[ée]e|g[ée]n[èe]re|veux|besoin)\b",
+        re.IGNORECASE)
+    ABOUT_FORMAT = re.compile(
+        r"^\s*(?:what|how|why|when|which\s+is|is|are|does|do\s+i|should|explain|tell\s+me\s+about|"
+        r"teach|qu'?est|comment|pourquoi|explique)\b", re.IGNORECASE)
+    # Her OWN case study (homework, an assignment, one she pasted) is help
+    # with that material, not a request for generated questions, wherever the
+    # word sits: "I have a case study assignment, can you make it easier".
+    OWN_MATERIAL = re.compile(
+        r"\b(?:assignment|homework|devoir|help\s+me\s+(?:understand|with)|understand|comprendre|"
+        r"(?:my|this|the\s+following|attached)\s+(?:case\s+stud(?:y|ies)|scenario)|"
+        r"case\s+stud(?:y|ies)\s+(?:below|above|attached))\b", re.IGNORECASE)
+    FORMAT_REQUEST_MAX_CHARS = 160
+
+    @classmethod
+    def _is_format_request(cls, user_input: str) -> bool:
+        from services import practice_profile as pp
+        text = (user_input or "").strip()
+        if (not text or len(text) > cls.FORMAT_REQUEST_MAX_CHARS or cls.ABOUT_FORMAT.search(text)
+                or cls.OWN_MATERIAL.search(text)):
+            return False
+        changes = pp.parse_changes(text)
+        if not changes.get("include"):
+            return False  # names no format, or only excludes one ("no case studies")
+        return bool(cls.FORMAT_REQUEST_VERB.search(text)) or len(text.split()) <= 4
+
     # ========================================================================
     # ANSWER DISCIPLINE
     # ========================================================================
@@ -270,6 +305,12 @@ class NursingTutor:
         if self.SUMMARIZE_PATTERNS.search(user_input):
             print(f"⚡ FAST ROUTE: Detected summarize pattern")
             return "summarize_document"
+
+        # A request for a question format ("give me case study", "quiz me on
+        # prioritization", "SATA please") is a quiz, though it may not say so.
+        if self._is_format_request(user_input):
+            print(f"⚡ FAST ROUTE: Detected question-format request in '{user_input[:50]}...'")
+            return "generate_quiz_stream"
 
         # Quiz / test / exam — broadest content pattern, checked last
         if self.QUIZ_PATTERNS.search(user_input):

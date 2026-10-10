@@ -51,7 +51,17 @@ _FORMAT_PATTERNS = {
     "casestudy": re.compile(
         r"case[\s-]?stud(?:y|ies)|casestudy|\bordering\b|\bin\s+order\b|\bin\s+the\s+(?:right|correct)\s+order\b"
         r"|\b(?:put|place|arrange|rank|sort)\w*\s+(?:\w+\s+){0,3}in\s+(?:the\s+)?(?:right\s+|correct\s+)?order"
-        r"|drag[\s-]*(?:and|&|n)?[\s-]*drop|\bbow[\s-]?tie\b|\bngn\b|next[\s-]gen",
+        r"|drag[\s-]*(?:and|&|n)?[\s-]*drop|\bbow[\s-]?tie\b|\bngn\b|next[\s-]gen"
+        # Prioritization is asked for as a FORMAT ("quiz me on prioritization",
+        # "who to see first questions") and was matched by nothing, so it fell
+        # back to MCQ + SATA (owner, 2026-10-10). It means the ordering
+        # question, which now carries the "Who first?" walkthrough. Bare
+        # "priority" is left out on purpose: "priority nursing diagnoses for
+        # heart failure" is a topic, not a format.
+        r"|\bprioriti[sz]\w*|\bpriorit(?:y|ies)\s+(?:questions?|quiz|practice|ordering)\b"
+        r"|\bwho\s+(?:do\s+(?:you|i)\s+|to\s+|would\s+you\s+|should\s+(?:you|i|the\s+nurse)\s+)?(?:see|assess|attend\s+to|treat|prioriti[sz]e)\s+first\b"
+        r"|\bwhich\s+(?:patient|client)s?\s+(?:\w+\s+){0,4}first\b"
+        r"|[ée]tudes?\s+de\s+cas|\bpriorisation\b|\bprioris(?:er|e)\b|\bmettre\s+en\s+ordre\b",
         re.I),
     "sata": re.compile(r"\bsatas?\b|select[\s-]+all|multiple\s+(?:correct|answers)", re.I),
     "mcq": re.compile(r"\bmcqs?\b|multiple[\s-]*choice|single[\s-]answer", re.I),
@@ -60,6 +70,14 @@ _NEGATION = re.compile(
     r"\b(?:no|not|don'?t|dont|do\s+not|stop|without|never|avoid|exclude|skip|remove|less|fewer|hate|dislike|none\s+of)\b"
     r"|\bno\s+more\b|\bwant\s+no\b", re.I)
 _ONLY = re.compile(r"\b(?:only|just|exclusively|nothing\s+but)\b", re.I)
+# Words that make a format request an ADDITION to the current mix. Without
+# one, naming a format is a switch: "give me case study questions" used to be
+# read as "add case study", which the batch split turned into 1 case study in
+# 5 (4 select-all in a chat whose mix was SATA + case study), saved for every
+# later batch (owner, 2026-10-10). "including case studies" and "you can
+# include ordering questions again" stay additions.
+_ADDITIVE = re.compile(
+    r"\b(?:includ\w*|also|add|adding|mix\w*|again|as\s+well|too|a\s+few|throw\s+in|along\s+with|on\s+top)\b", re.I)
 _BULLET = re.compile(r"^\s*(?:[-*•▪◦]|\d{1,2}[.)])\s+")
 _HEADING = re.compile(r"^\s*(?:#{1,4}\s+|\*\*|__)(.+?)(?:\*\*|__)?\s*:?\s*$")
 _CLAUSE_SPLIT = re.compile(r"[.;!?\n,]+|\bbut\b|\binstead\b|\bplus\b", re.I)
@@ -134,9 +152,10 @@ def parse_changes(text):
     if exclude:
         changes["exclude"] = exclude
     if include:
-        if only_hit or exclude:
+        if only_hit or exclude or not _ADDITIVE.search(text):
             # "MCQ and SATA only, no ordering" is a complete statement of
-            # what she wants, not just an addition.
+            # what she wants, not just an addition. So is plainly naming a
+            # format: "give me case study questions" means case studies.
             changes["only"] = include
         changes["include"] = include
 
