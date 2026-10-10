@@ -5,7 +5,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from core.material_model import service_tier_for_chat
+from core.material_model import MODEL_POLICY, service_tier_for_chat
 from core.material_loader import TeachingMaterialLoader, describe_visual
 from services.document_understanding import MaterialError, analyse_document, model_json, fingerprint
 from services.material_practice import stream_material_practice, plan_key
@@ -78,13 +78,13 @@ class RequestTests(unittest.TestCase):
                     self.assertNotIn('temperature', body)
                     self.assertNotIn('max_tokens', body)
 
-    def test_visual_input_uses_pro_tier_and_medium_reasoning(self):
+    def test_visual_input_uses_pro_tier_and_visual_reasoning_policy(self):
         loader = TeachingMaterialLoader('test.docx', service_tier='fast')
         text = loader._describe_visual(b'test-image', 'image/png', 'Figure')
         self.assertIn('Labels A and B', text)
         body = self.requests[-1]
         self.assertEqual(body['service_tier'], 'fast')
-        self.assertEqual(body['reasoning_effort'], 'medium')
+        self.assertEqual(body['reasoning_effort'], MODEL_POLICY['visualReasoning'])
         self.assertEqual(body['messages'][1]['content'][1]['type'], 'image_url')
 
     def test_numbered_passages_send_every_source_character_only_once(self):
@@ -124,7 +124,7 @@ class WorkflowRoutingTests(unittest.TestCase):
             self.assertGreater(call.await_count, 1)
             for invocation in call.await_args_list:
                 self.assertEqual(invocation.kwargs['service_tier'], 'fast')
-                self.assertEqual(invocation.kwargs['reasoning_effort'], 'medium')
+                self.assertEqual(invocation.kwargs['reasoning_effort'], MODEL_POLICY['analysisReasoning'])
 
     def test_plan_and_question_stages_route_by_membership_not_client_settings(self):
         analysis = {'filename':'notes', 'fingerprint':'abc', 'goals':[
@@ -153,7 +153,7 @@ class WorkflowRoutingTests(unittest.TestCase):
 
     def test_cache_identity_tracks_model_policy_without_membership(self):
         before = fingerprint('Source notes')
-        with patch.dict('core.material_model.MODEL_POLICY', {'analysisReasoning':'low'}):
+        with patch.dict('core.material_model.MODEL_POLICY', {'analysisReasoning':'high'}):
             self.assertNotEqual(before, fingerprint('Source notes'))
         settings = {'scope':'Topic'}
         before = plan_key([], settings)

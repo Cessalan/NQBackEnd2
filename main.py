@@ -2380,18 +2380,30 @@ def _language_for_prompt(lang_code: str) -> str:
     return mapping.get(code, lang_code)
 
 
-async def extract_file_insights_from_text(text, filename, chat_id, file_id, updates, language="english"):
-    """Analyse the full ordered material; project legacy insights for existing UI."""
-    from services.document_understanding import analyse_document, display_insights
+async def extract_file_insights_from_text(text, filename, chat_id, file_id, updates, language="english",
+                                         index_fingerprint=None):
+    """Quick topics for the upload card now; the full analysis finishes in the background.
+
+    2026-10-08: the upload used to wait 8-10s for the full analysis. It now
+    waits only for quick_overview (about the old flow's speed), while the full
+    analysis keeps running; quizzes reuse that run (document_understanding).
+    """
+    from services.document_understanding import display_insights, quick_overview, start_background_analysis
     updates.append({"type": "insight_extraction_start", "file_id": file_id, "filename": filename})
-    def progress(section, total):
-        updates.append({"type": "material_analysis_progress", "file_id": file_id,
-                        "filename": filename, "section": section, "total": total})
-    analysis = await analyse_document(text, filename, chat_id=chat_id,
-                                      language=language, progress=progress)
-    if chat_id in ACTIVE_SESSIONS:
-        ACTIVE_SESSIONS[chat_id].session.material_analysis[filename] = analysis
-    insights = display_insights(analysis)
+
+    def analysed(analysis):
+        session = ACTIVE_SESSIONS.get(chat_id)
+        if session is None:
+            return  # saved to Firestore by analyse_document; reloaded on demand
+        session.session.material_analysis[filename] = analysis
+        # Chapter groups for practice coverage; the card already showed its preview.
+        insights = getattr(session.session, "file_insights", {}) or {}
+        if filename in insights:
+            insights[filename]["mainTopics"] = display_insights(analysis)["mainTopics"]
+
+    start_background_analysis(text, filename, chat_id=chat_id, language=language,
+                              index_fingerprint=index_fingerprint, on_done=analysed)
+    insights = await quick_overview(text, filename, language=language)
     insights['frameworks'] = detect_frameworks(text)
     updates.append({"type": "insight_batch", "file_id": file_id, "filename": filename,
                     **insights})
@@ -2559,15 +2571,16 @@ async def embed_document_task(temp_path: str, filename: str, chat_id: str, file_
         # ========================================
         # 🆕 START INSIGHT EXTRACTION IN PARALLEL
         # ========================================
+        from services.document_understanding import fingerprint
+        revision = fingerprint(text)
         insight_task = asyncio.create_task(
-            extract_file_insights_from_text(text, filename, chat_id, file_id, updates, language)
+            extract_file_insights_from_text(text, filename, chat_id, file_id, updates, language,
+                                            index_fingerprint=revision)
         )
         
         # ========================================
         # CONTINUE WITH EMBEDDING (PARALLEL)
         # ========================================
-        from services.document_understanding import fingerprint
-        revision = fingerprint(text)
         # Exact offsets preserve all extracted text across reloads.
         chunks = [text[start:start + 1000] for start in range(0, len(text), 800)]
         
@@ -2598,8 +2611,8 @@ async def embed_document_task(temp_path: str, filename: str, chat_id: str, file_
         vectors = await embeddings.aembed_documents(texts)
         text_embeddings = list(zip(texts, vectors))
 
-        # Analysis must pass before committing the upload or telling the UI it
-        # is ready. Embedding and analysis still run concurrently above.
+        # The quick overview is all the upload waits for; the full analysis
+        # runs on in the background (extract_file_insights_from_text).
         insights = await insight_task
 
         # Get session
@@ -7124,6 +7137,7 @@ from pydantic import BaseModel as _GlossaryBaseModel
 from services.glossary import get_term_definition
 from services.explain import explain_selection
 from services.quiz_rationale import generate_rationale as generate_quiz_rationale
+from services.quiz_walkthrough import generate_walkthrough as generate_quiz_walkthrough
 
 class GlossaryRequest(_GlossaryBaseModel):
     term: str
@@ -7183,6 +7197,14 @@ class QuizRationaleRequest(_GlossaryBaseModel):
     question: str
     options: _RationaleList[str]
     correct_index: int
+    language: _ExplainOptional[str] = "en"
+
+class QuizWalkthroughRequest(_GlossaryBaseModel):
+    """'Show me how' on a missed select-all question (services/quiz_walkthrough.py).
+    `correct_indices` is the stored answer key; the model explains it, never sets it."""
+    question: str
+    options: _RationaleList[str]
+    correct_indices: _RationaleList[int]
     language: _ExplainOptional[str] = "en"
 
 class QuizExtendRequest(_GlossaryBaseModel):
@@ -7288,6 +7310,26 @@ async def quiz_rationale(request: QuizRationaleRequest):
     except Exception as e:
         print(f"⚠️ Quiz rationale failed for {question[:60]!r}: {e}")
         raise HTTPException(status_code=500, detail="quiz rationale failed")
+
+
+@app.post("/quiz/walkthrough")
+async def quiz_walkthrough(request: QuizWalkthroughRequest):
+    """The teaching walkthrough for one missed question. 200 with
+    `walkthrough: null` when none can be shown (model failure, or it
+    disagreed with the key): the frontend then keeps today's explanation,
+    so an unavailable walkthrough is a normal outcome, not an error."""
+    question = (request.question or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="question is required")
+    if len(question) > 1500:
+        raise HTTPException(status_code=400, detail="question too long")
+    if not request.options or not 2 <= len(request.options) <= 8:
+        raise HTTPException(status_code=400, detail="2 to 8 options required")
+    if not request.correct_indices or any(i < 0 or i >= len(request.options) for i in request.correct_indices):
+        raise HTTPException(status_code=400, detail="correct_indices out of range")
+    result = await generate_quiz_walkthrough(
+        question, list(request.options), list(request.correct_indices), request.language or "en")
+    return {"walkthrough": result}
 
 # ============================================================================
 # QUESTION BANK IMPORT ENDPOINT

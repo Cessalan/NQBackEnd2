@@ -174,6 +174,47 @@ class GenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sources[0]['page'], 1)
         self.assertNotIn('page', sources[1])
 
+    def test_a_request_that_names_no_subject_covers_every_file(self):
+        from services.studysheet_simple import covers_all_files
+        for request in ['create me a study sheet', 'Make a sheet', 'study sheet please',
+                        'Fais-moi une fiche d’étude', 'Create a study sheet summarizing the uploaded documents']:
+            self.assertTrue(covers_all_files(request), request)
+        for request in ['create me a study sheet on ABCDE', 'study sheet for nephrotic syndrome',
+                        'fais une fiche sur les reins']:
+            self.assertFalse(covers_all_files(request), request)
+
+    async def test_unscoped_request_retrieves_from_every_file(self):
+        from services.studysheet_simple import SimpleStudySheetGenerator
+        generator = SimpleStudySheetGenerator.__new__(SimpleStudySheetGenerator)
+        asked = []
+        class Store:
+            def similarity_search(self, query, k):
+                asked.append(query)
+                return [SimpleNamespace(page_content=f'Passage for {query}', metadata={'source': 'x.pdf'})]
+        generator.session = SimpleNamespace(vectorstore=Store(), file_insights={
+            'Évaluation (C)ABCDE.pdf': {'topics': ['Airway', 'Breathing']},
+            'Kidney_Disorders.pdf': {'topics': ['Nephrotic syndrome']}})
+        await generator._get_document_context('Kidney Disorders', 'create me a study sheet', {})
+        self.assertIn('Évaluation (C)ABCDE.pdf', asked)
+        self.assertIn('Airway', asked)
+        self.assertIn('Nephrotic syndrome', asked)
+        asked.clear()
+        await generator._get_document_context('Kidney Disorders', 'study sheet on nephrotic syndrome', {})
+        self.assertEqual(len(asked), 1)
+
+    async def test_unscoped_request_replaces_the_routers_file_title(self):
+        from services.studysheet_simple import SimpleStudySheetGenerator
+        generator = SimpleStudySheetGenerator.__new__(SimpleStudySheetGenerator)
+        generator.session = SimpleNamespace(vectorstore=None, documents=[], file_insights={})
+        seen = {}
+        async def plan(payload):
+            seen.update(payload)
+            raise RuntimeError('stop here')
+        generator._plan = plan
+        [e async for e in generator.generate_study_sheet_stream(
+            'Kidney Disorders & Filtration', user_request='create me a study sheet', chat_context={})]
+        self.assertEqual(seen['topicHint'], 'All uploaded documents')
+
     async def test_source_review_keeps_supported_facts_and_labels_extra_details(self):
         from services.studysheet_simple import SimpleStudySheetGenerator
         generator = SimpleStudySheetGenerator.__new__(SimpleStudySheetGenerator)
@@ -207,14 +248,47 @@ class GenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(sheet['sections']), 1)
         self.assertEqual(sheet['sections'][0]['title'], 'Learn the concept')
 
-    def test_scope_plan_rejects_unanswered_quizzes_and_duplicate_reviews(self):
+    def test_scope_plan_drops_unanswered_quizzes_and_duplicate_reviews(self):
+        # An unanswered quiz must never become a "mistake", and a quiz gets one
+        # review. Since 2026-10-09 these are dropped rather than failing the sheet.
         from services.studysheet_simple import SimpleStudySheetGenerator
         payload = {'priorities': [], 'quizzes': [{'sourceId': 'Q1', 'answered': 0}]}
         plan = {'priorityIds': [], 'quizIds': ['Q1'], 'includeSelfCheck': False, 'practiceReviews': [{'quizId': 'Q1', 'text': 'Review'}]}
-        with self.assertRaises(ValueError): SimpleStudySheetGenerator._validate_scope_plan(plan, payload)
+        result = SimpleStudySheetGenerator._validate_scope_plan(dict(plan), payload)
+        self.assertEqual(result['quizIds'], [])
+        self.assertEqual(result['practiceReviews'], [])
         payload['quizzes'][0]['answered'] = 1
-        plan['practiceReviews'] *= 2
-        with self.assertRaises(ValueError): SimpleStudySheetGenerator._validate_scope_plan(plan, payload)
+        plan['practiceReviews'] = [{'quizId': 'Q1', 'text': 'First'}, {'quizId': 'Q1', 'text': 'Second'}]
+        result = SimpleStudySheetGenerator._validate_scope_plan(dict(plan), payload)
+        self.assertEqual(result['quizIds'], ['Q1'])
+        self.assertEqual([r['text'] for r in result['practiceReviews']], ['First'])
+
+    def test_scope_plan_survives_ids_copied_from_the_prompt_example(self):
+        # The 2026-10-09 failure: no priorities or quizzes in the chat, but the
+        # planner returned the prompt's example IDs. The sheet must still build.
+        from services.studysheet_simple import SimpleStudySheetGenerator
+        plan = {'language': 'english', 'scope': 'Kidney', 'priorityIds': ['P1'], 'quizIds': ['Q1'],
+                'includeSelfCheck': True, 'practiceReviews': [{'quizId': 'Q1', 'title': 'x', 'text': 'Invented review'}]}
+        result = SimpleStudySheetGenerator._validate_scope_plan(plan, {'priorities': [], 'quizzes': []})
+        self.assertEqual((result['priorityIds'], result['quizIds'], result['practiceReviews']), ([], [], []))
+        self.assertEqual(result['scope'], 'Kidney')
+
+    def test_scope_plan_keeps_a_quiz_only_with_its_review(self):
+        from services.studysheet_simple import SimpleStudySheetGenerator
+        payload = {'priorities': [{'sourceId': 'P1'}], 'quizzes': [{'sourceId': 'Q1', 'answered': 3}, {'sourceId': 'Q2', 'answered': 2}]}
+        plan = {'priorityIds': ['P1', 'P9'], 'quizIds': ['Q1', 'Q2'], 'includeSelfCheck': 'yes',
+                'practiceReviews': [{'quizId': 'Q2', 'text': 'Distinction to remember'}]}
+        result = SimpleStudySheetGenerator._validate_scope_plan(plan, payload)
+        self.assertEqual(result['priorityIds'], ['P1'])
+        self.assertEqual(result['quizIds'], ['Q2'])
+        self.assertIs(result['includeSelfCheck'], True)
+
+    def test_fallback_plan_json_is_read_through_fences_and_prose(self):
+        from services.studysheet_simple import _json_object
+        body = '{"scope": "Renal", "priorityIds": []}'
+        newline = chr(10)
+        self.assertEqual(_json_object('```json' + newline + body + newline + '```')['scope'], 'Renal')
+        self.assertEqual(_json_object('Here is the plan:' + newline + body + newline + 'Done.')['scope'], 'Renal')
 
     async def test_planning_fallback_preserves_the_requested_scope(self):
         from services.studysheet_simple import SimpleStudySheetGenerator

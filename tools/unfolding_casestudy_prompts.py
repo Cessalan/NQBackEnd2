@@ -74,6 +74,7 @@ USAGE:
 
 from langchain.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
+from core.quiz_model import quiz_chat_model
 from langchain_core.output_parsers import StrOutputParser
 import json
 import random
@@ -319,7 +320,7 @@ async def generate_unfolding_casestudy(
 
     # Use GPT-4o for complex multi-item generation
     # Temperature 0.7 balances creativity with consistency
-    llm = ChatOpenAI(model="gpt-4.1", temperature=0.7)
+    llm = quiz_chat_model(timeout=150)  # Luna; fast tier for Pro. Six items: longer output.
     chain = prompt | llm | StrOutputParser()
 
     try:

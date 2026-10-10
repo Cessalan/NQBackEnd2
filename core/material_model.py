@@ -3,7 +3,12 @@ import logging
 
 logger = logging.getLogger('uvicorn.error.material_model')
 MODEL = 'gpt-6-luna'
-MODEL_POLICY = {'model': MODEL, 'analysisReasoning': 'medium',
+# 2026-10-08: analysis and figure reading moved to low reasoning. On a real
+# 4-page handout (tools/time_upload_variants.py) analysis went 15.9s -> 9.3s
+# with the same coverage (29 -> 30 learning goals), and a figure 7-10s -> ~5s.
+# Changing this policy changes every analysis fingerprint, so each saved
+# document is re-analysed once, on its next use.
+MODEL_POLICY = {'model': MODEL, 'analysisReasoning': 'low', 'visualReasoning': 'low',
                 'planReasoning': 'medium', 'draftReasoning': 'low',
                 'verificationReasoning': 'medium'}
 

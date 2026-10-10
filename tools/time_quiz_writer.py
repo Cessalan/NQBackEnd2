@@ -1,6 +1,8 @@
-"""Time the quiz writer (concept pick + 5 parallel MCQs) on different models.
+"""Time and validate every quiz question type on the live quiz model.
 
-Read-only: makes the generator's real calls, writes nothing.
+Runs the real generators through core/quiz_model.py on the default tier (free
+students) and the fast tier (Pro), so a model change shows up here first.
+Read-only: makes model calls, writes nothing.
 Usage: venv/Scripts/python tools/time_quiz_writer.py
 """
 import asyncio
@@ -12,9 +14,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dotenv import load_dotenv
 load_dotenv()
 
-import langchain_openai
+from core.quiz_model import use_quiz_tier, quiz_chat_model
 from services import quiz_with_bank
 from tools import quiztools
+from tools.sata_prompts import generate_sata_question
+from tools.casestudy_prompts import generate_casestudy_question
+from tools.unfolding_casestudy_prompts import generate_unfolding_casestudy
 
 CONTENT = """Document content:
 Primary survey (C)ABCDE. C - Catastrophic haemorrhage: control massive external bleeding first with direct
@@ -26,52 +31,54 @@ skin colour, two large-bore IV lines, warmed fluids; no central pulse means star
 D - Disability: GCS, pupils, blood glucose. E - Exposure: remove clothing, inspect, prevent hypothermia.
 Secondary survey. MIST handover: Mechanism, Injuries, Signs, Treatment. SAMPLE history: Signs and symptoms,
 Allergies, Medications, Past history, Last meal, Events. Reassess ABCDE after every intervention."""
-
-REAL = langchain_openai.ChatOpenAI
-
-
-def factory(model, tier=None):
-    def make(*args, **kwargs):
-        kwargs['model'] = model
-        if model.startswith('gpt-6'):
-            # Reasoning model: no sampling parameters; low effort for speed.
-            kwargs.pop('temperature', None)
-            kwargs['reasoning_effort'] = 'low'
-            if tier:
-                kwargs['service_tier'] = tier
-        return REAL(**kwargs)
-    return make
+TOPIC = 'Trauma primary survey'
 
 
-async def one_quiz():
+async def timed(coro):
     start = time.perf_counter()
-    concepts, modes = await quiz_with_bank._extract_concepts_for_mode_plan(
-        content_context=CONTENT, topic='Primary and secondary survey', mode_sequence=['knowledge'] * 5,
-        language='english', learning_objective='exam_prep')
-    picked = time.perf_counter()
-    questions = await asyncio.gather(*(quiztools._generate_single_question(
+    try:
+        result = await coro
+        return time.perf_counter() - start, result, None
+    except Exception as error:  # noqa: BLE001 - report every failure, keep going
+        return time.perf_counter() - start, None, f'{type(error).__name__}: {str(error)[:160]}'
+
+
+def valid(result, key='question'):
+    return isinstance(result, dict) and bool(result.get(key) or result.get('scenario'))
+
+
+async def run_tier(tier):
+    use_quiz_tier(tier)
+    model = quiz_chat_model()
+    print(f'\n### tier={tier} model={model.model_name} service_tier={getattr(model, "service_tier", None)}')
+
+    pick, picked, error = await timed(quiz_with_bank._extract_concepts_for_mode_plan(
+        content_context=CONTENT, topic=TOPIC, mode_sequence=['knowledge'] * 5,
+        language='english', learning_objective='exam_prep'))
+    concepts = (picked or ([], []))[0]
+    print(f'  {pick:5.2f}s concept pick: {len(concepts)} concepts {error or ""}')
+
+    start = time.perf_counter()
+    mcqs = await asyncio.gather(*(quiztools._generate_single_question(
         content=CONTENT, topic=c, difficulty='medium', question_num=i + 1, language='english',
-        quiz_mode='knowledge', learning_objective='exam_prep') for i, c in enumerate(concepts)))
-    done = time.perf_counter()
-    ok = sum(1 for q in questions if isinstance(q, dict) and q.get('question'))
-    return picked - start, done - picked, ok, len(concepts), (questions[0] or {}).get('question', '')[:90]
+        quiz_mode='knowledge', learning_objective='exam_prep') for i, c in enumerate(concepts)), return_exceptions=True)
+    ok = sum(1 for q in mcqs if valid(q))
+    print(f'  {time.perf_counter() - start:5.2f}s 5 MCQs in parallel: {ok}/{len(mcqs)} valid')
+
+    for label, coro in (
+        ('SATA', generate_sata_question(topic=TOPIC, difficulty='medium', question_num=1, language='english',
+                                        content_context=CONTENT)),
+        ('ordering case', generate_casestudy_question(topic=TOPIC, difficulty='medium', question_num=1,
+                                                      language='english', content_context=CONTENT)),
+        ('unfolding case', generate_unfolding_casestudy(topic=TOPIC, difficulty='medium', language='english')),
+    ):
+        seconds, result, error = await timed(coro)
+        print(f'  {seconds:5.2f}s {label}: {"valid" if valid(result) else "INVALID"} {error or ""}')
 
 
 async def main():
-    variants = [('gpt-4.1-mini (shipped)', 'gpt-4.1-mini', None),
-                ('gpt-6-luna default tier', 'gpt-6-luna', 'default'),
-                ('gpt-6-luna fast tier', 'gpt-6-luna', 'fast')]
-    for label, model, tier in variants:
-        for run in range(2):
-            quiz_with_bank.ChatOpenAI = factory(model, tier)
-            quiztools.ChatOpenAI = factory(model, tier)
-            try:
-                pick, write, ok, n, sample = await one_quiz()
-                print(f"{label:24s} pick {pick:5.2f}s  write {write:5.2f}s  total {pick + write:5.2f}s  ok {ok}/{n} | {sample}")
-            except Exception as error:
-                print(f"{label:24s} FAILED {type(error).__name__}: {str(error)[:200]}")
-    quiz_with_bank.ChatOpenAI = REAL
-    quiztools.ChatOpenAI = REAL
+    for tier in (os.getenv('TIERS', 'default,fast').split(',')):
+        await run_tier(tier)
 
 
 asyncio.run(main())

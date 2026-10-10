@@ -3,6 +3,7 @@ from datetime import datetime
 from langchain_core.tools import tool
 from models.session import PersistentSessionContext
 from langchain_openai import ChatOpenAI
+from core.quiz_model import quiz_chat_model
 # Manual prompt variable injection, including memory if used (ideal for custom stuff)
 from langchain.chains import LLMChain
 from langchain.prompts import PromptTemplate
@@ -327,9 +328,10 @@ async def generate_study_sheet_stream(
     - Document summaries (use summarize_document)
     
     Args:
-        topic: The topic to create a study guide for
+        topic: The topic the student named. If they named none ("make me a study
+            sheet"), pass "all uploaded documents"; never substitute a file's title.
         num_sections: Number of sections (default 6)
-    
+
     Returns:
         dict with type "study_guide_trigger" to initiate progressive loading
     """
@@ -2235,8 +2237,8 @@ async def _generate_single_question(
         learning_objective_instruction=learning_objective_instruction
     )
 
-    # Cheap model with reliable JSON output; QUIZ_GENERATION_MODEL overrides it.
-    llm = ChatOpenAI(model=os.getenv("QUIZ_GENERATION_MODEL", "gpt-4.1-mini"), temperature=0.7)
+    # Luna, on the fast tier for Pro members (core/quiz_model.py).
+    llm = quiz_chat_model()
     chain = prompt | llm | StrOutputParser()
 
     try:

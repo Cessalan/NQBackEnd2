@@ -37,7 +37,7 @@ class MaterialUploadCommitTests(unittest.TestCase):
 
     def test_rejected_analysis_never_changes_existing_index_or_reports_upload_ready(self):
         for store in (None, MagicMock()):
-            async def fail(*args):
+            async def fail(*args, **kwargs):
                 raise MaterialError('Unsupported source evidence')
             upload, faiss, session = self.build_upload(fail, store)
             updates = []
@@ -51,7 +51,7 @@ class MaterialUploadCommitTests(unittest.TestCase):
 
     def test_success_commits_and_reports_ready_only_after_analysis_has_passed(self):
         completed = []
-        async def insights(*args):
+        async def insights(*args, **kwargs):
             await asyncio.sleep(0)
             completed.append(True)
             return {'topics': ['Synthetic topic']}
@@ -69,7 +69,7 @@ class MaterialUploadCommitTests(unittest.TestCase):
 
     def test_embedding_failure_cancels_and_drains_pending_analysis(self):
         stopped = []
-        async def insights(*args):
+        async def insights(*args, **kwargs):
             try:
                 await asyncio.Event().wait()
             except asyncio.CancelledError:

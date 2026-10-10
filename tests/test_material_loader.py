@@ -76,5 +76,68 @@ class LoaderTests(unittest.TestCase):
             self.assertIn('S | Situation',text)
             self.assertIn('Exam instruction: recognize each SBAR component.',text)
 
+    def test_plain_text_pages_with_table_rules_are_not_sent_as_images(self):
+        # 2026-10-08: a 4-page handout sent every page to the vision model
+        # because table borders count as drawings; 34s before analysis began.
+        import fitz
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)/'handout.pdf'
+            document = fitz.open()
+            for index in range(3):
+                page = document.new_page()
+                page.insert_textbox(fitz.Rect(40, 40, 560, 780), ' '.join(['Airway breathing circulation disability exposure.'] * 20), fontsize=9)
+                page.draw_rect(fitz.Rect(30, 30, 560, 400))          # a table border: a drawing, not an image
+            sparse = document.new_page()
+            sparse.draw_line((40, 40), (300, 300))                     # a diagram with almost no text
+            sparse.insert_text((40, 320), 'Fig 1')
+            document.save(path); document.close()
+            with patch('core.material_loader.describe_visual', return_value='diagram described') as read:
+                pages = TeachingMaterialLoader(str(path))._pdf()
+            self.assertEqual(read.call_count, 1)
+            self.assertEqual(read.call_args.args[2], 'PDF page 4')
+            self.assertIn('diagram described', pages[3])
+            self.assertTrue(all('\x00' not in page for page in pages))
+
+    def test_figures_are_described_concurrently_and_land_in_order(self):
+        import threading, time
+        from core import material_loader
+        active, peak, lock = [0], [0], threading.Lock()
+        def slow(data, mime, label, **kwargs):
+            with lock:
+                active[0] += 1; peak[0] = max(peak[0], active[0])
+            time.sleep(0.05)
+            with lock:
+                active[0] -= 1
+            return f'described {label}'
+        loader = TeachingMaterialLoader('deck.pptx')
+        parts = [f'[Slide {i}] ' + loader._queue_visual(b'x', 'image/png', f'figure {i}') for i in range(6)]
+        with patch('core.material_loader.describe_visual', side_effect=slow):
+            resolved = loader._resolve_visuals(parts)
+        self.assertEqual(resolved, [f'[Slide {i}] described figure {i}' for i in range(6)])
+        self.assertGreater(peak[0], 1)
+        self.assertLessEqual(peak[0], material_loader.VISUAL_WORKERS)
+
+    def test_a_header_logo_does_not_send_a_text_page_to_the_vision_model(self):
+        import fitz
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); logo = root/'logo.png'
+            Image.new('RGB', (252, 126), 'green').save(logo)
+            body = ' '.join(['Primary survey: catastrophic haemorrhage first, then airway.'] * 20)
+            document = fitz.open()
+            header = document.new_page()
+            header.insert_image(fitz.Rect(40, 30, 160, 90), filename=str(logo))       # letterhead logo
+            header.insert_textbox(fitz.Rect(40, 120, 560, 780), body, fontsize=9)
+            figure = document.new_page()
+            figure.insert_textbox(fitz.Rect(40, 40, 560, 300), body, fontsize=9)
+            figure.insert_image(fitz.Rect(200, 360, 320, 420), filename=str(logo))    # same size, mid-page
+            path = root/'handout.pdf'; document.save(path); document.close()
+            with patch('core.material_loader.describe_visual', return_value='figure described') as read:
+                pages = TeachingMaterialLoader(str(path))._pdf()
+            self.assertEqual(read.call_count, 1)
+            self.assertEqual(read.call_args.args[2], 'PDF page 2')
+            self.assertNotIn('figure described', pages[0])
+            self.assertIn('figure described', pages[1])
+
 
 if __name__ == '__main__': unittest.main()

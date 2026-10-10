@@ -102,6 +102,54 @@ Ordinary worked examples, general misconceptions and self-check questions are no
 feedback. Examine sectionTitle as well as the block's text."""
 
 
+ALL_FILES_TOPIC = {'english': 'All uploaded documents', 'french': 'Tous les documents téléversés'}
+
+_BROAD_REQUEST = re.compile(r"all (?:my |the )?(?:notes|files|documents|material|content)|uploaded documents|"
+                            r"tout(?:es)? (?:les |mes )|documents téléversés", re.I)
+
+# Words that ask for a sheet without saying what it is about. A request made
+# only of these names no subject.
+_REQUEST_FILLER = set("""
+a an the me us my our your this that it new another one some please pls plz can could would will you i we
+want need like give make create generate build write do get prepare produce study sheet sheets guide guides
+summary summarize summarise revision review notes note cheat for of on to from based about with and
+fais fait faire fait-moi moi crée créer créez génère générer prépare préparer une un la le les des de du
+d étude etude d'étude révision resume résumé fiche fiches peux pouvez tu vous svp stp sur avec pour mes
+""".split())
+
+
+def covers_all_files(request):
+    """True when a study-sheet request should cover every uploaded file.
+
+    2026-10-09, chat DUaslMLdRZIvCJrwjOhF: two PDFs (ABCDE assessment, kidney
+    disorders), the student typed "create me a study sheet", and the tool
+    router filled `topic` with the newer file's title. Retrieval and the
+    planner both treated that title as the scope and the ABCDE file never
+    appeared. A request that names nothing is a request for everything.
+    """
+    request = str(request or '')
+    if _BROAD_REQUEST.search(request):
+        return True
+    words = re.findall(r"[^\W\d_]+(?:['’][^\W\d_]+)?", request.lower())
+    return not [w for w in words if w.replace('’', "'") not in _REQUEST_FILLER]
+
+
+def _json_object(text):
+    """The JSON object in a model reply, with or without code fences or a
+    sentence around it. Claude's planning fallback returned fenced JSON, and a
+    bare json.loads on it was the second half of the 2026-10-09 failure."""
+    text = str(text or '').strip()
+    if text.startswith('```'):
+        text = re.sub(r'^```(?:json)?\s*|\s*```$', '', text).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start, end = text.find('{'), text.rfind('}')
+        if start < 0 or end <= start:
+            raise
+        return json.loads(text[start:end + 1])
+
+
 class SimpleStudySheetGenerator:
     def __init__(self, session):
         self.session = session
@@ -114,6 +162,10 @@ class SimpleStudySheetGenerator:
     async def generate_study_sheet_stream(self, topic, language="english", *, user_request=None, chat_context=None):
         language = 'french' if str(language).lower().startswith('fr') else 'english'
         request = user_request or topic
+        if user_request and covers_all_files(user_request):
+            # The router's topic is a guess (often the newest file's title);
+            # keep it out of the scope so every file is covered.
+            topic = ALL_FILES_TOPIC[language]
         context = chat_context or {}
         evidence = context.get("study_sheet_context")
         if evidence is None:
@@ -160,7 +212,7 @@ class SimpleStudySheetGenerator:
         try:
             plan = await self._plan(payload)
         except Exception as error:
-            print(f'Study sheet planning unavailable: {type(error).__name__}')
+            print(f'Study sheet planning unavailable: {type(error).__name__}: {str(error)[:300]}')
             yield self._event(status='study_sheet_error', message=(
                 'Votre demande n’a pas pu être préparée. Réessayez.' if language == 'french'
                 else 'Your study request could not be prepared. Please try again.'))
@@ -312,32 +364,48 @@ class SimpleStudySheetGenerator:
                 messages=[{'role': 'user', 'content': prompt}])
             if result.stop_reason != 'end_turn':
                 raise ValueError('Incomplete fallback study sheet plan')
-            return self._validate_scope_plan(json.loads(''.join(
+            return self._validate_scope_plan(_json_object(''.join(
                 b.text for b in result.content if getattr(b, 'type', '') == 'text')), payload)
 
     @staticmethod
     def _validate_scope_plan(plan, payload):
-        plan['language'] = plan.get('language', payload.get('language', 'english'))
-        if plan['language'] not in ('english', 'french'):
-            raise ValueError('Invalid planned language')
-        priorities = {p['sourceId'] for p in payload['priorities']}
-        quizzes = {q['sourceId'] for q in payload['quizzes'] if q['answered'] > 0}
+        """Keep only what the evidence supports; never fail the sheet over a bad ID.
+
+        2026-10-09: gpt-4.1-mini returned priorityIds ["P1"] and quizIds ["Q1"],
+        copied from the example in PLAN_SYSTEM, for a chat that had neither. The
+        old validator raised on that, the Claude fallback then failed to parse,
+        and the student got "Your study request could not be prepared." An ID
+        we did not supply, or a quiz she never answered, is now dropped: it can
+        add nothing to the sheet, and it no longer takes the sheet down with it.
+        """
+        if not isinstance(plan, dict):
+            raise ValueError('Invalid study sheet plan')
+        hint = payload.get('language', 'english')
+        language = plan.get('language', hint)
+        plan['language'] = language if language in ('english', 'french') else (
+            hint if hint in ('english', 'french') else 'english')
+        priorities = {p['sourceId'] for p in payload.get('priorities', [])}
+        # An unanswered quiz is never eligible: it must not become a "mistake".
+        quizzes = {q['sourceId'] for q in payload.get('quizzes', []) if q.get('answered', 0) > 0}
         for key, valid in [('priorityIds', priorities), ('quizIds', quizzes)]:
-            if not isinstance(plan.get(key), list) or any(p not in valid for p in plan[key]):
-                raise ValueError('Invalid planned evidence')
-            plan[key] = list(dict.fromkeys(plan[key]))[:3 if key == 'quizIds' else 8]
+            ids = plan.get(key) if isinstance(plan.get(key), list) else []
+            plan[key] = list(dict.fromkeys(i for i in ids if i in valid))[:3 if key == 'quizIds' else 8]
         if not isinstance(plan.get('includeSelfCheck'), bool):
-            raise ValueError('Invalid self-check preference')
-        reviews = plan.get('practiceReviews') or []
-        if not isinstance(reviews, list) or any(not isinstance(r, dict) or r.get('quizId') not in plan['quizIds']
-                or not isinstance(r.get('text'), str) or not r['text'].strip() for r in reviews):
-            raise ValueError('Invalid planned practice review')
-        if len(reviews) != len(plan['quizIds']) or {r['quizId'] for r in reviews} != set(plan['quizIds']):
-            raise ValueError('Missing planned practice review')
-        if any(len(r['text']) > 6000 or (r.get('title') is not None and
-               (not isinstance(r['title'], str) or len(r['title']) > 240)) for r in reviews):
-            raise ValueError('Practice review too long')
-        plan['practiceReviews'] = reviews
+            plan['includeSelfCheck'] = True
+        # One usable review per selected quiz; a quiz without one is dropped
+        # rather than shown with no explanation.
+        reviewed = {}
+        for review in plan.get('practiceReviews') or []:
+            if not isinstance(review, dict) or review.get('quizId') not in plan['quizIds'] or review['quizId'] in reviewed:
+                continue
+            text, title = review.get('text'), review.get('title')
+            if not isinstance(text, str) or not text.strip() or len(text) > 6000:
+                continue
+            if title is not None and (not isinstance(title, str) or len(title) > 240):
+                review = {k: v for k, v in review.items() if k != 'title'}
+            reviewed[review['quizId']] = review
+        plan['quizIds'] = [q for q in plan['quizIds'] if q in reviewed]
+        plan['practiceReviews'] = [reviewed[q] for q in plan['quizIds']]
         return plan
 
     @staticmethod
@@ -407,16 +475,15 @@ class SimpleStudySheetGenerator:
         if not store:
             return [], []  # Pasted notes, chat, quizzes, or a named topic still work.
         queries = [f"{topic}\n{request[:2000]}"]
-        broad = re.search(r"all (?:my |the )?(?:notes|files|documents|material|content)|uploaded documents|"
-                          r"tout(?:es)? (?:les |mes )|documents téléversés", request, re.I)
         insights = getattr(session, "file_insights", {}) or {}
-        if broad:
-            for info in insights.values():
-                if isinstance(info, dict):
-                    for subtopic in info.get("topics", [])[:8]:
-                        if isinstance(subtopic, str):
-                            queries.append(subtopic)
-        queries = list(dict.fromkeys(queries))[:12]
+        if covers_all_files(request):
+            # One round per file, so the cap can't spend every slot on the
+            # first file's topics.
+            per_file = [[name] + [t for t in (info.get("topics") or [])[:8] if isinstance(t, str)]
+                        for name, info in insights.items() if isinstance(info, dict)]
+            for at in range(max((len(f) for f in per_file), default=0)):
+                queries.extend(f[at] for f in per_file if len(f) > at)
+        queries = list(dict.fromkeys(queries))[:16]
         results = await asyncio.gather(*(asyncio.to_thread(store.similarity_search, query=q, k=36 if i == 0 else 6)
                                         for i, q in enumerate(queries)), return_exceptions=True)
         docs = []

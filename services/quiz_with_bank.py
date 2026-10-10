@@ -37,6 +37,7 @@ import logging
 from typing import AsyncGenerator, Dict, Any, List, Optional
 
 from langchain_openai import ChatOpenAI
+from core.quiz_model import quiz_chat_model
 from models.session import PersistentSessionContext
 from tools.quiztools import (
     _generate_single_question,
@@ -72,7 +73,7 @@ async def extract_concepts_from_content(
     earlier batch HERE — a second call with no memory would happily re-extract
     the same high-yield concepts and ask the same things again.
     """
-    llm = ChatOpenAI(model=os.getenv("QUIZ_GENERATION_MODEL", "gpt-4.1-mini"), temperature=0.7)
+    llm = quiz_chat_model()  # Luna; fast tier for Pro (core/quiz_model.py)
 
     # ── Intent-aware selection instructions ───────────────────────────────
     objective_instructions = {
@@ -418,6 +419,12 @@ async def stream_quiz_questions(
     # support-only verifier rewarded verbatim list-copying, and the quality
     # dropped visibly. Analysis failures fall OPEN:
     # the generator still runs on the raw document text, as it always has.
+    # Pro members write on Luna's fast tier. Decided here, once per quiz, from
+    # the server's own membership check; every generator below reads it.
+    from core.material_model import service_tier_for_chat
+    from core.quiz_model import use_quiz_tier
+    use_quiz_tier(await asyncio.to_thread(service_tier_for_chat, chat_id or getattr(session, 'chat_id', None)))
+
     profile = getattr(session, 'practice_profile', {}) or {}
     if profile.get('source', {}).get('kind') == 'pasted' and not source_text:
         source_text = profile['source'].get('pastedText')

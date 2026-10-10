@@ -428,5 +428,60 @@ class MainTopicTests(unittest.TestCase):
         self.assertEqual(len(shown['concepts']), 4)
 
 
+class BackgroundAnalysisTests(unittest.TestCase):
+    def test_quick_excerpts_are_evenly_spaced_in_order_and_short_text_goes_whole(self):
+        from services.document_understanding import quick_excerpts, QUICK_EXCERPTS, QUICK_EXCERPT_CHARS
+        text = ''.join(f'[{i:04d}]' + 'x' * 94 for i in range(200))   # 20,000 chars of numbered blocks
+        parts = quick_excerpts(text)
+        self.assertEqual(len(parts), QUICK_EXCERPTS)
+        self.assertTrue(text.startswith(parts[0]))
+        self.assertTrue(text.endswith(parts[-1]))
+        self.assertTrue(all(len(p) == QUICK_EXCERPT_CHARS for p in parts))
+        positions = [text.index(p) for p in parts]
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(quick_excerpts('short notes'), ['short notes'])
+
+    def test_a_failed_preview_never_fails_the_upload(self):
+        from services.document_understanding import quick_overview
+        async def broken(system, payload):
+            raise ValueError('model unavailable')
+        preview = asyncio.run(quick_overview('Primary survey notes', 'abcde.pdf', call=broken))
+        self.assertEqual(preview['topics'], [])
+        self.assertTrue(preview['quick'])
+
+    def test_preview_keeps_topics_and_insights_from_the_model(self):
+        from services.document_understanding import quick_overview
+        async def answer(system, payload):
+            self.assertIn('excerpts', payload)
+            return {'document_type': 'lecture notes', 'topics': ['Primary survey', 'Secondary survey', ''],
+                    'insights': [{'topic': 'Primary survey', 'insight': 'Bleeding first.', 'key_points': ['C before A']}]}
+        preview = asyncio.run(quick_overview('notes', 'abcde.pdf', call=answer))
+        self.assertEqual(preview['topics'], ['Primary survey', 'Secondary survey'])
+        self.assertEqual(preview['insights'][0]['key_points'], ['C before A'])
+
+    def test_a_quiz_waits_for_the_running_upload_analysis_instead_of_starting_another(self):
+        from services import document_understanding as du
+        analysis = {**material('notes.txt'), 'version': du.VERSION, 'readabilityVersion': du.READABILITY_VERSION,
+                    'practiceReady': True}
+        text = 'Primary survey teaching notes.'
+        analysis['fingerprint'] = analysis['indexFingerprint'] = du.fingerprint(text)
+        calls = []
+        async def slow_analyse(*args, **kwargs):
+            calls.append(args[1])
+            await asyncio.sleep(0.05)
+            return analysis
+        async def run():
+            with patch('services.document_understanding.analyse_document', side_effect=slow_analyse),                  patch('services.document_understanding.all_material_texts', return_value={'notes.txt': text}):
+                first = du.start_background_analysis(text, 'notes.txt', chat_id='chat')
+                second = du.start_background_analysis(text, 'notes.txt', chat_id='chat')
+                self.assertIs(first, second)
+                session = SimpleNamespace(chat_id='chat', material_analysis={}, vectorstore=None, user_language='en')
+                result = await du.understand_session(session)
+            return result
+        result = asyncio.run(run())
+        self.assertEqual(calls, ['notes.txt'])          # one analysis, not two
+        self.assertEqual(result[0]['fingerprint'], analysis['fingerprint'])
+
+
 if __name__ == '__main__':
     unittest.main()
