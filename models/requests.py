@@ -99,6 +99,14 @@ class StudyPlanRequest(BaseModel):
     # produced before the feature existed. See course_intelligence.planner_topics.
     courseIntelligence: Optional[dict] = None
 
+    # The client builds Tonight's plan itself when the exam is close
+    # (ragfrontend StudyMode/tonightPlanModel.js): round 1 replaces the sprint
+    # path, so planning one (an LLM call) and prefetching its first step (a
+    # second generation) was thrown away. A capability, not a decision: the
+    # archetype is still decided here from the exam date, and a client that
+    # does not send this gets the sprint path exactly as before.
+    tonightPlan: Optional[bool] = False
+
 
 class CourseIntelligenceRequest(BaseModel):
     """

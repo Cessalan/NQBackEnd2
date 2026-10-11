@@ -3238,6 +3238,11 @@ Return ONLY valid JSON (all strings must be in {prompt_language}):
         user_prefs = request.userPreferences or {}
         review_format = user_prefs.get("reviewFormat", "Visual Concept Maps")
 
+        if _skips_sprint_planning(request, _days_to_exam(user_prefs)):
+            print("🌙 Tonight's plan: client builds round 1, sprint path not planned")
+            return _tonight_plan_payload(unique_topics, _days_to_exam(user_prefs), quick_check,
+                                         ci_report, student_flags)
+
         # Single source of truth for the path prompt — this endpoint used to
         # carry a byte-for-byte duplicate of _build_study_path_prompt, which
         # meant every change had to be made twice or the /study/plan fallback
@@ -3451,6 +3456,31 @@ def _days_to_exam(user_prefs: dict):
 #   flashcard -6.5pp continuation — latest slot, or dropped under time pressure
 SPRINT_MAX_DAYS = 2      # can't teach new material; triage and drill
 FOCUS_MAX_DAYS = 9       # shore up weak spots
+
+
+def _skips_sprint_planning(request, days_to_exam) -> bool:
+    """True when the client will build Tonight's plan itself, so the sprint
+    path would be planned and prefetched only to be thrown away."""
+    return bool(getattr(request, "tonightPlan", False)) and _plan_archetype(days_to_exam) == "sprint"
+
+
+def _tonight_plan_payload(unique_topics, days_to_exam, quick_check, ci_report, student_flags) -> dict:
+    """The plan context a Tonight's-plan client needs, with no steps: it
+    builds round 1 from the readiness check (tonightPlanModel.js)."""
+    return {
+        "nodes": [],
+        "topics": unique_topics,
+        "total_nodes": 0,
+        "estimated_time_minutes": 0,
+        "archetype": "sprint",
+        "days_to_exam": days_to_exam,
+        "tiers": {},
+        "recommended_start": None,
+        "quickCheckId": quick_check.checkId if quick_check else None,
+        "course_intelligence": bool(ci_report),
+        "student_flags": student_flags,
+        "tonight": True,
+    }
 
 
 def _plan_archetype(days_to_exam):
@@ -4331,6 +4361,14 @@ async def start_study_journey(request: StudyPlanRequest):
                   f"(days_to_exam={days_to_exam}, hardest={user_prefs.get('hardestTopics')})")
 
             yield f"data: {json.dumps({'status': 'plan_thinking', 'step': 'archetype', 'archetype': archetype, 'days_to_exam': days_to_exam})}\n\n"
+
+            if _skips_sprint_planning(request, days_to_exam):
+                print("🌙 Tonight's plan: client builds round 1, sprint path not planned or prefetched")
+                tonight_payload = _tonight_plan_payload(unique_topics, days_to_exam, quick_check,
+                                                        ci_report, student_flags)
+                yield f"data: {json.dumps({'status': 'plan_ready', 'plan': tonight_payload})}\n\n"
+                yield f"data: {json.dumps({'status': 'complete'})}\n\n"
+                return
 
             hardest = [t for t in (user_prefs.get("hardestTopics") or []) if t]
             if hardest:

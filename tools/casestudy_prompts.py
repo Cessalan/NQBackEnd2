@@ -31,6 +31,7 @@ from core.quiz_model import quiz_chat_model
 from langchain_core.output_parsers import StrOutputParser
 import json
 import random
+import re
 import uuid
 
 # ============================================
@@ -83,11 +84,25 @@ Context:
    - Options should be initially presented in a SCRAMBLED order (not the correct order)
    - Each item should be a distinct, complete nursing action
    - Items should be plausible and relevant to the scenario
+   - ⚠️ Every item is something the nurse DOES, starting with an action verb (assess, administer,
+     apply, position, notify, obtain, monitor, elevate, teach, document, reassure, remove...).
+     NEVER a statement of knowledge or interpretation: no "Recognize that...", "Understand...",
+     "Identify that...". Explaining TO THE PATIENT is teaching and is fine. Knowledge statements cannot be put in a priority
+     order, so the "correct" order would be arbitrary.
+   - Every finding, value or test an item mentions must appear in the caseStudy tabs. Never refer
+     to a lab, vital sign or result the chart does not show.
+   - No two items may tie: each step must have a clear reason to come before the next.
 
 4. **Correct Order (correctOrder array):**
    - List items in the CORRECT sequence
    - Each item has "id" and "text" matching the options
    - Order should follow evidence-based nursing priorities (ABCs, Maslow's, etc.)
+   - The order must be decided by a standard nursing priority rule (airway-breathing-circulation,
+     Maslow, safety first, assess before you act, unstable before stable, acute before chronic,
+     remove barriers before teaching), never by the order a textbook explains a concept.
+   - If the topic is conceptual (pathophysiology, definitions, how a syndrome works), build a
+     patient scenario in which that concept decides what the nurse does FIRST, and order those
+     actions.
 
 5. **Justification:**
    - Explain WHY this specific order is correct
@@ -187,7 +202,64 @@ NOTE: The example above shows a CLINICAL scenario with all three tabs. For NON-C
 # CASE STUDY QUESTION GENERATOR
 # ============================================
 
+# An ordering item that is a statement of knowledge, not an action. Real case
+# (2026-10-10): a nephritic-syndrome question whose items were "Recognize that
+# glomerular inflammation...", "Explain that the findings suggest...", and
+# "Explain that the elevated serum creatinine..." (creatinine was not even in
+# the chart). There is no priority rule between explanations, so its "correct
+# order" was arbitrary, and the "Who first?" walkthrough rightly refused to
+# defend it. Any "explain..." passes: in a teaching question "Explain that
+# bladder training uses planned voiding..." is the nurse teaching the patient,
+# a real step (a live student's question, 2026-10-11, would have been wrongly
+# rejected by an earlier version that caught "explain that").
+_NON_ACTION = re.compile(
+    r"^\s*(?:recogni[sz]es?|understands?|realiz(?:e|es)|knows?|identif(?:y|ies)\s+that|"
+    r"notes?\s+that|states?\s+that|interprets?\s+that|"
+    r"reconna[iî]tre|comprendre)\b",
+    re.I,
+)
+
+
+def ordering_item_problems(question: dict) -> list:
+    """Items of an ordering question that are not nursing actions. Empty
+    when every item is something the nurse does."""
+    items = (question or {}).get("options") or []
+    texts = [str(i.get("text") if isinstance(i, dict) else i or "") for i in items]
+    return [t for t in texts if _NON_ACTION.search(t)]
+
+
 async def generate_casestudy_question(
+    topic: str,
+    difficulty: str,
+    question_num: int,
+    language: str,
+    content_context: str = "",
+    questions_to_avoid: list = None
+) -> dict:
+    """An ordering question whose items are all nursing actions, or None.
+
+    One retry with the reason, then None: callers already treat a missing
+    question as a failed slot, and a question with an arbitrary key does more
+    harm than a missing one.
+    """
+    note = ""
+    for attempt in (1, 2):
+        question = await _generate_casestudy_question_once(
+            topic, difficulty, question_num, language,
+            (content_context or "") + note, questions_to_avoid)
+        if not question:
+            return None
+        bad = ordering_item_problems(question)
+        if not bad:
+            return question
+        print(f"⚠️ Case study {question_num} rejected (attempt {attempt}): non-action items {bad}")
+        note = ("\n\nYOUR PREVIOUS ATTEMPT WAS REJECTED. These items are statements of knowledge, "
+                "not nursing actions, so they cannot be put in a priority order: "
+                + "; ".join(bad[:4]) + ". Every item must be something the nurse does.")
+    return None
+
+
+async def _generate_casestudy_question_once(
     topic: str,
     difficulty: str,
     question_num: int,
