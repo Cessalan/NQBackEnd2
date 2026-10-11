@@ -586,8 +586,12 @@ class NursingTutor:
             # that generates nothing.
             # ═══════════════════════════════════════════════════════════════════
             self._analyzer_practice = {}
+            self._request_ctx = {}
+            self._request_view = None
+            self._request_meta = {}
             try:
                 from services import practice_profile as pp
+                from services import request_brief as rb
                 if classification and not classification.get('_fallback'):
                     self._analyzer_practice = classification.get('practice_changes') or {}
                 merged, changed = pp.merge(
@@ -595,6 +599,22 @@ class NursingTutor:
                     analyzer_changes=self._analyzer_practice if self._analyzer_practice.get('scope_action') == 'change' else
                     {k: v for k, v in self._analyzer_practice.items() if k != 'scope'},
                 )
+                # Her requirements, in her words (services/request_brief):
+                # saved now, like an exclusion, so a rule she states on a turn
+                # that generates nothing still holds for the next quiz.
+                scope_action = 'focus' if pp.focus_topic(raw_user_input) else self._analyzer_practice.get('scope_action')
+                new_items = rb.analyzer_items(self._analyzer_practice)
+                brief, request_only = rb.merge(merged['brief'], new_items, scope_action=scope_action,
+                                               drop=self._analyzer_practice.get('drop_requirements'))
+                if brief != merged['brief']:
+                    merged['brief'] = brief
+                    changed = list(changed) + ['brief']
+                self._request_ctx = {
+                    'request_only': request_only,
+                    'unsupported': [i for i in new_items if i['kind'] == 'unsupported'],
+                    'analyzer_total': self._analyzer_practice.get('total'),
+                    'analyzer_exam': self._analyzer_practice.get('exam'),
+                }
                 self.session.practice_profile = merged
                 if changed:
                     print(f"🧷 PRACTICE PROFILE changed {changed}: {pp.summary_line(merged)}")
@@ -962,6 +982,12 @@ class NursingTutor:
                         tc["args"] = self._apply_practice_profile(
                             dict(tc.get("args") or {}), raw_user_input,
                             continuation_info.get('is_continuation', False))
+                        # Her request, read back to her before any material
+                        # is read: the first thing the quiz screen shows is
+                        # what she asked for, in her words.
+                        if getattr(self, '_request_view', None):
+                            yield json.dumps({"status": "quiz_brief", "type": "quiz",
+                                              "brief": self._request_view}) + "\n"
 
                 # ─────────────────────────────────────────────────────────
                 # HONESTY PREAMBLE: stream once before content generation
@@ -1298,15 +1324,22 @@ class NursingTutor:
                                     self._profile_saved = await practice_profile_store.save(self.session.chat_id, profile)
                                     self._practice_dirty = False
                                 source_text = profile["source"]["pastedText"] if profile["source"]["kind"] == "pasted" else None
+                                request_view = getattr(self, '_request_view', None)
+                                request_meta = getattr(self, '_request_meta', None) or {}
                                 quiz_settings = {"difficulty": metadata.get("difficulty"), "question_types": metadata.get("question_types"),
-                                                 "scope": profile["scope"] or metadata.get("topic") or "", "requested_total": None}
+                                                 "scope": profile["scope"] or metadata.get("topic") or "", "requested_total": None,
+                                                 "quiz_mode": metadata.get("quiz_mode"), "exam": bool(request_meta.get("exam"))}
+                                if request_meta.get("focus_topic"):
+                                    quiz_settings["focus_topic"] = request_meta["focus_topic"]
 
                                 # Stream questions one by one (with optional empathetic message)
                                 async for chunk in stream_quiz_questions(
                                     topic=metadata.get("topic"),
                                     difficulty=metadata.get("difficulty"),
                                     num_questions=metadata.get("num_questions"),
-                                    requested_total=metadata.get("requested_total"),
+                                    requested_total=(request_view or {}).get("total") or metadata.get("requested_total"),
+                                    request=request_view,
+                                    focus_topic=request_meta.get("focus_topic"),
                                     source=metadata.get("source"),
                                     session=self.session,
                                     empathetic_message=empathetic_message,
@@ -1355,7 +1388,19 @@ class NursingTutor:
                                             quiz_settings['practice_plan'] = chunk['plan']
                                         yield json.dumps(chunk) + '\n'
 
+                                    elif chunk.get('status') in ('quiz_plan', 'quiz_allowance'):
+                                        # The blueprint behind her request (services/
+                                        # planned_practice): every later batch is
+                                        # written from it by index.
+                                        if chunk.get('status') == 'quiz_plan' and chunk.get('plan'):
+                                            quiz_settings['request_plan'] = {'id': chunk['plan']['id'],
+                                                                             'offset': chunk['plan'].get('offset', 0)}
+                                        yield json.dumps({**chunk, "type": "quiz"}) + '\n'
+
                                     elif chunk.get("status") == "generating":
+                                        if chunk.get("plan_id"):
+                                            quiz_settings['request_plan'] = {'id': chunk['plan_id'],
+                                                                             'offset': chunk.get('plan_offset', 0)}
 
                                         value ={ "status": "quiz_generating",
                                             "requested_total": chunk.get("requested_total"),
@@ -2613,11 +2658,48 @@ IMPORTANT: If user now says "more", "again", "another":
         # router's topic for this quiz but don't let a guess overwrite scope.
 
         # ── Formats, total, difficulty ────────────────────────────────────
-        args['question_types'] = pp.effective_formats(profile, args.get('question_types'), raw_user_input)
-        if not focus and not changes.get('requested_total') and profile['requestedTotal']:
-            args['num_questions'] = profile['requestedTotal']
+        from services import request_brief as rb
+        ctx = getattr(self, '_request_ctx', None) or {}
+        guess = args.get('question_types')
+        hard = (changes.get('difficulty') or profile['difficulty'] or args.get('difficulty')) == 'hard'
+        if hard and not changes.get('include') and not profile['formats'] and (not guess or list(guess) == ['mcq']):
+            # She asked for hard and named no format. The analyzer's default
+            # (multiple choice only) would make every question the format
+            # students find easiest: 76% first-try right on multiple choice
+            # against 48% on select-all (all students, since 2026-09-01). The
+            # app's own default, multiple choice + select-all, applies.
+            guess = None
+        args['question_types'] = pp.effective_formats(profile, guess, raw_user_input)
+        floor = rb.floor(raw_user_input, changes.get('requested_total'))
+        exam = bool(floor['exam'] or ctx.get('analyzer_exam')) and not focus
+        # Her number, then the analyzer's reading of a loose number ("minimum
+        # 20"), then an exam with no number is a full exam, then the chat's
+        # saved size, then the router. Until 2026-10-11 the router's number
+        # (capped at 15 by the analyzer's schema) won whenever she phrased a
+        # number loosely, and "a full exam" became 5 questions.
+        total, assumed = rb.resolve_total(
+            explicit=floor['total'], analyzer_total=ctx.get('analyzer_total'),
+            floor_result={'exam': exam}, is_continuation=not focus,
+            saved_total=profile['requestedTotal'], router_total=args.get('num_questions'), focus=bool(focus))
+        args['num_questions'] = total
+        if not assumed and not focus:
+            profile['requestedTotal'] = total
         if not changes.get('difficulty') and profile['difficulty']:
             args['difficulty'] = profile['difficulty']
+        if floor['style']:
+            profile['brief'], _ = rb.merge(profile['brief'], [], floor_style=floor['style'])
+        brief_items = list(profile['brief']) + list(ctx.get('request_only') or [])
+        if any(i['kind'] == 'style' for i in brief_items):
+            # She asked for clinical reasoning; every slot is written as a
+            # scenario and the checker holds it to that.
+            args['quiz_mode'] = 'nclex'
+        self._request_view = rb.request_view(
+            profile['brief'], ctx.get('request_only') or [], ctx.get('unsupported') or [],
+            total=total, assumed=assumed, exam=exam, said=floor['said'], difficulty=args.get('difficulty'),
+            formats=args['question_types'], excluded=profile['excludedFormats'],
+            files=profile['source']['files'] if profile['source']['kind'] == 'uploads' else [],
+            scope=profile['scope'])
+        self._request_meta = {'focus_topic': focus, 'exam': exam}
         # generate_quiz_stream reads the total and mode keywords from this; it
         # must be her words, not the continuation rewrite.
         args['user_prompt'] = raw_user_input[:4000]

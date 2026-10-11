@@ -45,13 +45,16 @@ def _is_reasoning_model(model):
     return model.startswith(('gpt-6', 'gpt-5', 'o1', 'o3', 'o4'))
 
 
-def quiz_chat_model(*, timeout=90):
-    """A LangChain chat model for writing quiz questions on the current tier."""
+def quiz_chat_model(*, timeout=90, reasoning=None):
+    """A LangChain chat model for writing quiz questions on the current tier.
+
+    `reasoning` overrides the effort for one call: a hard item built step by
+    step (services/hard_items) needs more than the fast default."""
     from langchain_openai import ChatOpenAI
     model = os.getenv('QUIZ_GENERATION_MODEL') or QUIZ_MODEL
     if not _is_reasoning_model(model):
         # Rollback path: the pre-Luna models took sampling parameters.
         return ChatOpenAI(model=model, temperature=0.7, request_timeout=timeout)
     # Reasoning models reject temperature; effort and tier replace it.
-    return ChatOpenAI(model=model, reasoning_effort=QUIZ_REASONING, service_tier=quiz_tier(),
+    return ChatOpenAI(model=model, reasoning_effort=reasoning or QUIZ_REASONING, service_tier=quiz_tier(),
                       use_responses_api=False, request_timeout=timeout)

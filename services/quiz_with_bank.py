@@ -354,6 +354,7 @@ async def stream_quiz_questions(
     guidance: str = None,
     requested_total: int = None,
     plan_id: str = None,
+    request: dict = None,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Generate quiz questions fresh from document content via LLM.
@@ -424,6 +425,16 @@ async def stream_quiz_questions(
     from core.material_model import service_tier_for_chat
     from core.quiz_model import use_quiz_tier
     use_quiz_tier(await asyncio.to_thread(service_tier_for_chat, chat_id or getattr(session, 'chat_id', None)))
+
+    # Her requirements (services/request_brief), when this quiz was requested
+    # in words: given to the concept picker and every writer with explicit
+    # precedence, and every question is checked against them below.
+    from services import request_brief, requirement_check
+    requirements_text = request_brief.writer_requirements(request) if request else ""
+    if requirements_text:
+        guidance = f"{requirements_text}\n\n{guidance}" if guidance else requirements_text
+    requirement_checks = request_brief.checkable(request) if request else []
+    requirement_checks = requirement_check.applicable(requirement_checks)
 
     profile = getattr(session, 'practice_profile', {}) or {}
     if profile.get('source', {}).get('kind') == 'pasted' and not source_text:
@@ -739,59 +750,76 @@ async def stream_quiz_questions(
             # Per-slot mode. Identical to `quiz_mode` for every non-applied batch.
             current_quiz_mode = mode_sequence[concept_idx] if concept_idx < len(mode_sequence) else quiz_mode
 
-            try:
-                question_data = None
-
+            async def write(context):
                 # Generate based on question type, passing the specific concept
                 if current_question_type == "matrix":
-                    question_data = await generate_matrix_question(
+                    return await generate_matrix_question(
                         topic=concept, difficulty=difficulty, question_num=current_question_num,
-                        language=session.user_language, content_context=content_context,
+                        language=session.user_language, content_context=context,
                         questions_to_avoid=[], quiz_mode=current_quiz_mode)
-                elif current_question_type == "sata":
-                    question_data = await generate_sata_question(
+                if current_question_type == "sata":
+                    return await generate_sata_question(
                         topic=concept,
                         difficulty=difficulty,
                         question_num=current_question_num,
                         language=session.user_language,
-                        content_context=content_context,
+                        content_context=context,
                         questions_to_avoid=[],  # No blocking on previous - concepts are unique
                         quiz_mode=current_quiz_mode
                     )
-                elif current_question_type == "casestudy":
-                    question_data = await generate_casestudy_question(
+                if current_question_type == "casestudy":
+                    return await generate_casestudy_question(
                         topic=concept,
                         difficulty=difficulty,
                         question_num=current_question_num,
                         language=session.user_language,
-                        content_context=content_context,
+                        content_context=context,
                         questions_to_avoid=[]
                     )
-                elif current_question_type == "unfoldingcase" or current_question_type == "unfoldingCase":
-                    question_data = await generate_unfolding_casestudy(
+                if current_question_type == "unfoldingcase" or current_question_type == "unfoldingCase":
+                    return await generate_unfolding_casestudy(
                         topic=concept,
                         difficulty=difficulty,
                         language=session.user_language or "english",
                         questions_to_avoid=[]
                     )
-                else:
-                    # Generate MCQ question (default)
-                    random_target_letter = random.choice(['A', 'B', 'C', 'D'])
-                    question_data = await _generate_single_question(
-                        content=content_context,
-                        topic=concept,
-                        difficulty=difficulty,
-                        question_num=current_question_num,
-                        language=session.user_language,
-                        questions_to_avoid=[],
-                        target_letter=random_target_letter,
-                        existing_topics=existing_topics,
-                        quiz_mode=current_quiz_mode,
-                        learning_objective=learning_objective
-                    )
+                # Generate MCQ question (default)
+                random_target_letter = random.choice(['A', 'B', 'C', 'D'])
+                written = await _generate_single_question(
+                    content=context,
+                    topic=concept,
+                    difficulty=difficulty,
+                    question_num=current_question_num,
+                    language=session.user_language,
+                    questions_to_avoid=[],
+                    target_letter=random_target_letter,
+                    existing_topics=existing_topics,
+                    quiz_mode=current_quiz_mode,
+                    learning_objective=learning_objective
+                )
+                if written and 'questionType' not in written:
+                    written['questionType'] = 'mcq'
+                return written
 
-                    if question_data and 'questionType' not in question_data:
-                        question_data['questionType'] = 'mcq'
+            try:
+                question_data = await write(content_context)
+
+                # Her requirements, checked before she sees the question
+                # (services/requirement_check): one rewrite with the reason,
+                # and a requirement is claimed only when the final draft met it.
+                if question_data and requirement_checks:
+                    results = await requirement_check.judge(question_data, requirement_checks)
+                    failed = requirement_check.failures(results)
+                    if failed:
+                        retry = await write(content_context + "\n\n" + requirement_check.repair_note(failed))
+                        if retry:
+                            retry_results = await requirement_check.judge(retry, requirement_checks)
+                            if len(requirement_check.failures(retry_results)) <= len(failed):
+                                question_data, results = retry, retry_results
+                    question_data['request'] = {
+                        'serves': [],
+                        'verified': requirement_check.verified_map(results) if results is not None
+                        else {c['id']: None for c in requirement_checks}}
 
                 # Misconception-ledger key. _generate_single_question keeps a
                 # short label from its own reasoning; SATA / case-study

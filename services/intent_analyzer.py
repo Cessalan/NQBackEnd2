@@ -208,8 +208,8 @@ TOOL_ARGS_OVERRIDES
     learning_objective: "exam_prep" | "weak_areas" | "first_review" |
                         "deep_dive" | "quick_check" | "general"
     source_preference: "documents" | "scratch" | "auto"
-    num_questions: integer 1-15 (DEFAULT 5 — only exceed it when the user names
-                   a number or asks for a long set; the quiz extends on demand)
+    num_questions: integer 1-200: the number she asked for; 5 when she named
+                   none (an exam request with no number is handled separately)
     question_types: array, one or more of ["mcq", "sata", "casestudy"]
 - Quality_standard of "clinical_judgment" or "exam_board_specific" should
   generally map to quiz_mode="nclex", difficulty="hard".
@@ -252,12 +252,50 @@ app remembers the rest; an empty object means "same as before".
 - clear_emphasis: true only when she withdraws an earlier steer.
 - excluded_formats: formats she says she does not want. mcq, sata, casestudy
   (casestudy = ordering / "put in order" / drag-and-drop / bowtie).
+- exam: true when she asks for an exam, a practice test or a mock (she wants
+  test conditions), false for a quiz or practice questions. Mentioning her real
+  exam ("my exam is tomorrow") is not asking for one.
+- total: the number of questions she asked for whenever she gave one, even
+  loosely ("minimum 20", "like 60 questions", "a 100 question exam"); null when
+  she gave none. A number describing her real exam ("my exam has 50 questions")
+  is not a request unless she asks for that many.
+- difficulty: "hard" or "easy" only when she asks for it, in any words ("super
+  tough", "she gives us very hard exams", "too easy" -> "hard"); else omit.
+- requirements: every distinct thing she asks this practice to BE, from THIS
+  message only. One entry each:
+    kind: "scope"       which material or subject ("both chapters", "only angina")
+          "focus"       a share of the questions on something ("medication questions also")
+          "rule"        how every question must be written ("medication class not drug
+                        names", "no abbreviations", "use our hospital's protocol terms")
+          "style"       the kind of question (NCLEX, clinical reasoning, application)
+          "unsupported" something this app cannot do (real past papers, a printed
+                        booklet, a question format it does not have)
+    said: her own words for it, copied from her message with her spelling, max 20 words.
+    label: a 2-6 word restatement for a checklist, in her language.
+    instruction: what the question writer must do, one specific, checkable sentence.
+          For a focus, say what makes a question count toward it.
+    share: focus only, the fraction of questions she wants on it: "also"/"some"
+          about 0.3, "mostly"/"focus on" about 0.6, "only" 1.
+  Never restate a count, a difficulty or a format as a requirement: those are
+  read separately. Never invent a requirement she did not state.
+- drop_requirements: ids from the saved requirements (listed in the context in
+  [brackets]) that she withdraws ("you can use drug names again").
 Examples:
     "more questions"                                  -> {"scope_action": "keep"}
     "stop focusing so much on pharmacology"           -> {"scope_action": "keep", "emphasis": "less pharmacology"}
     "i dont want the in order questions"              -> {"scope_action": "keep", "excluded_formats": ["casestudy"]}
     "now quiz me on wound care and pressure injuries" -> {"scope_action": "change", "scope": "wound care and pressure injuries"}
-    "50 questions based on the notes"                 -> {"scope_action": "change", "scope": "all of the uploaded notes"}
+    "50 questions based on the notes"                 -> {"scope_action": "change", "scope": "all of the uploaded notes", "total": 50}
+    "i need a full exam on both these chapter with medications questions also. the doctor expects us to know medication class not medications name and also everything related to this class. she gives us very ahrd exams"
+      -> {"scope_action": "change", "scope": "both uploaded chapters", "exam": true, "total": null, "difficulty": "hard",
+          "requirements": [
+            {"kind": "scope", "said": "on both these chapter", "label": "Both chapters",
+             "instruction": "Cover both uploaded chapters."},
+            {"kind": "focus", "said": "with medications questions also", "label": "Medication questions", "share": 0.3,
+             "instruction": "The question tests a medication class in her material: its action, indications, adverse effects, nursing assessment, monitoring or teaching."},
+            {"kind": "rule", "said": "the doctor expects us to know medication class not medications name and also everything related to this class",
+             "label": "Medication class, not drug names",
+             "instruction": "Refer to medications only by their class (a loop diuretic, an ARNI), never by a generic or brand drug name, and test what is true of the whole class."}]}
 
 Be decisive. Do not ask the user to clarify - infer from the message. End by
 calling classify_intent. Never respond with plain text.
@@ -385,7 +423,7 @@ CLASSIFY_INTENT_TOOL = {
                         "type": "string",
                         "enum": ["documents", "scratch", "auto"],
                     },
-                    "num_questions": {"type": "integer", "minimum": 1, "maximum": 15},
+                    "num_questions": {"type": "integer", "minimum": 1, "maximum": 200},
                     "question_types": {
                         "type": "array",
                         "items": {
@@ -418,6 +456,26 @@ CLASSIFY_INTENT_TOOL = {
                         "items": {"type": "string", "enum": ["mcq", "sata", "casestudy"]},
                         "uniqueItems": True,
                     },
+                    "exam": {"type": "boolean"},
+                    "total": {"type": ["integer", "null"], "minimum": 1, "maximum": 200},
+                    "difficulty": {"type": "string", "enum": ["easy", "hard"]},
+                    "requirements": {
+                        "type": "array",
+                        "maxItems": 8,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "kind": {"type": "string", "enum": ["scope", "focus", "rule", "style", "unsupported"]},
+                                "said": {"type": "string"},
+                                "label": {"type": "string"},
+                                "instruction": {"type": "string"},
+                                "share": {"type": "number", "minimum": 0.1, "maximum": 1},
+                            },
+                            "required": ["kind", "said", "label", "instruction"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "drop_requirements": {"type": "array", "items": {"type": "string"}},
                 },
                 "additionalProperties": False,
             },

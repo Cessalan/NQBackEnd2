@@ -1199,8 +1199,9 @@ async def generate_quiz_stream(
 
         # Validate num_questions
         from services.quiz_tutor import requested_question_total
+        from services.practice_api import CHAT_QUIZ_FIRST_BATCH
         requested_total = requested_question_total(user_prompt, num_questions)
-        num_questions = min(5, requested_total)
+        num_questions = min(CHAT_QUIZ_FIRST_BATCH, requested_total)
 
         # Formats: the chat's saved practice profile, then this message.
         # services/practice_profile.effective_formats keeps every exclusion the

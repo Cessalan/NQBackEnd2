@@ -585,7 +585,12 @@ def read_original_upload(chat_id, filename):
         raise MaterialError(f'The original {filename} could not be read completely. Please re-upload it.') from exc
 
 
-async def understand_session(session, source_text=None):
+async def understand_session(session, source_text=None, *, require_ready=True):
+    """Every file's analysis. `require_ready=False` returns files that are only
+    partly readable instead of refusing them: apply_readability has already
+    removed every record overlapping an uncertain visual transcription, so the
+    readable rest is safe to plan from (services/planned_practice). One image
+    slide marked UNCERTAIN used to block a whole lecture deck."""
     from pathlib import Path
     texts = all_material_texts(session, source_text)
     cache = getattr(session, 'material_analysis', None) or {}
@@ -641,7 +646,7 @@ async def understand_session(session, source_text=None):
                                                  language=session.user_language or 'en', index_fingerprint=digest)
     session.material_analysis = cache
     blocked = [name for name in texts if not cache[name].get('practiceReady', cache[name].get('complete'))]
-    if blocked:
+    if blocked and require_ready:
         raise MaterialError('Could not find enough confidently readable material in ' + ', '.join(blocked)
                             + '. Please upload a clearer copy or paste the relevant notes before generating the test.')
     return [cache[name] for name in texts]

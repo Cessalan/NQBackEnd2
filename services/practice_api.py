@@ -1,6 +1,8 @@
 """Authenticated practice tutoring and metered continuation of existing chat quizzes."""
 import asyncio
 import json
+import os
+import re
 import time
 from typing import Any
 from fastapi import APIRouter, HTTPException, Request
@@ -8,6 +10,19 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from services import usage_guard
 from services.quiz_tutor import respond, sanitize_settings
+
+# Questions a chat quiz generates in its first stream. This was 5, with the
+# rest left to the focused quiz fetching 5-question batches as she went; that
+# relay broke, and a Pro student who asked for a 15-question exam three times
+# on 2026-10-11 got 5 questions and a debrief each time. Questions are written
+# in parallel (one concept pass, then one call each), so 20 arrive about as
+# fast as 5. Larger requests still continue in batches from FocusedQuiz.
+CHAT_QUIZ_FIRST_BATCH = 20
+# Questions per batch of a planned request (services/planned_practice). The
+# owner's call (2026-10-11): an exam is shown at its full size but written ten
+# at a time, the next ten starting while she still has three to answer, so a
+# 100-question request costs only what she actually reaches.
+PLANNED_BATCH = 10
 
 
 class TutorRequest(BaseModel):
@@ -25,10 +40,52 @@ class PracticeRequest(BaseModel):
     chat_id: str = Field(min_length=1, max_length=200)
     request_id: str = Field(pattern=r"^[a-zA-Z0-9-]{8,100}$")
     topic: str = Field(min_length=1, max_length=3000)
-    count: int = Field(default=5, ge=1, le=5)
+    count: int = Field(default=5, ge=1, le=10)
     settings: dict = Field(default_factory=dict)
     existing_questions: list[str] = Field(default_factory=list, max_length=200)
     language: str = Field(default="en", max_length=20)
+
+
+_PLAN_ID = re.compile(r"^req-[0-9a-f]{28}$")
+
+
+def request_plan_ref(raw_settings):
+    """The blueprint a batch continues, from the quiz's saved settings, or None.
+
+    Read from the raw settings: sanitize_settings keeps only what the tutor may
+    change. The id is validated, since it names a Firestore document.
+    """
+    plan = (raw_settings or {}).get("request_plan")
+    if not isinstance(plan, dict) or not isinstance(plan.get("id"), str) or not _PLAN_ID.match(plan["id"]):
+        return None
+    offset = plan.get("offset", 0)
+    if not isinstance(offset, int) or isinstance(offset, bool) or not 0 <= offset <= 10000:
+        offset = 0
+    return {"id": plan["id"], "offset": offset}
+
+
+def request_view_for_batch(profile, settings, raw_settings):
+    """Her requirements for a later batch, rebuilt from the chat's saved brief.
+
+    Rebuilt on the server rather than accepted from the client, so a batch is
+    written to what she asked for even if this quiz predates a rule she added.
+    """
+    from services import practice_profile as pp, request_brief as rb
+    raw_settings = raw_settings or {}
+    total = settings.get("requested_total") or profile.get("requestedTotal") or 0
+    return rb.request_view(profile.get("brief") or [], total=total, assumed=False,
+                           exam=raw_settings.get("exam") is True, difficulty=settings.get("difficulty"),
+                           formats=pp.effective_formats(profile, settings.get("question_types")),
+                           excluded=profile.get("excludedFormats") or [],
+                           files=(profile.get("source") or {}).get("files") or [], scope=profile.get("scope"))
+
+
+def planned_quiz_mode(raw_settings, view):
+    """The mode her first batch was written in, held for the rest of the request."""
+    if any(i.get("kind") == "style" for i in (view or {}).get("items", [])):
+        return "nclex"
+    mode = (raw_settings or {}).get("quiz_mode")
+    return mode if mode in ("knowledge", "nclex", "applied") else "nclex"
 
 
 class DebriefRequest(BaseModel):
@@ -202,14 +259,54 @@ def build_router(setup_session):
                 pasted = profile["source"]["pastedText"] if profile["source"]["kind"] == "pasted" else None
                 yield json.dumps({"status": "quiz_generating", "total": allocation["count"]}) + "\n"
                 seen = {q.strip().lower() for q in body.existing_questions}
+                view = request_view_for_batch(profile, settings, body.settings)
+                plan = request_plan_ref(body.settings)
+                # "Hard" is relative to her: a student getting most of them
+                # right gets a harder next batch, and is told why.
+                from services import request_brief as rb
+                performance = body.settings.get("performance") if isinstance(body.settings.get("performance"), dict) else {}
+                harder = rb.escalation(performance) if rb.is_hard(view) else None
+                if harder:
+                    yield json.dumps({"status": "quiz_escalated", "answered": performance.get("answered"),
+                                      "correct": performance.get("correct")}) + "\n"
+                if plan:
+                    # A planned request continues from its blueprint by index:
+                    # the next ten slots after the questions she already has.
+                    from services.planned_practice import PlanUnavailable, stream_planned
+                    try:
+                        async for chunk in stream_planned(
+                                session=session, chat_id=body.chat_id, view=view,
+                                total=settings.get("requested_total") or len(body.existing_questions) + allocation["count"],
+                                offset=plan["offset"], start=len(body.existing_questions), count=allocation["count"],
+                                difficulty=settings.get("difficulty", "medium"),
+                                question_types=pp.effective_formats(profile, settings.get("question_types")),
+                                quiz_mode=planned_quiz_mode(body.settings, view), learning_objective="exam_prep",
+                                existing_questions=body.existing_questions, source_text=pasted,
+                                focus_topic=body.settings.get("focus_topic") if isinstance(body.settings.get("focus_topic"), str) else None,
+                                plan_id=plan["id"], announce=False, is_cancelled=lambda: _is_cancelled(body.chat_id),
+                                escalation=harder):
+                            if chunk.get("status") == "question_ready":
+                                q = chunk["question"]
+                                key = q.get("question", "").strip().lower()
+                                if key and key not in seen:
+                                    questions.append(q)
+                                    seen.add(key)
+                                    yield json.dumps({"status": "question_ready", "question": q}) + "\n"
+                        if not questions:
+                            raise RuntimeError("No new questions returned")
+                        await asyncio.to_thread(finish, uid, body.request_id, questions)
+                        yield json.dumps({"status": "quiz_complete", "total_generated": len(questions)}) + "\n"
+                        return
+                    except PlanUnavailable as e:
+                        print(f"🗺️ PLAN unavailable for batch in {body.chat_id}: {e}")
                 async for chunk in stream_quiz_questions(topic=body.topic, difficulty=settings.get("difficulty", "medium"),
                     num_questions=allocation["count"], source="documents" if session.vectorstore or profile['source']['kind'] == 'uploads' else "scratch", session=session,
                     chat_id=body.chat_id, question_types=pp.effective_formats(profile, settings.get("question_types")),
                     quiz_mode="nclex", learning_objective="exam_prep", existing_questions=body.existing_questions,
                     index_offset=len(body.existing_questions), user_prompt=settings.get("scope", ""),
-                    source_text=pasted, guidance=pp.generation_guidance(profile),
+                    source_text=pasted, guidance="\n\n".join(g for g in (pp.generation_guidance(profile), harder) if g),
                     requested_total=settings.get('requested_total') or profile.get('requestedTotal'),
-                    plan_id=settings.get('plan_id')):
+                    plan_id=settings.get('plan_id'), request=view):
                     if chunk.get("status") == "question_ready":
                         q = chunk["question"]
                         key = q.get("question", "").strip().lower()
@@ -234,12 +331,46 @@ def build_router(setup_session):
     return router
 
 
+def _material_backed(source, session, source_text=None):
+    profile = getattr(session, "practice_profile", None) or {}
+    kind = (profile.get("source") or {}).get("kind")
+    return bool(source_text) or kind == "pasted" or (bool(getattr(session, "vectorstore", None))
+                                                     and (source == "documents" or kind == "uploads"))
+
+
+def _empathetic_events(message):
+    """The empathetic preamble the concept-first generator streams, for the planned path too."""
+    yield {"status": "empathetic_message_start", "message": "Understanding your learning needs..."}
+    words, text = message.split(), ""
+    for i, word in enumerate(words):
+        text += word + " "
+        if (i + 1) % 4 == 0 or i == len(words) - 1:
+            yield {"status": "empathetic_message_chunk", "chunk": text.strip(), "progress": int((i + 1) / len(words) * 100)}
+    yield {"status": "empathetic_message_complete", "full_message": message}
+
+
+def _is_cancelled(chat_id):
+    from tools.quiztools import get_connection_manager
+    manager = get_connection_manager()
+    return bool(manager and chat_id and manager.is_cancelled(chat_id))
+
+
 async def metered_chat_quiz_stream(**kwargs):
-    """Initial chat quizzes use the same atomic question budget as continuation."""
+    """Initial chat quizzes use the same atomic question budget as continuation.
+
+    A request she made (`request`, services/request_brief) over her own
+    material is written from a blueprint of that material, PLANNED_BATCH at a
+    time (services/planned_practice). Anything else, or a plan that cannot be
+    built, goes to the concept-first generator, which still receives her
+    requirements and checks every question against them.
+    """
     from types import SimpleNamespace
     from uuid import uuid4
     from services.quiz_with_bank import stream_quiz_questions
+    request_view = kwargs.pop("request", None)
+    focus_topic = kwargs.pop("focus_topic", None)
     chat_id = kwargs["chat_id"]
+    session = kwargs["session"]
     uid = await asyncio.to_thread(usage_guard._resolve_uid, chat_id)
     if not uid:
         yield {"status": "error", "message": "Save your conversation before starting practice."}
@@ -247,22 +378,58 @@ async def metered_chat_quiz_stream(**kwargs):
     quota = await asyncio.to_thread(usage_guard.check_quota, chat_id)
     requested = max(1, min(200, kwargs.get("requested_total") or kwargs.get("num_questions") or 5))
     allowed = requested if quota.get("tier") == "pro" else min(requested, quota.get("remaining", 0))
-    request = SimpleNamespace(chat_id=chat_id, request_id=str(uuid4()), count=min(5, max(1, allowed)), existing_questions=[])
+    planned = bool(request_view) and os.getenv("PLANNED_PRACTICE", "1") != "0" \
+        and _material_backed(kwargs.get("source"), session, kwargs.get("source_text"))
+    first_batch = PLANNED_BATCH if planned else CHAT_QUIZ_FIRST_BATCH
+    request = SimpleNamespace(chat_id=chat_id, request_id=str(uuid4()), count=min(first_batch, max(1, allowed)), existing_questions=[])
     try:
         allocation = await asyncio.to_thread(reserve, uid, request)
     except HTTPException as exc:
         yield {"status": "error", "message": exc.detail, "code": "quota_exceeded" if exc.status_code == 429 else "practice_failed"}
         return
+    if request_view:
+        # What she asked for against what her plan allows, before any
+        # question: a free student who asks for 100 is told what she gets.
+        yield {"status": "quiz_allowance", "requested": requested, "allowed": allowed,
+               "pro": quota.get("tier") == "pro", "batch": allocation["count"]}
     questions = []
-    kwargs['requested_total'] = allowed
-    kwargs["num_questions"] = allocation["count"]
+    stamp = {"quota_charged": True, "requested_total": max(allocation["count"], allowed)}
     try:
+        if planned:
+            from services.planned_practice import PlanUnavailable, stream_planned
+            empathetic = kwargs.get("empathetic_message")
+            try:
+                async for chunk in stream_planned(
+                        session=session, chat_id=chat_id, view=request_view, total=allowed,
+                        count=allocation["count"], difficulty=kwargs.get("difficulty") or "medium",
+                        question_types=kwargs.get("question_types"), quiz_mode=kwargs.get("quiz_mode") or "knowledge",
+                        learning_objective=kwargs.get("learning_objective") or "general",
+                        existing_questions=kwargs.get("existing_questions"), source_text=kwargs.get("source_text"),
+                        focus_topic=focus_topic, scope_text=kwargs.get("topic"),
+                        additional_context=kwargs.get("additional_context"),
+                        is_cancelled=lambda: _is_cancelled(chat_id)):
+                    if empathetic and chunk.get("status") == "quiz_planning":
+                        for event in _empathetic_events(empathetic):
+                            yield {**event, **stamp}
+                        empathetic = None
+                    if chunk.get("status") == "question_ready":
+                        questions.append(chunk["question"])
+                    if chunk.get("status") == "quiz_complete":
+                        await asyncio.to_thread(finish, uid, request.request_id, questions)
+                    yield {**chunk, **stamp}
+                return
+            except PlanUnavailable as e:
+                # Raised only before the first question, so nothing is half-delivered.
+                print(f"🗺️ PLAN unavailable for {chat_id}, using the concept-first generator: {e}")
+        kwargs["requested_total"] = allowed
+        kwargs["num_questions"] = allocation["count"]
+        kwargs["request"] = request_view
         async for chunk in stream_quiz_questions(**kwargs):
             if chunk.get("status") == "question_ready":
                 questions.append(chunk["question"])
             if chunk.get("status") == "quiz_complete":
                 await asyncio.to_thread(finish, uid, request.request_id, questions)
-            yield {**chunk, "quota_charged": True, "requested_total": max(allocation["count"], allowed)}
+            yield {**chunk, **stamp}
     finally:
         await asyncio.shield(asyncio.to_thread(finish, uid, request.request_id, questions))
 

@@ -33,6 +33,8 @@ tests/test_practice_profile.py, which replays the real messages.
 import re
 from datetime import datetime, timezone
 
+from services import request_brief
+
 PROFILE_VERSION = 1
 FORMATS = ("mcq", "sata", "casestudy", "true_false", "matrix", "unfoldingcase")
 # What a chat quiz generates when nobody has said anything about format and
@@ -217,6 +219,8 @@ def normalize(profile):
         "requestedTotal": max(1, min(200, int(total))) if isinstance(total, int) and not isinstance(total, bool) else None,
         "matchExamples": profile.get('matchExamples', True) is not False,
         "generationInstructions": str(profile.get('generationInstructions') or '')[:4000] or None,
+        # Her standing requirements, each in her own words (services/request_brief).
+        "brief": request_brief.normalize_brief(profile.get("brief")),
         "updatedAt": profile.get("updatedAt"),
         "updatedBy": profile.get("updatedBy"),
     }
@@ -258,6 +262,10 @@ def merge(profile, changes, *, analyzer_changes=None, updated_by="chat"):
         after["requestedTotal"] = changes["requested_total"]
     if changes.get("difficulty"):
         after["difficulty"] = changes["difficulty"]
+    elif analyzer_changes.get("difficulty") in ("easy", "hard"):
+        # "she gives us very ahrd exams", "these are very easy": her words,
+        # read by the analyzer where the keyword rules can't.
+        after["difficulty"] = analyzer_changes["difficulty"]
     if 'match_examples' in changes:
         after['matchExamples'] = changes['match_examples']
     if changes.get('generation_instructions'):
@@ -385,6 +393,9 @@ def summary_line(profile):
         parts.append(f"emphasis: {p['emphasis']}")
     if p["source"]["kind"]:
         parts.append(f"source: {p['source']['kind']}")
+    saved = request_brief.saved_summary(p["brief"])
+    if saved:
+        parts.append(f"her saved requirements: {saved}")
     return "; ".join(parts) or "none saved"
 
 
