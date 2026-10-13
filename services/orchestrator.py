@@ -38,8 +38,12 @@ class NursingTutor:
         r'\b(flashcards?|flash\s+cards?|cartes?)\b',
         re.IGNORECASE
     )
+    # "prep guide" is a study guide too: chat XbPrJdZgXEcRmlGNhgfY said "prep
+    # guide" and "complete the prep guide" and got two quizzes full of case
+    # studies, because only "study guide" was recognised (owner, 2026-10-11).
     STUDYSHEET_PATTERNS = re.compile(
-        r'\b(study\s+sheets?|study\s+guides?|fiches?|résumés?|cheat\s+sheets?)\b',
+        r'\b(study\s+sheets?|(?:study|prep|preparation|review|revision|exam)\s+guides?|'
+        r'guides?\s+d.?(?:étude|etude|révision|revision)|fiches?|résumés?|cheat\s+sheets?)\b',
         re.IGNORECASE
     )
     SUMMARIZE_PATTERNS = re.compile(
@@ -110,6 +114,26 @@ class NursingTutor:
         if not changes.get("include"):
             return False  # names no format, or only excludes one ("no case studies")
         return bool(cls.FORMAT_REQUEST_VERB.search(text)) or len(text.split()) <= 4
+
+    @classmethod
+    def _is_guide_request(cls, user_input: str) -> bool:
+        """A request for a study guide that does not also ask for questions.
+
+        The intent analyzer overrides the fast route, and it read "prep guide"
+        (sent after a "where would you like to start?") as "practise from the
+        Prep Guide", so the student got a quiz in the chat's saved formats,
+        case studies included. Asking for a guide is never asking to be
+        tested; "quiz me on the study guide" still names questions and is
+        left to the analyzer. The guide phrase is removed before looking for
+        quiz words, so the "exam" in "exam guide" doesn't count.
+        """
+        text = (user_input or "").strip()
+        if not text or not cls.STUDYSHEET_PATTERNS.search(text):
+            return False
+        rest = cls.STUDYSHEET_PATTERNS.sub(" ", text)
+        return not (cls.QUIZ_PATTERNS.search(rest) or cls.FLASHCARD_PATTERNS.search(rest)
+                    or re.search(r'\bquestions?\b', rest, re.IGNORECASE)
+                    or cls._is_format_request(rest))
 
     # ========================================================================
     # ANSWER DISCIPLINE
@@ -798,6 +822,17 @@ class NursingTutor:
                 # ask for something specific).
                 if not fast_route_tool or fast_route_tool == "NO_TOOL":
                     fast_route_tool = "NO_TOOL"
+
+            # A guide asked for is never answered with an assessment, whatever
+            # the analyzer inferred from the quizzes before it. A written
+            # answer ABOUT her guide is left alone. Her own words, not the
+            # continuation rewrite, which may carry a "Study Guide" file name.
+            if (not continuation_info.get('is_continuation')
+                    and fast_route_tool in ASSESSMENT_TOOLS
+                    and self._is_guide_request(raw_user_input)):
+                print(f"📄 GUIDE GUARD: '{raw_user_input[:50]}' asks for a guide — "
+                      f"routing to the study sheet instead of {fast_route_tool}.")
+                fast_route_tool = "generate_study_sheet_stream"
 
             # ─────────────────────────────────────────────────────────────────
             # DETERMINISTIC GUARD: never answer a complaint with another quiz.

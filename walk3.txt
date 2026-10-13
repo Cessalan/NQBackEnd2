@@ -1,0 +1,30 @@
+Place the following nursing actions in order of priority to prevent fu -> NULL: key_supported=False reason=None
+Question 5: Place the following nursing actions in order of priority f -> NULL: key_supported=False reason=None
+Place the following nursing actions in order of priority for transferr -> NULL: key_supported=False reason=None
+Place the following nursing actions in order of priority for this pati -> OK
+Place the following nursing actions in order of priority before assist -> NULL: missing text pos 5
+Place the following nursing actions in order of priority to address th -> NULL: key_supported=False reason=None
+Place the following nursing actions in order of priority as the nurse  -> OK
+Place the following nursing actions in order of priority for this pati -> OK
+Before assisting the patient from bed to chair, place the following nu -> OK
+Place the following nursing actions in order of priority for this pati -> OK
+Place the following nursing actions in order of priority for this pati -> OK
+Place the following nursing actions in order of priority for this pati -> NULL: key_supported=False reason=None
+The nurse is preparing to reposition the patient from supine to the ri -> OK
+Place the following nursing actions in the order the nurse should perf -> OK
+Place the following nursing actions in order of priority for this pati -> NULL: key_supported=False reason=None
+Place the following nursing actions in order of priority to prevent fu -> OK
+Question 5: Place the following nursing actions in order of priority f -> NULL: key_supported=False reason=None
+Place the following nursing actions in order of priority for transferr -> OK
+Place the following nursing actions in order of priority for this pati -> NULL: key_supported=False reason=None
+Place the following nursing actions in order of priority before assist -> OK
+Place the following nursing actions in order of priority to address th -> NULL: key_supported=False reason=None
+Place the following nursing actions in order of priority as the nurse  -> OK
+Place the following nursing actions in order of priority for this pati -> NULL: key_supported=False reason=None
+Before assisting the patient from bed to chair, place the following nu -> OK
+Place the following nursing actions in order of priority for this pati -> OK
+Place the following nursing actions in order of priority for this pati -> OK
+Place the following nursing actions in order of priority for this pati -> NULL: key_supported=False reason=None
+The nurse is preparing to reposition the patient from supine to the ri -> OK
+Place the following nursing actions in the order the nurse should perf -> OK
+Place the following nursing actions in order of priority for this pati -> NULL: key_supported=False reason=None

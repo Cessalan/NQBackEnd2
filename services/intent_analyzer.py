@@ -84,7 +84,7 @@ INTENT
 - "extract_from_doc"     - user wants the actual questions from their uploaded
                             document (often a past paper) presented as a quiz
 - "generate_flashcards"  - flashcards, cartes, flash cards
-- "generate_study_sheet" - study sheet, study guide, cheat sheet, fiche
+- "generate_study_sheet" - study sheet, study guide, prep/review guide, cheat sheet, fiche
 - "answer_question"      - user pasted or typed a question THEY need answered:
                             homework, an assignment prompt, a case study with
                             questions, a mock-exam question, an MCQ they want

@@ -61,6 +61,7 @@ MAX_THINK_CHARS = 110      # one line of the demonstrated thinking
 MAX_MEANING_CHARS = 90
 MAX_QUOTE_CHARS = 110
 MIN_THINK, MAX_THINK = 2, 3
+ATTEMPTS = 2               # a rejected walkthrough gets one fresh try
 
 BREAKDOWN_ROLES = ("problem", "risk", "task")
 
@@ -80,7 +81,7 @@ RULES = (
     "barrier_first", "prepare_first", "treat_before_record", "teach_last", "sequence",
 )
 
-PROMPT_VERSION = 1
+PROMPT_VERSION = 2
 
 _CACHE: dict[str, dict] = {}
 _client: Optional[AsyncAnthropic] = None
@@ -171,7 +172,7 @@ Rules (name the one that decides each step):
 abc (airway, breathing, circulation first), maslow (body needs before feelings), assess_first (assess before you act), unstable_first (unstable before stable), acute_first (new and sudden before chronic and expected), safety_first (safety first), barrier_first (remove what blocks the message first), prepare_first (prepare before you perform), treat_before_record (treat and report before tests that only record), teach_last (teach once the patient is safe and able), sequence (this step needs the one before it).
 
 Write in {language_name}, in plain words a tired student reads at a glance. Return JSON with:
-- key_supported: true only if a nursing instructor would accept EVERY step of this order as defensible from the chart. false if any step is unsafe, arguable, or would need a stretch to explain: a rung or rule that does not honestly describe the action (for example reassurance called teaching), or a reason the chart does not give. False is a normal, expected answer; a student is better served by no walkthrough than by a forced one.
+- key_supported: this order is the answer key and is normally right. Priority questions always have room for debate; a step that is debatable but reasonable is supported. Set false ONLY if following this order would be unsafe for this patient (for example acting before a needed assessment, or delaying care for an unstable finding), or the chart directly contradicts a step. When true, explain the order with reasons the chart actually gives, and pick the ladder and rules that honestly fit it.
 - ladder: the ladder id.
 - breakdown: 1 to 3 parts, at most one per role:
     - role: "problem" (what is wrong now), "risk" (what could go wrong), or "task" (what the question asks).
@@ -296,37 +297,45 @@ async def generate_order_walkthrough(question: str, chart: str, items: list, vit
     if key in _CACHE:
         return _CACHE[key]
 
-    try:
-        response = await _get_client().messages.create(
-            model=MODEL,
-            max_tokens=4000,
-            messages=[{"role": "user", "content": build_prompt(question, chart, vitals, items, language)}],
-            # SDK 0.68 predates output_config; same route as quiz_walkthrough.py.
-            extra_body={"output_config": {
-                "effort": "low",
-                "format": {"type": "json_schema", "schema": output_schema()},
-            }},
-        )
-    except Exception as e:
-        print(f"⚠️ Order walkthrough LLM call failed: {e}")
-        return None
+    # A decline is mostly noise, not a verdict on the key: on chat
+    # XbPrJdZgXEcRmlGNhgfY's 15 case questions, run twice each, 13 of 30 came
+    # back null, and most of those questions passed on the other run. So a
+    # rejection gets one fresh attempt, and only a usable walkthrough is
+    # cached: remembering a rejection had made one unlucky roll permanent
+    # for the server's lifetime, and students saw "no walkthrough" every
+    # time (owner, 2026-10-11). Validation is unchanged, so a ladder that
+    # contradicts the key is still never shown.
+    for attempt in range(ATTEMPTS):
+        try:
+            response = await _get_client().messages.create(
+                model=MODEL,
+                max_tokens=4000,
+                messages=[{"role": "user", "content": build_prompt(question, chart, vitals, items, language)}],
+                # SDK 0.68 predates output_config; same route as quiz_walkthrough.py.
+                extra_body={"output_config": {
+                    "effort": "low",
+                    "format": {"type": "json_schema", "schema": output_schema()},
+                }},
+            )
+        except Exception as e:
+            print(f"⚠️ Order walkthrough LLM call failed: {e}")
+            return None
 
-    if response.stop_reason in ("refusal", "max_tokens"):
-        print(f"⚠️ Order walkthrough not usable: stop_reason={response.stop_reason}")
-        return None
-    text = next((b.text for b in response.content if getattr(b, "type", None) == "text"), "")
-    try:
-        raw = json.loads(text)
-    except (TypeError, json.JSONDecodeError):
-        print("⚠️ Order walkthrough returned non-JSON text")
-        return None
+        if response.stop_reason in ("refusal", "max_tokens"):
+            print(f"⚠️ Order walkthrough not usable: stop_reason={response.stop_reason}")
+            continue
+        text = next((b.text for b in response.content if getattr(b, "type", None) == "text"), "")
+        try:
+            raw = json.loads(text)
+        except (TypeError, json.JSONDecodeError):
+            print("⚠️ Order walkthrough returned non-JSON text")
+            continue
 
-    result = validate_order_walkthrough(raw, question, chart, items)
-    if result is None:
+        result = validate_order_walkthrough(raw, question, chart, items)
+        if result is not None:
+            _CACHE[key] = result
+            return result
         supported = raw.get("key_supported") if isinstance(raw, dict) else None
-        print(f"⚠️ Order walkthrough rejected (key_supported={supported}) for {question[:60]!r}")
-    # A rejection is remembered too: a question whose key the model would not
-    # defend should not be re-sent every time someone misses it. Transport
-    # failures above return before this and are retried on the next call.
-    _CACHE[key] = result
-    return result
+        print(f"⚠️ Order walkthrough rejected (attempt {attempt + 1}/{ATTEMPTS}, "
+              f"key_supported={supported}) for {question[:60]!r}")
+    return None
