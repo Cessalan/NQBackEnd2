@@ -119,7 +119,6 @@ from langchain_community.document_loaders import (
     PyPDFLoader,
     TextLoader,
     CSVLoader,
-    Docx2txtLoader,
     UnstructuredExcelLoader,
     UnstructuredPowerPointLoader)
 
@@ -154,101 +153,52 @@ from tools.flashcard_tools import stream_flashcards
 import json
 import hashlib
 
-# Custom PowerPoint loader that doesn't need NLTK
-class SimplePowerPointLoader:
-    """Lightweight PowerPoint loader using python-pptx directly."""
-    def __init__(self, file_path: str):
-        self.file_path = file_path
-    
+class LegacyOfficeLoader:
+    """A .ppt/.doc/.xls binary: converted to its modern format, then read like one.
+
+    python-pptx and python-docx only read the zip-based formats, so a legacy
+    deck used to fail every time ("Package not found at …ppt", 2026-09-28 and
+    10-08). Without LibreOffice installed, convert_legacy raises the
+    instruction to save it as .pptx instead.
+    """
+
+    def __init__(self, path, legacy_ext, *, service_tier='default'):
+        self.path = path
+        self.legacy_ext = legacy_ext
+        self.service_tier = service_tier
+
     def load(self):
-        """Extract text from PowerPoint slides."""
-        try:
-            from pptx import Presentation
-            from pptx.enum.shapes import MSO_SHAPE_TYPE
-        except ImportError:
-            raise ImportError("python-pptx is required. Install: pip install python-pptx")
-        
-        prs = Presentation(self.file_path)
-        documents = []
-        
-        for slide_num, slide in enumerate(prs.slides, start=1):
-            text_content = []
-            
-            # Extract text from all shapes in the slide
-            for shape in slide.shapes:
-                # Regular text shapes
-                if hasattr(shape, "text") and shape.text.strip():
-                    text_content.append(shape.text.strip())
-                
-                # Handle tables - use shape_type to check safely
-                if shape.shape_type == MSO_SHAPE_TYPE.TABLE:
-                    try:
-                        table = shape.table
-                        for row in table.rows:
-                            row_text = " | ".join(
-                                cell.text.strip() for cell in row.cells if cell.text.strip()
-                            )
-                            if row_text:
-                                text_content.append(row_text)
-                    except Exception as e:
-                        print(f"⚠️ Failed to extract table: {e}")
-                        continue
-                
-                # Handle grouped shapes (recursively extract text)
-                if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
-                    try:
-                        for sub_shape in shape.shapes:
-                            if hasattr(sub_shape, "text") and sub_shape.text.strip():
-                                text_content.append(sub_shape.text.strip())
-                    except Exception as e:
-                        print(f"⚠️ Failed to extract grouped shape: {e}")
-                        continue
-            
-            # Create document if there's content
-            if text_content:
-                page_content = "\n\n".join(text_content)
-                doc = Document(
-                    page_content=page_content,
-                    metadata={
-                        "source": os.path.basename(self.file_path),
-                        "page": slide_num,
-                        "total_slides": len(prs.slides)
-                    }
-                )
-                documents.append(doc)
-        
-        print(f"✅ Extracted text from {len(documents)} slides")
+        import tempfile
+        from core.file_format import convert_legacy
+        with tempfile.TemporaryDirectory() as out_dir:
+            converted = convert_legacy(self.path, self.legacy_ext, out_dir)
+            documents = get_loader_for_file(converted, service_tier=self.service_tier).load()
+        for document in documents:
+            document.metadata['source'] = os.path.basename(self.path)
         return documents
+
 
 # to load documents
 def get_loader_for_file(path, *, service_tier='default'):
-    ext = os.path.splitext(path)[-1].lower()
-    if ext in ('.docx', '.pptx', '.pdf', '.png', '.jpg', '.jpeg', '.webp'):
+    """Pick a loader by what the file IS (core.file_format), not by its name."""
+    from core.file_format import (detect_format, IMAGE_EXTENSIONS, LEGACY_TARGET,
+                                  UploadFormatError, UNSUPPORTED_TYPE)
+    kind = detect_format(path)
+    if kind in LEGACY_TARGET:
+        return LegacyOfficeLoader(path, kind, service_tier=service_tier)
+    if kind in ('.docx', '.pptx', '.pdf', '.png', '.jpg', '.webp'):
         from core.material_loader import TeachingMaterialLoader
-        return TeachingMaterialLoader(path, service_tier=service_tier)
-    if ext == ".pdf":# pdf file support
-        #Detect if PDF is scanned or text-based
-        if is_scanned_pdf(path):
-            print("📷 Detected scanned PDF - Using OCR")
-            return OCRPDFLoader(path)
-        else:
-            print("📄 Detected text-based PDF - Using standard loader")
-            return PyPDFLoader(path)
-    elif ext == ".txt": # txt file support
-        return TextLoader(path, encoding="utf-8")
-    elif ext == ".csv":  #excel support
+        return TeachingMaterialLoader(path, service_tier=service_tier, kind=kind)
+    if kind == '.txt':
+        return TextLoader(path, autodetect_encoding=True)
+    if kind == '.csv':
         return CSVLoader(path, encoding="utf-8")
-    elif ext in [".doc", ".docx"]: # word document support
-        return Docx2txtLoader(path) 
-    elif ext in [".xls", ".xlsx"]: #excel support
-        return UnstructuredExcelLoader(path) 
-    elif ext in [".ppt", ".pptx"]: # power point support
-        return SimplePowerPointLoader(path)
-    elif ext in [".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp",".heic"]:  # Add image support
+    if kind == '.xlsx':
+        return UnstructuredExcelLoader(path)
+    if kind in IMAGE_EXTENSIONS:
         print("Extracting text from image")
         return OCRImageLoader(path)
-    else:
-        raise ValueError("Unsupported file type")
+    raise UploadFormatError(UNSUPPORTED_TYPE, "We can't read this kind of file.")
 
 # Initialize Firebase
 if not firebase_admin._apps:
@@ -1798,6 +1748,10 @@ async def upload_multiple_files(
     chat_id: str = Form(...),
     user_id: str = Form(...),
     language: str = Form(...),
+    # The browser's funnelId for this upload (FunnelService). Printed on the
+    # received/finished lines so a failed upload's funnel row can be found in
+    # these logs. Optional: older clients don't send it.
+    client_upload_id: str = Form(None),
 ):
     """Upload multiple files and process in parallel."""
     # Validate and normalize language parameter
@@ -1807,7 +1761,7 @@ async def upload_multiple_files(
     # Normalize language code (handle 'fr-FR', 'fr-CA', etc.)
     language = language.lower().split('-')[0]  # 'fr-FR' -> 'fr'
     prompt_language = _language_for_prompt(language)
-    print(f"*Upload received: user {user_id}, chat:{chat_id}, language:{language}*")
+    print(f"*Upload received: user {user_id}, chat:{chat_id}, language:{language}, upload:{client_upload_id}*")
     # Read all files immediately
     file_data_list = []
     for file in files:
@@ -1910,6 +1864,7 @@ async def upload_multiple_files(
             file_documents = {}  # filename -> documents
             file_bytes_map = {}  # filename -> bytes (for background upload)
             last_file_error = None  # remember why files failed (for batch error code)
+            last_file_code = None   # a core.file_format code, when the file was the problem
 
             # Drain the queue until all tasks are done and nothing is pending
             while True:
@@ -1931,6 +1886,7 @@ async def upload_multiple_files(
                     completed_files.append(update.get("file_id"))
                 elif update.get("type") in ("file_error", "embedding_error"):
                     last_file_error = update.get("message") or last_file_error
+                    last_file_code = update.get("code") or last_file_code
 
             # Collect per-file results (documents, insights, raw bytes)
             for result in gather_task.result():
@@ -1976,12 +1932,13 @@ async def upload_multiple_files(
             # state on this. Quota/rate-limit failures get code "capacity" so
             # the UI can tell users we're overloaded rather than blame them.
             if not completed_files:
+                print(f"❌ Upload failed, no file processed: chat:{chat_id}, upload:{client_upload_id}, last error: {last_file_error}")
                 err_text = (last_file_error or "").lower()
                 overloaded = any(token in err_text for token in
                                  ("429", "quota", "rate limit", "ratelimit", "overloaded"))
                 yield json.dumps({
                     "type": "error",
-                    "code": "capacity" if overloaded else "processing_failed",
+                    "code": "capacity" if overloaded else (last_file_code or "processing_failed"),
                     "message": ("We have too many users right now and couldn't complete the request"
                                 if overloaded else "All files failed to process")
                 }) + "\n"
@@ -2097,6 +2054,7 @@ async def upload_multiple_files(
             # ========================================
             # FINAL SUMMARY (IMMEDIATE)
             # ========================================
+            print(f"✅ Upload finished: chat:{chat_id}, upload:{client_upload_id}, {len(completed_files)}/{len(valid_files)} files")
             yield json.dumps({
                 "type": "all_complete",
                 "total_files": len(valid_files),
@@ -2204,12 +2162,19 @@ async def upload_multiple_files(
                         # Non-critical - user can still chat even if this fails
                         print(f"⚠️ Post-upload message failed: {post_upload_error}")
 
+        except (asyncio.CancelledError, GeneratorExit):
+            # The browser went away mid-stream: tab closed, phone locked, or
+            # its own stall/overall timer fired. The server's side of a
+            # frontend `upload_interrupted` / timeout row.
+            print(f"🔌 Upload client disconnected: chat:{chat_id}, upload:{client_upload_id}")
+            raise
         except Exception as e:
-            print(f"❌ Batch processing error: {e}")
+            print(f"❌ Batch processing error: {e} (upload:{client_upload_id})")
             import traceback
             traceback.print_exc()
             yield json.dumps({
                 "type": "error",
+                "code": "batch_error",
                 "message": str(e)
             }) + "\n"
     
@@ -2505,14 +2470,20 @@ async def process_file_from_bytes(file_bytes: bytes, filename: str, chat_id: str
         
     except Exception as e:
         print(f"❌ Error processing {filename}: {e}")
-        import traceback
-        traceback.print_exc()
+        from core.file_format import UploadFormatError
+        if not isinstance(e, UploadFormatError):
+            # Her file being unreadable is not our bug; keep tracebacks for ours.
+            import traceback
+            traceback.print_exc()
         
         updates.append({
             "type": "file_error",
             "file_id": file_id,
             "filename": filename,
-            "message": str(e)
+            "message": str(e),
+            # Set when the FILE is the problem (core.file_format): the frontend
+            # tells her what to do with it instead of "try again".
+            "code": getattr(e, "code", None),
         })
         
         return {
@@ -2655,8 +2626,10 @@ async def embed_document_task(temp_path: str, filename: str, chat_id: str, file_
         print(f"❌ Embedding error for {filename}: {e}")
         if 'insight_task' in locals() and not insight_task.done():
             insight_task.cancel()
-        import traceback
-        traceback.print_exc()
+        from core.file_format import UploadFormatError
+        if not isinstance(e, UploadFormatError):
+            import traceback
+            traceback.print_exc()
         raise
 
     finally:

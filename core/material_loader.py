@@ -65,10 +65,56 @@ def _teaching_images(page):
     return kept
 
 
+def raw_office_text(path, suffix):
+    """Text runs straight from a .pptx/.docx package's XML, one part per slide.
+
+    The fallback for a package python-pptx/python-docx won't open. No layout,
+    tables flattened, figures dropped: just the words, in order.
+    """
+    import re
+    import zipfile
+    from xml.etree import ElementTree
+    drawing_text = '{http://schemas.openxmlformats.org/drawingml/2006/main}t'
+    word_text = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t'
+    word_para = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p'
+    drawing_para = '{http://schemas.openxmlformats.org/drawingml/2006/main}p'
+    try:
+        archive = zipfile.ZipFile(path)
+    except zipfile.BadZipFile:
+        return []
+    with archive:
+        names = archive.namelist()
+        if suffix == '.pptx':
+            def number(name):
+                match = re.search(r'(\d+)\.xml$', name)
+                return int(match.group(1)) if match else 0
+            slides = sorted((n for n in names if re.match(r'ppt/slides/slide\d+\.xml$', n)), key=number)
+            parts = []
+            for name in slides:
+                try:
+                    root = ElementTree.fromstring(archive.read(name))
+                except ElementTree.ParseError:
+                    continue
+                lines = [''.join(t.text or '' for t in para.iter(drawing_text)) for para in root.iter(drawing_para)]
+                parts.append(f'[Slide {number(name)}]\n' + '\n'.join(line for line in lines if line.strip()))
+            return parts
+        if 'word/document.xml' not in names:
+            return []
+        try:
+            root = ElementTree.fromstring(archive.read('word/document.xml'))
+        except ElementTree.ParseError:
+            return []
+        lines = [''.join(t.text or '' for t in para.iter(word_text)) for para in root.iter(word_para)]
+        return ['\n'.join(line for line in lines if line.strip())]
+
+
 class TeachingMaterialLoader:
-    def __init__(self, file_path, *, service_tier='default'):
+    def __init__(self, file_path, *, service_tier='default', kind=None):
         self.file_path = file_path
         self.service_tier = service_tier
+        # The format the CONTENT has (core.file_format.detect_format). A deck
+        # renamed .pdf is still read as a deck; the name only decides by default.
+        self.kind = kind
         self._pending = []
 
     def _describe_visual(self, data, mime, label):
@@ -98,20 +144,39 @@ class TeachingMaterialLoader:
 
     def load(self):
         from langchain.schema import Document
-        suffix = Path(self.file_path).suffix.lower()
-        if suffix == '.docx':
-            parts = self._word()
-        elif suffix == '.pptx':
-            parts = self._slides()
+        suffix = self.kind or Path(self.file_path).suffix.lower()
+        if suffix in ('.docx', '.pptx'):
+            parts = self._office(suffix)
         elif suffix in ('.png', '.jpg', '.jpeg', '.webp'):
             import mimetypes
-            parts = [self._queue_visual(Path(self.file_path).read_bytes(), mimetypes.guess_type(self.file_path)[0], 'Uploaded teaching image')]
+            parts = [self._queue_visual(Path(self.file_path).read_bytes(), mimetypes.guess_type('image' + suffix)[0], 'Uploaded teaching image')]
         else:
             parts = self._pdf()
         parts = self._resolve_visuals(parts)  # image uploads; readers resolve their own
         return [Document(page_content=text, metadata={'source': Path(self.file_path).name,
                          'section': index, 'extraction_method': 'structured_material'})
                 for index, text in enumerate(parts) if text.strip()]
+
+    def _office(self, suffix):
+        """Structured read first; the package's raw text if the structure is broken.
+
+        python-pptx/python-docx refuse a package whose relationships are not
+        what Office writes (KeyError "no relationship of type …officeDocument",
+        seen 2026-10-13 from a deck she retried three times). Its slide XML is
+        usually intact, and her words matter more than its layout.
+        """
+        try:
+            return self._word() if suffix == '.docx' else self._slides()
+        except Exception as error:
+            self._pending = []
+            print(f"⚠️ Structured read of {Path(self.file_path).name} failed ({error!r}); reading its raw text")
+            parts = raw_office_text(self.file_path, suffix)
+            if not any(part.strip() for part in parts):
+                from core.file_format import UploadFormatError, UNREADABLE_DOCUMENT
+                raise UploadFormatError(
+                    UNREADABLE_DOCUMENT,
+                    'We could not read any text in this file. Export it as PDF and upload that.') from error
+            return parts
 
     def _word(self):
         from docx import Document
@@ -183,26 +248,36 @@ class TeachingMaterialLoader:
         from pptx.enum.shapes import MSO_SHAPE_TYPE
         presentation = Presentation(self.file_path)
         result = []
+        def read_shape(shape):
+            if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                return read_shapes(shape.shapes)
+            if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                return [self._queue_visual(shape.image.blob, shape.image.content_type, 'Slide figure')]
+            if getattr(shape, 'has_table', False):
+                return ['[Table]\n' + '\n'.join(' | '.join(c.text for c in r.cells) for r in shape.table.rows)]
+            if getattr(shape, 'has_text_frame', False):
+                return [shape.text]
+            if getattr(shape, 'has_chart', False):
+                chart = shape.chart
+                labels = [c.label for c in chart.plots[0].categories]
+                return ['[Chart]\n' + json.dumps({'categories': labels,
+                    'series': [{'name': s.name, 'values': list(s.values)} for s in chart.series]})]
+            if shape.shape_type == MSO_SHAPE_TYPE.LINE:
+                return [f'[Drawing connector: {shape.name}; position {shape.left},{shape.top}; size {shape.width},{shape.height}]']
+            return [f'[UNREADABLE FIGURE: slide shape {shape.name}]']
+
         def read_shapes(shapes):
             parts = []
             for shape in shapes:
-                if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
-                    parts.extend(read_shapes(shape.shapes))
-                elif shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
-                    parts.append(self._queue_visual(shape.image.blob, shape.image.content_type, 'Slide figure'))
-                elif getattr(shape, 'has_table', False):
-                    parts.append('[Table]\n' + '\n'.join(' | '.join(c.text for c in r.cells) for r in shape.table.rows))
-                elif getattr(shape, 'has_text_frame', False):
-                    parts.append(shape.text)
-                elif getattr(shape, 'has_chart', False):
-                    chart = shape.chart
-                    labels = [c.label for c in chart.plots[0].categories]
-                    parts.append('[Chart]\n' + json.dumps({'categories': labels,
-                        'series': [{'name': s.name, 'values': list(s.values)} for s in chart.series]}))
-                elif shape.shape_type == MSO_SHAPE_TYPE.LINE:
-                    parts.append(f'[Drawing connector: {shape.name}; position {shape.left},{shape.top}; size {shape.width},{shape.height}]')
-                else:
-                    parts.append(f'[UNREADABLE FIGURE: slide shape {shape.name}]')
+                # One shape must never cost her the deck. A picture LINKED to a
+                # file on the author's computer has no bytes in the package
+                # ("no embedded image", 3 decks lost 10-10→10-13); a chart
+                # with no plots has no categories.
+                try:
+                    parts.extend(read_shape(shape))
+                except Exception as error:
+                    print(f"⚠️ Skipped slide shape {getattr(shape, 'name', '?')}: {error!r}")
+                    parts.append(f"[UNREADABLE FIGURE: slide shape {getattr(shape, 'name', '')}]")
             return parts
         for index, slide in enumerate(presentation.slides):
             parts = [f'[Slide {index + 1}]'] + read_shapes(slide.shapes)
