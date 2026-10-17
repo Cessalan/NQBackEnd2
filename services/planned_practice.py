@@ -37,6 +37,12 @@ from services import requirement_check
 SELECTION_MODEL = "claude-haiku-5-5"
 MAX_PASSAGE_CHARS = 5000
 MAX_AVOID = 12
+# Once she has a question, the rest of a batch is not waited on forever. A
+# knowledge quiz on 2026-10-16 delivered one question of five and then went
+# quiet while the others were judged and rewritten; the browser gave up at 90s
+# of silence and cancelled the stream, so she was shown nothing at all. A slot
+# still unfinished after this is dropped (its quota refunded by finish()).
+BATCH_DEADLINE_S = 120
 
 
 class PlanUnavailable(Exception):
@@ -187,7 +193,8 @@ async def resolve_plan(*, chat_id, goals, view, scope_text, focus_topic, formats
         return saved
     if matched:
         selection = {"inScope": matched, "serves": {}, "gaps": []}
-    elif plan_model.needs_model_selection(view.get("items", []) if not focus_topic else [{"kind": "scope"}], False):
+    elif plan_model.needs_model_selection(view.get("items", []) if not focus_topic else [{"kind": "scope"}], False,
+                                          scope_text=scope_text):
         try:
             raw = await select_goals(goals, view, scope_text, focus_topic, language)
         except PlanUnavailable:
@@ -353,22 +360,29 @@ async def stream_planned(*, session, chat_id, view, total, offset=0, start=0, co
         for slot in slots]
     index = start
     delivered = 0
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + BATCH_DEADLINE_S
+    pending = set(tasks)
     try:
-        for coro in asyncio.as_completed(tasks):
+        while pending:
             if is_cancelled and is_cancelled():
-                for task in tasks:
-                    task.cancel()
                 return
-            try:
-                question = await coro
-            except Exception as e:  # noqa: BLE001 - one slot never sinks the batch
-                print(f"❌ planned slot failed: {type(e).__name__}: {e}")
-                continue
-            if not question:
-                continue
-            yield {"status": "question_ready", "question": question, "index": index, "source": "plan"}
-            index += 1
-            delivered += 1
+            if delivered and loop.time() >= deadline:
+                print(f"⏱️ planned batch: {len(pending)} slot(s) past {BATCH_DEADLINE_S}s, delivering {delivered}")
+                break
+            wait = max(0.01, min(5, deadline - loop.time())) if delivered else 5
+            done, pending = await asyncio.wait(pending, timeout=wait, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                try:
+                    question = task.result()
+                except Exception as e:  # noqa: BLE001 - one slot never sinks the batch
+                    print(f"❌ planned slot failed: {type(e).__name__}: {e}")
+                    continue
+                if not question:
+                    continue
+                yield {"status": "question_ready", "question": question, "index": index, "source": "plan"}
+                index += 1
+                delivered += 1
     finally:
         for task in tasks:
             if not task.done():

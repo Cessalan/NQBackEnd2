@@ -39,7 +39,9 @@ import json
 import re
 from collections import Counter
 
-PLAN_VERSION = 1
+# 2: a topic named in the request is a scope (needs_model_selection), so v1
+# plans built over all her material for a named topic are not reused.
+PLAN_VERSION = 2
 MAX_SELECTION_GOALS = 400
 _WORD = re.compile(r"[a-z0-9]+")
 _STOP = {"the", "and", "of", "for", "with", "in", "on", "a", "an", "to", "patient", "patients", "nursing",
@@ -115,19 +117,34 @@ def selection_key(goals, request_items, scope_text, focus_topic):
     return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()[:32]
 
 
-def needs_model_selection(request_items, focus_topic_matched):
+# Scope words that mean "all of it", so no selection is needed.
+_WHOLE_MATERIAL = re.compile(
+    r"^\s*(?:(?:on|from|about)\s+)?(?:all\s+(?:of\s+)?)?(?:the|my|her)?\s*(?:uploaded\s+|whole\s+|entire\s+)?"
+    r"(?:material|materials|notes|documents?|files?|uploads?|everything|course)\s*$", re.I)
+
+
+def names_a_scope(scope_text):
+    """True when the topic she (or the post-upload button) named is narrower than everything."""
+    return bool(scope_text and scope_text.strip()) and not _WHOLE_MATERIAL.match(scope_text)
+
+
+def needs_model_selection(request_items, focus_topic_matched, scope_text=None):
     """True when choosing goals needs reading, not matching.
 
     A focus ("medication classes") always does. A scope she named in words
     does, unless it is the derived whole-material scope. A targeted topic that
-    code already matched does not.
+    code already matched does not. Neither does the topic the quiz was called
+    with, unless it names something narrower than all her material: "a quiz
+    about kidney disorders" over two files was planned over both and four of
+    five questions came from the other file (2026-10-17), and a student who
+    clicked the knowledge quiz for five named topics got endotoxin shock.
     """
     for item in request_items or []:
         if item.get("kind") == "focus":
             return True
         if item.get("kind") == "scope" and not item.get("derived") and not focus_topic_matched:
             return True
-    return False
+    return not focus_topic_matched and names_a_scope(scope_text)
 
 
 def validate_selection(raw, goals, focus_items):

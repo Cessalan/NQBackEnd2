@@ -992,6 +992,12 @@ async def process_chat_message(chat_id: str, message: dict, websocket: WebSocket
                 if chunk_data.get("status") in ["mindmap_generating", "mindmap_complete"]:
                     print(f"🧠 Sending mindmap chunk: status={chunk_data.get('status')}, has_data={bool(chunk_data.get('mindmap_data'))}")
 
+                if chunk_data.get("type") == "heartbeat":
+                    # Liveness only: the frontend's watchdog counts any frame.
+                    await websocket.send_text(json.dumps({"type": "heartbeat"}))
+                    manager.update_activity(chat_id)
+                    continue
+
                 # Forward to WebSocket with type wrapper
                 await websocket.send_text(json.dumps({
                     "type": "stream_chunk",

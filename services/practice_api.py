@@ -23,6 +23,12 @@ CHAT_QUIZ_FIRST_BATCH = 20
 # at a time, the next ten starting while she still has three to answer, so a
 # 100-question request costs only what she actually reaches.
 PLANNED_BATCH = 10
+# The chat socket has no server heartbeat of its own, and the browser fails a
+# stream after 90s of silence (STALL_MS in the frontend's WebSocketManager.js)
+# and sends cancel_stream. Writing, judging and rewriting a batch is often
+# silent longer than that, so a chat quiz says it is alive every few seconds.
+# Same contract as the upload stream: keep this well under STALL_MS.
+QUIZ_HEARTBEAT_S = 10
 
 
 class TutorRequest(BaseModel):
@@ -349,6 +355,32 @@ def _empathetic_events(message):
     yield {"status": "empathetic_message_complete", "full_message": message}
 
 
+async def _with_heartbeat(events, every=QUIZ_HEARTBEAT_S):
+    """`events`, plus {"status": "heartbeat"} whenever it is silent for `every` seconds."""
+    iterator = events.__aiter__()
+    pending = asyncio.ensure_future(iterator.__anext__())
+    try:
+        while True:
+            done, _ = await asyncio.wait({pending}, timeout=every)
+            if not done:
+                yield {"status": "heartbeat"}
+                continue
+            try:
+                event = pending.result()
+            except StopAsyncIteration:
+                return
+            yield event
+            pending = asyncio.ensure_future(iterator.__anext__())
+    finally:
+        if not pending.done():
+            pending.cancel()
+            try:
+                await pending
+            except (asyncio.CancelledError, StopAsyncIteration, Exception):  # noqa: BLE001
+                pass
+        await iterator.aclose()
+
+
 def _is_cancelled(chat_id):
     from tools.quiztools import get_connection_manager
     manager = get_connection_manager()
@@ -399,7 +431,7 @@ async def metered_chat_quiz_stream(**kwargs):
             from services.planned_practice import PlanUnavailable, stream_planned
             empathetic = kwargs.get("empathetic_message")
             try:
-                async for chunk in stream_planned(
+                async for chunk in _with_heartbeat(stream_planned(
                         session=session, chat_id=chat_id, view=request_view, total=allowed,
                         count=allocation["count"], difficulty=kwargs.get("difficulty") or "medium",
                         question_types=kwargs.get("question_types"), quiz_mode=kwargs.get("quiz_mode") or "knowledge",
@@ -407,7 +439,7 @@ async def metered_chat_quiz_stream(**kwargs):
                         existing_questions=kwargs.get("existing_questions"), source_text=kwargs.get("source_text"),
                         focus_topic=focus_topic, scope_text=kwargs.get("topic"),
                         additional_context=kwargs.get("additional_context"),
-                        is_cancelled=lambda: _is_cancelled(chat_id)):
+                        is_cancelled=lambda: _is_cancelled(chat_id))):
                     if empathetic and chunk.get("status") == "quiz_planning":
                         for event in _empathetic_events(empathetic):
                             yield {**event, **stamp}
@@ -424,7 +456,7 @@ async def metered_chat_quiz_stream(**kwargs):
         kwargs["requested_total"] = allowed
         kwargs["num_questions"] = allocation["count"]
         kwargs["request"] = request_view
-        async for chunk in stream_quiz_questions(**kwargs):
+        async for chunk in _with_heartbeat(stream_quiz_questions(**kwargs)):
             if chunk.get("status") == "question_ready":
                 questions.append(chunk["question"])
             if chunk.get("status") == "quiz_complete":

@@ -107,6 +107,22 @@ def item_id(kind, label):
     return f"{kind}:{slug(label)}"
 
 
+# A negation before a match in the same clause cancels it: the app's own
+# Knowledge Quiz button sends "Use direct factual questions, not clinical
+# scenarios", and reading that as a request FOR clinical scenarios gave every
+# knowledge quiz two contradictory requirements (found 2026-10-13). Same rule
+# as practice_profile's format negation.
+_NEGATION = re.compile(r"\b(?:no|not|don'?t|dont|do\s+not|without|avoid|never|instead\s+of|rather\s+than|pas\s+de|sans)\b", re.I)
+
+
+def _negated(text, match):
+    start = max((m.end() for m in _CLAUSE_OR_COMMA.finditer(text, 0, match.start())), default=0)
+    return bool(_NEGATION.search(text[start:match.start()]))
+
+
+_CLAUSE_OR_COMMA = re.compile(r"[.;!?\n,]+|\bbut\b", re.I)
+
+
 def said_for(text, match):
     """The clause of her message that contains a match: her words, not ours."""
     text = str(text or "")
@@ -127,7 +143,7 @@ def floor(text, explicit_total=None):
     """
     text = str(text or "")
     result = {"total": explicit_total if isinstance(explicit_total, int) and explicit_total > 0 else None,
-              "full": False, "exam": False, "style": None, "said": {}}
+              "full": False, "exam": False, "style": None, "style_refused": False, "said": {}}
     if not text.strip():
         return result
     if not result["total"]:
@@ -146,7 +162,11 @@ def floor(text, explicit_total=None):
         result["exam"] = True
         result["full"] = bool(full)
         result["said"]["exam"] = said_for(text, full or exam)
-    style = _STYLE.search(text)
+    matches = list(_STYLE.finditer(text))
+    style = next((m for m in matches if not _negated(text, m)), None)
+    # Refusing the style withdraws a saved one: an earlier "NCLEX style" must
+    # not turn a later "not clinical scenarios" quiz into scenarios.
+    result["style_refused"] = bool(matches) and style is None
     if style:
         result["style"] = {"id": "style:clinical", "kind": "style", "label": "Clinical reasoning, NCLEX style",
                            "said": said_for(text, style),

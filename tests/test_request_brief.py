@@ -67,6 +67,28 @@ class FloorReadsRealRequests(unittest.TestCase):
                 self.assertIsNotNone(floor(text)["style"])
         self.assertIsNone(floor("quiz me on diabetes")["style"])
 
+    def test_a_refused_style_is_not_a_request_for_it(self):
+        # The app's own Knowledge Quiz button (found 2026-10-13).
+        self.assertIsNone(floor("Generate a knowledge test quiz about Maslow. Use direct factual questions, not clinical scenarios")["style"])
+        for text in ("no nclex style please, just definitions", "questions without case-based scenarios",
+                     "factual recall rather than clinical reasoning", "pas de mises en situation"):
+            with self.subTest(text=text):
+                self.assertIsNone(floor(text)["style"])
+
+    def test_refusing_the_style_withdraws_a_saved_one(self):
+        result = floor("Use direct factual questions, not clinical scenarios")
+        self.assertTrue(result["style_refused"])
+        saved, _ = rb.merge([], [], floor_style=floor("nclex style")["style"])
+        brief, _ = rb.merge(saved, [], drop=["style"])
+        self.assertEqual(brief, [])
+        self.assertFalse(floor("make them nclex style")["style_refused"])
+        self.assertFalse(floor("quiz me on diabetes")["style_refused"])
+
+    def test_a_negation_elsewhere_does_not_cancel_her_request(self):
+        style = floor("no ordering questions, but make them nclex style")["style"]
+        self.assertIsNotNone(style)
+        self.assertIsNotNone(floor("I don't know much yet. Give me NCLEX style questions")["style"])
+
 
 class TotalIsWhatSheAskedFor(unittest.TestCase):
     def test_her_number_wins_over_everything(self):

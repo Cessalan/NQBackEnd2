@@ -113,6 +113,16 @@ class Selection(unittest.TestCase):
         self.assertTrue(plan.needs_model_selection([{"kind": "scope", "label": "only angina"}], False))
         self.assertFalse(plan.needs_model_selection([{"kind": "scope", "label": "HFpEF"}], True))
 
+    def test_the_topic_she_named_is_a_scope(self):
+        # The knowledge-quiz button and "a quiz about X" arrive as the topic, not a brief item.
+        self.assertTrue(plan.needs_model_selection([], False, scope_text="kidney disorders and filtration"))
+        self.assertTrue(plan.needs_model_selection(
+            [], False, scope_text="Prokaryotic and eukaryotic cells, Gram-positive and gram-negative cell walls, Biofilms"))
+        for whole in (None, "", "the uploaded material", "my notes", "all of my files", "everything"):
+            with self.subTest(whole=whole):
+                self.assertFalse(plan.needs_model_selection([], False, scope_text=whole))
+        self.assertFalse(plan.needs_model_selection([], True, scope_text="HFpEF"))
+
 
 class Scheduling(unittest.TestCase):
     def setUp(self):

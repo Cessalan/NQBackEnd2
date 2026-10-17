@@ -1417,6 +1417,11 @@ class NursingTutor:
                                             "full_message": chunk.get("full_message")
                                         }) + "\n"
 
+                                    elif chunk.get('status') == 'heartbeat':
+                                        # Keeps the browser's stall watchdog from
+                                        # cancelling a slow batch (practice_api).
+                                        yield json.dumps({"type": "heartbeat"}) + '\n'
+
                                     elif chunk.get('status') in ('material_analyzing', 'practice_plan_ready', 'quiz_planning'):
                                         if chunk.get('plan'):
                                             quiz_settings['plan_id'] = chunk['plan']['id']
@@ -2723,6 +2728,8 @@ IMPORTANT: If user now says "more", "again", "another":
             args['difficulty'] = profile['difficulty']
         if floor['style']:
             profile['brief'], _ = rb.merge(profile['brief'], [], floor_style=floor['style'])
+        elif floor['style_refused']:
+            profile['brief'], _ = rb.merge(profile['brief'], [], drop=['style'])
         brief_items = list(profile['brief']) + list(ctx.get('request_only') or [])
         if any(i['kind'] == 'style' for i in brief_items):
             # She asked for clinical reasoning; every slot is written as a
