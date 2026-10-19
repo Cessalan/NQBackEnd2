@@ -48,5 +48,17 @@ class RebuiltRequirements(unittest.TestCase):
         self.assertEqual(practice_api.planned_quiz_mode({"quiz_mode": "made-up"}, {"items": []}), "nclex")
 
 
+
+class StemsStartWithTheQuestion(unittest.TestCase):
+    def test_an_echoed_slot_number_is_removed(self):
+        from services.planned_practice import strip_number
+        for raw in ("Question 5. Une femme de 32 ans", "question 12: A client", "Q3) A client", "  Question 2 - A client"):
+            with self.subTest(raw=raw):
+                self.assertFalse(strip_number({"question": raw})["question"].lower().startswith(("question", "q3")))
+        self.assertEqual(strip_number({"question": "Question the order if the client"})["question"],
+                         "Question the order if the client")
+        self.assertIsNone(strip_number(None))
+
+
 if __name__ == "__main__":
     unittest.main()

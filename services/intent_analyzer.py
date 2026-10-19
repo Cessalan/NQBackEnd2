@@ -212,7 +212,8 @@ TOOL_ARGS_OVERRIDES
                    none (an exam request with no number is handled separately)
     question_types: array, one or more of ["mcq", "sata", "casestudy"]
 - Quality_standard of "clinical_judgment" or "exam_board_specific" should
-  generally map to quiz_mode="nclex", difficulty="hard".
+  generally map to quiz_mode="nclex". Clinical is a style, not a difficulty:
+  set difficulty only when she asks for one in words.
 
 QUESTION_TYPES DECISION RULES
 - "mcq"        - default. Standard multiple choice with one right answer.

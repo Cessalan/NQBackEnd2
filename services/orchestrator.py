@@ -2701,7 +2701,13 @@ IMPORTANT: If user now says "more", "again", "another":
         from services import request_brief as rb
         ctx = getattr(self, '_request_ctx', None) or {}
         guess = args.get('question_types')
-        hard = (changes.get('difficulty') or profile['difficulty'] or args.get('difficulty')) == 'hard'
+        # Difficulty is hers to set, in this message or saved on the chat. A
+        # router or analyzer guess is not: it mapped every NCLEX request to
+        # "hard", and a hard request is written and checked to a standard
+        # she never asked for, about twice as slowly (2026-10-18).
+        said_difficulty = changes.get('difficulty') or profile['difficulty']
+        args['difficulty'] = said_difficulty or 'medium'
+        hard = said_difficulty == 'hard'
         if hard and not changes.get('include') and not profile['formats'] and (not guess or list(guess) == ['mcq']):
             # She asked for hard and named no format. The analyzer's default
             # (multiple choice only) would make every question the format
@@ -2724,8 +2730,6 @@ IMPORTANT: If user now says "more", "again", "another":
         args['num_questions'] = total
         if not assumed and not focus:
             profile['requestedTotal'] = total
-        if not changes.get('difficulty') and profile['difficulty']:
-            args['difficulty'] = profile['difficulty']
         if floor['style']:
             profile['brief'], _ = rb.merge(profile['brief'], [], floor_style=floor['style'])
         elif floor['style_refused']:

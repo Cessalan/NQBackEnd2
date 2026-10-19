@@ -28,6 +28,7 @@ import asyncio
 import hashlib
 import json
 import random
+import re
 import time
 
 from services import practice_plan as plan_model
@@ -249,8 +250,24 @@ def slot_content(slot, goal, view, additional_context=None, escalation=None):
     return "\n\n".join(lines)
 
 
-async def write_question(fmt, concept, content, *, difficulty, number, language, avoid, quiz_mode, learning_objective,
-                         hard=False):
+# Writers are told the slot number and sometimes echo it into the stem
+# ("Question 5. Une femme de 32 ans..."), which reads wrong when it arrives
+# second, and in exam mode, out of order (2026-10-18).
+_NUMBER_PREFIX = re.compile(r"^\s*(?:question|q)\s*\d+\s*[.:)\-–]\s*", re.I)
+
+
+def strip_number(question):
+    if question and isinstance(question.get("question"), str):
+        question["question"] = _NUMBER_PREFIX.sub("", question["question"], count=1)
+    return question
+
+
+async def write_question(fmt, concept, content, **kwargs):
+    return strip_number(await _write_question(fmt, concept, content, **kwargs))
+
+
+async def _write_question(fmt, concept, content, *, difficulty, number, language, avoid, quiz_mode, learning_objective,
+                          hard=False):
     if hard and fmt in ("mcq", "sata"):
         # Built hard (services/hard_items); the general writer is the fallback.
         from services.hard_items import write_hard

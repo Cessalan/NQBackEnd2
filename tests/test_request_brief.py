@@ -84,6 +84,17 @@ class FloorReadsRealRequests(unittest.TestCase):
         self.assertFalse(floor("make them nclex style")["style_refused"])
         self.assertFalse(floor("quiz me on diabetes")["style_refused"])
 
+    def test_asking_for_the_style_withdraws_a_rule_that_refused_it(self):
+        factual = {"kind": "rule", "label": "Direct factual questions",
+                   "said": "Use direct factual questions, not clinical scenarios.",
+                   "instruction": "Ask direct factual questions."}
+        saved, _ = rb.merge([], rb.analyzer_items({"requirements": [factual, CLASS_RULE]}))
+        brief, _ = rb.merge(saved, [], floor_style=floor("make it nclex style")["style"])
+        self.assertEqual(sorted(i["kind"] for i in brief), ["rule", "style"])
+        self.assertNotIn("Direct factual questions", [i["label"] for i in brief])
+        # A rule that never mentioned the style stays.
+        self.assertIn("Medication class, not drug names", [i["label"] for i in brief])
+
     def test_a_negation_elsewhere_does_not_cancel_her_request(self):
         style = floor("no ordering questions, but make them nclex style")["style"]
         self.assertIsNotNone(style)

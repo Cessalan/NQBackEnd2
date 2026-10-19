@@ -222,6 +222,10 @@ def analyzer_items(practice_changes):
     return [i for i in (normalize_item(r) for r in (changes.get("requirements") or [])) if i]
 
 
+def _refuses_style(item):
+    return item["kind"] != "style" and bool(item.get("said")) and floor(item["said"])["style_refused"]
+
+
 def merge(saved, new_items, *, scope_action=None, drop=None, floor_style=None):
     """The durable brief after one message. Returns (brief, request_only).
 
@@ -240,6 +244,12 @@ def merge(saved, new_items, *, scope_action=None, drop=None, floor_style=None):
     incoming = [i for i in (new_items or []) if i and i["kind"] in DURABLE_KINDS]
     if floor_style and not any(i["kind"] == "style" for i in incoming):
         incoming.append(dict(floor_style))
+    if any(i["kind"] == "style" for i in incoming):
+        # Asking for clinical style now retires a requirement saved from her
+        # refusing it ("direct factual questions, not clinical scenarios").
+        # Kept, the two contradict: every question fails one of them and is
+        # rewritten, which took a 5-question quiz to 130s (2026-10-18).
+        brief = [i for i in brief if not _refuses_style(i)]
     request_only = []
     for item in incoming:
         if scope_action == "focus" and item["kind"] in ("scope", "focus"):
