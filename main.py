@@ -123,7 +123,7 @@ from langchain_community.document_loaders import (
     UnstructuredPowerPointLoader)
 
 from fastapi import File, UploadFile, Form
-from typing import List
+from typing import List, Optional
 from uuid import uuid4
 import mimetypes
 
@@ -1750,7 +1750,7 @@ def get_post_upload_actions(language: str) -> list:
 
 @app.post("/chat/upload-files")
 async def upload_multiple_files(
-    files: List[UploadFile] = File(...),
+    files: Optional[List[UploadFile]] = File(None),
     chat_id: str = Form(...),
     user_id: str = Form(...),
     language: str = Form(...),
@@ -1758,6 +1758,10 @@ async def upload_multiple_files(
     # received/finished lines so a failed upload's funnel row can be found in
     # these logs. Optional: older clients don't send it.
     client_upload_id: str = Form(None),
+    # JSON list of names the browser already wrote to chats/{chat_id}/uploads/
+    # (services/staged_upload.py). Sent INSTEAD of `files` by current clients,
+    # which is what gets uploads past Cloud Run's 32 MiB request limit.
+    storage_files: str = Form(None),
 ):
     """Upload multiple files and process in parallel."""
     # Validate and normalize language parameter
@@ -1767,10 +1771,19 @@ async def upload_multiple_files(
     # Normalize language code (handle 'fr-FR', 'fr-CA', etc.)
     language = language.lower().split('-')[0]  # 'fr-FR' -> 'fr'
     prompt_language = _language_for_prompt(language)
-    print(f"*Upload received: user {user_id}, chat:{chat_id}, language:{language}, upload:{client_upload_id}*")
+    print(f"*Upload received: user {user_id}, chat:{chat_id}, language:{language}, upload:{client_upload_id}, staged:{bool(storage_files)}*")
     # Read all files immediately
     file_data_list = []
-    for file in files:
+    if storage_files:
+        from services.staged_upload import read_staged_files, staged_names
+        names = staged_names(storage_files)
+        if names is None:
+            raise HTTPException(status_code=400, detail="Invalid storage_files")
+        file_data_list = await read_staged_files(storage.bucket(), chat_id, names)
+        for f in file_data_list:
+            print(f"✅ Read staged file: {f['filename']} ({f['size']} bytes)" if "bytes" in f
+                  else f"❌ Staged file {f['filename']}: {f['error']}")
+    for file in files or []:
         try:
             file_bytes = await file.read()
             file_data_list.append({
@@ -1803,7 +1816,8 @@ async def upload_multiple_files(
                     yield json.dumps({
                         "type": "file_error",
                         "filename": failed["filename"],
-                        "message": f"Failed to read file: {failed['error']}"
+                        "message": f"Failed to read file: {failed['error']}",
+                        "code": failed.get("code"),
                     }) + "\n"
             
             # Get successfully read files
@@ -1812,9 +1826,13 @@ async def upload_multiple_files(
             if not valid_files:
                 yield json.dumps({
                     "type": "error",
+                    # A single oversized file is hers to fix, not a retry.
+                    "code": next((f.get("code") for f in failed_reads if f.get("code")), None),
                     "message": "No valid files to process"
                 }) + "\n"
                 return
+            # Already in Storage: the background task must not upload them again.
+            staged_filenames = {f["filename"] for f in valid_files if f.get("staged")}
             
             yield json.dumps({
                 "type": "batch_start",
@@ -1919,7 +1937,7 @@ async def upload_multiple_files(
                 # Store documents for background upload
                 if documents:
                     file_documents[filename] = documents
-                if file_bytes:
+                if file_bytes and filename not in staged_filenames:
                     file_bytes_map[filename] = file_bytes
 
                 # ========================================
