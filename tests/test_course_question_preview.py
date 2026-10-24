@@ -20,6 +20,12 @@ class QuestionPreviewTests(unittest.TestCase):
         self.assertIn(result, text)
         self.assertIsNone(preview_passage('Copyright Author Name, M.Sc. ' * 20))
 
+    def test_preview_skips_the_title_slide(self):
+        title = '[Slide 1] Complex Renal Problems “Kidneys are the Windows of the Body” Fall 2026 Brenda K. Shelton DNP. '
+        result = preview_passage(title + PASSAGE)
+        self.assertEqual(result, PASSAGE)
+        self.assertIsNone(preview_passage(title * 4))
+
     def question(self, **changes):
         return dict(question='A sample question?', options=['A', 'B', 'C', 'D'], correctIndex=0,
                     topic='Topic', rationale='Explanation', sourceId=0, sourceQuote=PASSAGE, **changes)
@@ -111,8 +117,13 @@ class QuestionPreviewTests(unittest.TestCase):
         result = validate_questions([self.sata(), later, opener], sources, ['Topic'])
         self.assertEqual(result[0]['question'], 'Opener')
         self.assertEqual(len(result), 3)
-        # Without a single-answer question on source 0 there is no opener, so no check.
-        self.assertEqual(validate_questions([self.sata(), later], sources, ['Topic']), [])
+        # No single-answer question on source 0: the first one from another
+        # source opens instead of the whole set being thrown away.
+        result = validate_questions([self.sata(), later], sources, ['Topic'])
+        self.assertEqual([q['question'] for q in result], ['Applied, other source', 'Which findings apply?'])
+        self.assertEqual(result[0]['source']['filename'], 'other.pdf')
+        # No single-answer question at all: still no check.
+        self.assertEqual(validate_questions([self.sata()], sources, ['Topic']), [])
 
     def test_citation_slips_are_repaired_only_from_the_source_text(self):
         other = 'A different passage about fall prevention. Keep the bed in the lowest position at all times.'

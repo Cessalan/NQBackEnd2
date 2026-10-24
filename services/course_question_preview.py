@@ -14,7 +14,10 @@ def _plain(value):
 
 def preview_passage(text):
     """Pick a contiguous body excerpt; never display author credits as evidence."""
-    credits = re.compile(r"copyright|©|\badapt[ée]?[ed]*\b|\bprofess(?:or|eur)\b|\b[MB]\.\s?Sc\.?|\bInf\.|\b(?:author|auteur)\b|spécialiste en soins", re.I)
+    credits = re.compile(r"copyright|©|\badapt[ée]?[ed]*\b|\bprofess(?:or|eur)\b|\b[MB]\.\s?Sc\.?|\bInf\.|\b(?:author|auteur)\b|spécialiste en soins"
+                         # A deck's title slide: nothing on it to ask about, and a
+                         # bare lecturer's name gets past the credit words above.
+                         r"|\[Slide 1\]|\b(?:DNP|Ph\.?D|MSN|APRN|FNP-BC)\b|\b(?:Fall|Spring|Summer|Winter|Autumn|Automne|Hiver|Printemps|Été)\s+20\d\d\b", re.I)
     # Sentence and bullet boundaries preserve exact source wording. Starting
     # after the last credit is safer than removing fragments within a quote.
     starts = [0] + [m.end() for m in re.finditer(r"[.!?]\s+|[•●]\s*", text)]
@@ -153,11 +156,17 @@ def validate_questions(payload, sources, topics):
             question["scenario"] = scenario
         questions.append(question)
 
-    # The opener must quote the passage already on screen (source 0) and be
-    # single-answer. Without one the whole set is refused, as before: the
-    # animation promises "this question comes from that passage".
+    # The opener is single-answer, and preferably quotes the passage already on
+    # screen (source 0). It used to HAVE to: without one the whole set was
+    # refused. Replayed on live uploads (2026-10-21) that threw away 4 of 6
+    # checks, including one of five valid questions, because the model wrote
+    # about other slides; ~2 in 3 students got the recall-MCQ fallback instead.
+    # The promise still holds without it: course_question_ready carries the
+    # opener's own source, and the frontend swaps the passage to that one.
     opener = next((i for i, q in enumerate(questions)
                    if q["sourceId"] == 0 and q["format"] == "mcq"), None)
+    if opener is None:
+        opener = next((i for i, q in enumerate(questions) if q["format"] == "mcq"), None)
     if opener is None:
         return []
     questions.insert(0, questions.pop(opener))
