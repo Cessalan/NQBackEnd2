@@ -849,22 +849,30 @@ def summarize_materials(material_insights: dict) -> dict:
         topics = [t for t in (insights.get("topics") or []) if isinstance(t, str) and t.strip()]
         concepts = [c for c in (insights.get("concepts") or []) if isinstance(c, str) and c.strip()]
         total_concepts += len(concepts)
+        # A full analysis groups its learning goals under each main topic, so
+        # a topic is credited with its own goals. Previews and older insights
+        # only have the file's list, which every topic in the file shares.
+        own = {}
+        for group in insights.get("mainTopics") or []:
+            if isinstance(group, dict) and isinstance(group.get("title"), str):
+                own[group["title"].strip()] = [o for o in group.get("outcomes") or []
+                                               if isinstance(o, str) and o.strip()]
 
         for topic in topics:
             label = topic.strip()
             slot = per_topic.setdefault(label, {"topic": label, "files": set(), "concepts": []})
             slot["files"].add(filename)
-            # Concepts are extracted per file, not per topic, so a file's
-            # concepts are attributed to each topic that file covers. That
-            # over-counts a many-topic file, which is why the count is
-            # normalised below rather than reported raw.
-            slot["concepts"].extend(concepts)
+            slot["concepts"].extend(own.get(label, concepts) if own else concepts)
 
     file_count = max(len(filenames), 1)
+    # Depth is measured against her deepest topic rather than a fixed count:
+    # with a fixed cap of 12 every topic of a long deck scored the same, and
+    # the alphabet chose where her plan started (2026-10-30).
+    deepest = max((len(set(s["concepts"])) for s in per_topic.values()), default=0) or 1
     rows = []
     for slot in per_topic.values():
         file_share = len(slot["files"]) / file_count
-        concept_depth = min(len(set(slot["concepts"])), 12) / 12.0
+        concept_depth = len(set(slot["concepts"])) / deepest
         # Coverage breadth (how many of her files touch it) counts double the
         # depth of any one file: a topic in every deck is the spine of the
         # course, a topic with many bullets in one deck is one long slide.
@@ -874,12 +882,13 @@ def summarize_materials(material_insights: dict) -> dict:
                 "topic": slot["topic"],
                 "file_count": len(slot["files"]),
                 "files": sorted(slot["files"]),
-                "key_points": sorted(set(slot["concepts"]))[:8],
+                "key_points": list(dict.fromkeys(slot["concepts"]))[:8],
                 "emphasis": emphasis,
             }
         )
 
-    rows.sort(key=lambda r: (-r["emphasis"], r["topic"].lower()))
+    # Stable sort: equal emphasis keeps her files' own order, never the alphabet.
+    rows.sort(key=lambda r: -r["emphasis"])
 
     return {
         "confidence": CONFIDENCE_VERIFIED,
@@ -1201,7 +1210,8 @@ def build_strategy(materials: dict, concept_map: Optional[dict], exam: Optional[
             }
         )
 
-    rows.sort(key=lambda r: (-r["score"], -r["signals"]["material_emphasis"], r["topic"].lower()))
+    # Stable: a full tie keeps the materials' order (her files' own order).
+    rows.sort(key=lambda r: (-r["score"], -r["signals"]["material_emphasis"]))
 
     # Recommended start: highest dependency inside the top window, because the
     # best first topic is the one the rest of the plan stands on.

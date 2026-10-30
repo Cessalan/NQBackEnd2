@@ -483,5 +483,88 @@ class BackgroundAnalysisTests(unittest.TestCase):
         self.assertEqual(result[0]['fingerprint'], analysis['fingerprint'])
 
 
+def preview(*topics):
+    return {'topics': list(topics), 'concepts': [], 'mainTopics': [], 'insights': [],
+            'document_type': 'teaching material', 'quick': True, 'frameworks': [{'id': 'sbar'}]}
+
+
+def analysed(*pairs):
+    """An analysis with one goal per (main topic, outcome) pair."""
+    return {'complete': True, 'sections': 1, 'warnings': [], 'examples': [],
+            'goals': [{'mainTopic': main, 'topic': main, 'outcome': outcome} for main, outcome in pairs]}
+
+
+class CompleteInsightsTests(unittest.TestCase):
+    """Planning from the upload preview: four decks became a plan opening on
+    "BATH ADMINISTRATION", a slide heading with nothing behind it (2026-10-30)."""
+
+    def test_a_preview_is_replaced_by_the_running_upload_analysis(self):
+        from services import document_understanding as du
+        full = analysed(('Pressure injuries', 'Stage a pressure injury'), ('Pressure injuries', 'Use the Braden scale'))
+        async def run():
+            async def finishing():
+                await asyncio.sleep(0.01)
+                return full
+            du._BACKGROUND[('chat', 'tissue.pptx')] = asyncio.create_task(finishing())
+            insights = {'tissue.pptx': preview('BATH ADMINISTRATION', 'Wound Closures')}
+            with patch('services.document_understanding.stored_analysis', side_effect=AssertionError('not needed')):
+                left = await du.complete_insights('chat', insights, wait_s=1)
+            du._BACKGROUND.clear()
+            return left, insights['tissue.pptx']
+        left, upgraded = asyncio.run(run())
+        self.assertEqual(left, [])
+        self.assertEqual(upgraded['topics'], ['Pressure injuries'])
+        self.assertEqual(upgraded['concepts'], ['Stage a pressure injury', 'Use the Braden scale'])
+        self.assertEqual(upgraded['frameworks'], [{'id': 'sbar'}], 'only the upload detects frameworks')
+        self.assertNotIn('quick', upgraded)
+
+    def test_a_reloaded_session_reads_the_saved_analysis(self):
+        from services import document_understanding as du
+        insights = {'notes.pdf': {'topics': ['Heading'], 'concepts': [], 'frameworks': []}}   # upload_loading shape
+        with patch('services.document_understanding.stored_analysis',
+                   return_value=analysed(('Oxygen therapy', 'Choose a Venturi mask'))) as stored:
+            left = asyncio.run(du.complete_insights('chat', insights))
+        stored.assert_called_once_with('chat', 'notes.pdf')
+        self.assertEqual(left, [])
+        self.assertEqual(insights['notes.pdf']['topics'], ['Oxygen therapy'])
+
+    def test_the_session_analysis_is_used_before_anything_is_read(self):
+        from services import document_understanding as du
+        insights = {'notes.pdf': preview('Heading')}
+        with patch('services.document_understanding.stored_analysis', side_effect=AssertionError('not needed')):
+            asyncio.run(du.complete_insights('chat', insights,
+                                             analyses={'notes.pdf': analysed(('Comfort', 'Assess pain'))}))
+        self.assertEqual(insights['notes.pdf']['topics'], ['Comfort'])
+
+    def test_a_slow_or_missing_analysis_keeps_the_preview_within_the_budget(self):
+        from services import document_understanding as du
+        async def run():
+            never = asyncio.create_task(asyncio.sleep(30))
+            du._BACKGROUND[('chat', 'slow.pdf')] = never
+            insights = {'slow.pdf': preview('Heading'), 'empty.pdf': preview('Other')}
+            with patch('services.document_understanding.stored_analysis', return_value=None):
+                started = asyncio.get_running_loop().time()
+                left = await du.complete_insights('chat', insights, wait_s=0.05)
+                elapsed = asyncio.get_running_loop().time() - started
+            self.assertFalse(never.cancelled(), 'the upload keeps analysing for the next reader')
+            never.cancel()
+            du._BACKGROUND.clear()
+            return left, elapsed, insights
+        left, elapsed, insights = asyncio.run(run())
+        self.assertEqual(left, ['slow.pdf', 'empty.pdf'])
+        self.assertLess(elapsed, 1)
+        self.assertTrue(insights['slow.pdf']['quick'])
+
+    def test_full_insights_and_goal_less_analyses_are_left_alone(self):
+        from services import document_understanding as du
+        full = {'topics': ['Comfort'], 'concepts': ['Assess pain']}
+        insights = {'done.pdf': full, 'blank.pdf': preview('Heading')}
+        with patch('services.document_understanding.stored_analysis', return_value=analysed()) as stored:
+            left = asyncio.run(du.complete_insights('chat', insights))
+        stored.assert_called_once_with('chat', 'blank.pdf')
+        self.assertIs(insights['done.pdf'], full)
+        self.assertEqual(left, ['blank.pdf'])
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -2377,7 +2377,7 @@ async def extract_file_insights_from_text(text, filename, chat_id, file_id, upda
     waits only for quick_overview (about the old flow's speed), while the full
     analysis keeps running; quizzes reuse that run (document_understanding).
     """
-    from services.document_understanding import display_insights, quick_overview, start_background_analysis
+    from services.document_understanding import quick_overview, start_background_analysis, upgrade_insights
     updates.append({"type": "insight_extraction_start", "file_id": file_id, "filename": filename})
 
     def analysed(analysis):
@@ -2385,10 +2385,11 @@ async def extract_file_insights_from_text(text, filename, chat_id, file_id, upda
         if session is None:
             return  # saved to Firestore by analyse_document; reloaded on demand
         session.session.material_analysis[filename] = analysis
-        # Chapter groups for practice coverage; the card already showed its preview.
+        # The card already showed its preview; everything read from here on
+        # (the tutor, course intelligence, the planner) gets the full analysis.
         insights = getattr(session.session, "file_insights", {}) or {}
         if filename in insights:
-            insights[filename]["mainTopics"] = display_insights(analysis)["mainTopics"]
+            insights[filename] = upgrade_insights(insights[filename], analysis)
 
     start_background_analysis(text, filename, chat_id=chat_id, language=language,
                               index_fingerprint=index_fingerprint, on_done=analysed)
@@ -2974,6 +2975,7 @@ async def generate_section(request: SectionRequest):
 
 from models.requests import StudyPlanRequest, StudyItemRequest, StudyAudioRequest, StudyReviewPlanRequest, DiagnosticQuizRequest, StudyMindmapRequest, StudyInterpretRequest, StudyExamRequest, NodeDebriefRequest, NarrationRequest, CourseIntelligenceRequest
 from services import course_intelligence
+from services.document_understanding import complete_insights
 from services import student_emphasis
 from services import student_emphasis_store
 from models.requests import ExamDebriefTurnRequest
@@ -3116,6 +3118,7 @@ async def generate_study_plan(request: StudyPlanRequest):
 
         session = ACTIVE_SESSIONS[request.chat_id]
         file_insights = getattr(session.session, "file_insights", {})
+        await complete_insights(request.chat_id, file_insights, analyses=getattr(session.session, "material_analysis", None))
 
         # ------------------------------------------
         # STEP 2: Collect all topics and concepts
@@ -4168,6 +4171,10 @@ async def run_course_intelligence_endpoint(request: CourseIntelligenceRequest):
                 if not file_insights:
                     await session_wrapper.load_file_insights_from_firebase()
                     file_insights = getattr(session_wrapper.session, "file_insights", {}) or {}
+                # Ranks from the full analysis, not the upload's preview of
+                # headings. Heartbeats keep the stream alive while this waits.
+                await complete_insights(request.chat_id, file_insights,
+                                        analyses=getattr(session_wrapper.session, "material_analysis", None))
 
                 prompt_language = _language_for_prompt(request.language)
 
@@ -4295,6 +4302,8 @@ async def start_study_journey(request: StudyPlanRequest):
 
             session_wrapper = ACTIVE_SESSIONS[request.chat_id]
             file_insights = getattr(session_wrapper.session, "file_insights", {})
+            await complete_insights(request.chat_id, file_insights,
+                                    analyses=getattr(session_wrapper.session, "material_analysis", None))
 
             all_topics = []
             all_concepts = []
@@ -4570,6 +4579,7 @@ async def generate_diagnostic_quiz(request: DiagnosticQuizRequest):
 
         session = ACTIVE_SESSIONS[request.chat_id]
         file_insights = getattr(session.session, "file_insights", {})
+        await complete_insights(request.chat_id, file_insights, analyses=getattr(session.session, "material_analysis", None))
 
         # Build topic + concept context from file_insights
         all_topics = []

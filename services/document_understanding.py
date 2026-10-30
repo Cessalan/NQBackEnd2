@@ -779,3 +779,82 @@ def display_insights(analysis):
                          'example_count': len(analysis['examples']),
                          'formats': list(dict.fromkeys(e['format'] for e in analysis['examples'])),
                          'objectives': len(analysis['goals']), 'warnings': analysis['warnings']}}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ANYTHING THAT RANKS OR PLANS NEEDS THE FULL ANALYSIS (2026-10-30)
+#
+# Since 2026-10-10 the upload keeps only its quick preview as the file's
+# insights: headings copied off the slides and no concepts. The background
+# run's on_done wrote back mainTopics and nothing else, and the upload_loading
+# message a reloaded session reads holds the preview too. So course
+# intelligence and the planner ranked raw slide headings with nothing behind
+# them: 157 of 165 course reports in Oct 10-30, and four nursing decks became
+# a plan that opened on "BATH ADMINISTRATION" (a student thumbed it down: "i
+# want what was on the powerpoints only"). Readers that rank or plan call
+# complete_insights first; the chat card keeps the fast preview.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# The course-intelligence stream heartbeats while it waits, and the full run
+# takes 8-10s on a 4-page handout, longer on a deck.
+FULL_INSIGHTS_WAIT_S = 40
+
+
+def is_preview(insights):
+    """A preview carries headings and no concepts; the full analysis carries every goal's outcome."""
+    return bool(insights) and bool(insights.get('quick') or not insights.get('concepts'))
+
+
+def upgrade_insights(insights, analysis):
+    """The preview replaced by the full analysis. Frameworks are kept: only the upload detects them.
+    An analysis with no goals has nothing better to offer, so the preview stands."""
+    if not analysis or not analysis.get('goals'):
+        return insights
+    upgraded = {**(insights or {}), **display_insights(analysis)}
+    upgraded.pop('quick', None)
+    return upgraded
+
+
+def stored_analysis(chat_id, filename):
+    """The saved analysis of this file's latest revision, or None."""
+    try:
+        manifest = _ref(chat_id, filename).get().to_dict() or {}
+    except Exception:  # noqa: BLE001 - no analysis is a valid answer here
+        return None
+    digest = manifest.get('fingerprint')
+    return load_analysis(chat_id, filename, digest) if digest else None
+
+
+async def complete_insights(chat_id, file_insights, *, analyses=None, wait_s=FULL_INSIGHTS_WAIT_S):
+    """Swap each preview in `file_insights` for its full analysis, in place.
+
+    Looks in `analyses` (the session's material_analysis), then waits for the
+    upload's own run, sharing one `wait_s` budget across files, then reads the
+    saved analysis. A file with none of the three keeps its preview, which is
+    no worse than before. Returns the filenames still on a preview.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + wait_s
+    still_preview = []
+    for filename, insights in list((file_insights or {}).items()):
+        if not is_preview(insights):
+            continue
+        analysis = (analyses or {}).get(filename)
+        if analysis is None:
+            running = background_analysis(chat_id, filename)
+            if running is not None:
+                try:
+                    analysis = await asyncio.wait_for(asyncio.shield(running),
+                                                      timeout=max(0.0, deadline - loop.time()))
+                except Exception:  # noqa: BLE001 - too slow or failed: try the saved copy
+                    analysis = None
+        if analysis is None:
+            analysis = await asyncio.to_thread(stored_analysis, chat_id, filename)
+        upgraded = upgrade_insights(insights, analysis)
+        if upgraded is insights:
+            still_preview.append(filename)
+        else:
+            file_insights[filename] = upgraded
+    if still_preview:
+        print(f'insights still on preview for {chat_id}: {still_preview}')
+    return still_preview

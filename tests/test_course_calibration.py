@@ -14,6 +14,10 @@ endpoint = next(node for node in tree.body if isinstance(node, ast.AsyncFunction
 endpoint.decorator_list = []
 
 
+async def complete_insights(chat_id, file_insights, **kwargs):
+    return []  # these insights are already full
+
+
 class CalibrationEndpointTests(unittest.TestCase):
     def run_endpoint(self, questions, language="fr"):
         prompts = []
@@ -39,6 +43,7 @@ class CalibrationEndpointTests(unittest.TestCase):
             "ChatOpenAI": LLM, "HTTPException": HTTPError, "json": json,
             "DIAGNOSTIC_QUESTION_COUNT": 6, "DIAGNOSTIC_DEEP_TOPICS": 3,
             "_language_for_prompt": lambda value: "French" if value == "fr" else "English",
+            "complete_insights": complete_insights,
         }
         exec(compile(ast.Module(body=[endpoint], type_ignores=[]), "calibration_endpoint", "exec"), namespace)
         request = types.SimpleNamespace(chat_id="test", language=language,

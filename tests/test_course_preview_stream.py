@@ -37,7 +37,10 @@ class PreviewStreamTests(unittest.TestCase):
         fn.decorator_list = []
         async def load_store(_):
             return object()
+        async def complete_insights(chat_id, file_insights, **kwargs):
+            return []
         namespace = dict(asyncio=asyncio, json=json, CourseIntelligenceRequest=object,
+            complete_insights=complete_insights,
             vectorstore_manager=types.SimpleNamespace(load_combined_vectorstore_from_firebase=load_store),
             StreamingResponse=lambda iterator, **kwargs: iterator,
             COURSE_INTELLIGENCE_HEARTBEAT_S=.01, _language_for_prompt=lambda _: 'English',
