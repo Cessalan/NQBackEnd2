@@ -153,6 +153,8 @@ def _downgrade_by_customer(customer_id: str, event, sub_status: str = None):
             "proEndedAt": at,
             # Cleared so a returning subscriber's next proSince is unambiguous.
             "cancelAtPeriodEnd": False,
+            # Nothing left to pay once the subscription is gone.
+            "paymentIssue": firestore.DELETE_FIELD,
         },
     }, merge=True)
     _log_billing_event(user_ref, event, {
@@ -161,6 +163,51 @@ def _downgrade_by_customer(customer_id: str, event, sub_status: str = None):
         "customerId": customer_id,
     })
     return user_ref.id
+
+
+def _open_invoice(invoice_id):
+    """
+    The open invoice's hosted page and next retry, or (None, None).
+
+    The hosted page is where she can pay the overdue invoice with a new card,
+    no login. Better than the portal: a card declined as `stolen_card` never
+    works again, so retrying the old one recovers nothing.
+    """
+    if not invoice_id or not STRIPE_SECRET_KEY:
+        return None, None
+    try:
+        inv = stripe.Invoice.retrieve(invoice_id)
+    except stripe.error.StripeError:
+        return None, None
+    nxt = getattr(inv, "next_payment_attempt", None)
+    return (
+        getattr(inv, "hosted_invoice_url", None),
+        datetime.datetime.fromtimestamp(nxt, datetime.timezone.utc) if isinstance(nxt, (int, float)) else None,
+    )
+
+
+def record_payment_issue(user_ref, sub: dict, event=None):
+    """
+    Mark a Pro account whose renewal failed (subscription `past_due`).
+
+    Until 2026-10-30 this state was ignored: Pro stayed on, nothing told the
+    student, and Stripe deleted the subscription about three weeks later.
+    cyates lost a month that way and only came back for her next exam; two
+    more were past_due and still studying when it was found. Entitlement does
+    NOT change here (she keeps Pro through the retries), the frontend just
+    shows her the invoice link. `since` keeps the first failure across replays.
+    """
+    url, next_attempt = _open_invoice(sub.get("latest_invoice"))
+    snap = user_ref.get()
+    prior = (((snap.to_dict() or {}).get("billing") or {}).get("paymentIssue") or {}) if snap.exists else {}
+    issue = {
+        "since": prior.get("since") or (_event_time(event) if event else datetime.datetime.now(datetime.timezone.utc)),
+        "invoiceUrl": url,
+        "nextAttemptAt": next_attempt,
+        "subscriptionId": sub.get("id"),
+    }
+    user_ref.set({"billing": {"paymentIssue": issue}}, merge=True)
+    return issue
 
 
 def create_portal_session(uid: str, return_url: str):
@@ -211,6 +258,8 @@ def handle_event(event) -> dict:
             # acknowledgement lives outside the protected billing fields.
             "welcomeVersion": 1,
             "cancelAtPeriodEnd": False,
+            # A fresh checkout is a working card; drop any old failure.
+            "paymentIssue": firestore.DELETE_FIELD,
         }
         # Never overwritten: the day this person first paid, which is what
         # cohort and lifetime-value questions are actually asking for.
@@ -241,6 +290,26 @@ def handle_event(event) -> dict:
         if status in ("canceled", "unpaid"):
             uid = _downgrade_by_customer(obj.get("customer"), event, status)
             return {"status": "downgraded", "uid": uid, "subStatus": status}
+
+        # Renewal failed: keep Pro, tell her. Recovered: stop telling her.
+        was = ((event.get("data") or {}).get("previous_attributes") or {}).get("status")
+        if status == "past_due" or (status == "active" and was == "past_due"):
+            user_ref = _find_user_by_customer(obj.get("customer"))
+            if user_ref is None:
+                return {"status": "ignored", "reason": "unknown customer"}
+            if status == "past_due":
+                record_payment_issue(user_ref, obj, event)
+                log = {"tier": "pro", "subStatus": status, "customerId": obj.get("customer")}
+                _log_billing_event(user_ref, event, log)
+                if not obj.get("cancel_at_period_end"):
+                    return {"status": "payment_issue", "uid": user_ref.id}
+            else:
+                user_ref.set({"billing": {"paymentIssue": firestore.DELETE_FIELD}}, merge=True)
+                _log_billing_event(user_ref, event, {
+                    "tier": "pro", "subStatus": status, "recovered": True, "customerId": obj.get("customer"),
+                })
+                if not obj.get("cancel_at_period_end"):
+                    return {"status": "payment_recovered", "uid": user_ref.id}
 
         # Still paying, but they clicked cancel in the portal: Stripe keeps the
         # subscription alive until the period ends, so entitlement MUST NOT
