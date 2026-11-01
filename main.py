@@ -3270,6 +3270,7 @@ Return ONLY valid JSON (all strings must be in {prompt_language}):
             path_json = path_json.strip()
 
         nodes = json.loads(path_json)
+        nodes = _drop_retired_node_types(nodes)
 
         # ------------------------------------------
         # STEP 5: Weight by the diagnostic, then attach status + exam nodes
@@ -3538,7 +3539,7 @@ def _build_study_path_prompt(
   {{"id": "node_2", "type": "lesson", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Review", "tags": ["topic1", "lesson"], "difficulty": 2}},
   {{"id": "node_3", "type": "audio", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Recap", "tags": ["topic1", "audio"], "difficulty": 1}},
   {{"id": "node_4", "type": "quiz", "label": "{unique_topics[0] if unique_topics else 'Topic 1'} - Final Test", "tags": ["topic1", "assessment"], "difficulty": 2}}"""
-    elif review_format == "Visual Concept Maps":
+    elif False:  # "Visual Concept Maps" retired 2026-10-31; it now gets the default unit
         structure_rule = "- LESSON: Introduce the topic (content comes from document)\n   - AUDIO: Listen to the lesson explained out loud\n   - MINDMAP: Visual concept map linking key ideas\n   - QUIZ: Test understanding of that specific topic"
         node_types = f'- "lesson": Introduction to ONE topic from the document\n- "audio": Audio explanation of that topic (listen instead of reading)\n- "mindmap": Visual concept map for that topic\n- "quiz": Questions testing that topic (will generate {STUDY_QUIZ_QUESTIONS} questions)'
         example_json_rows = f"""  {{"id": "node_1", "type": "lesson", "label": "{unique_topics[0] if unique_topics else 'Topic 1'}", "tags": ["topic1"], "difficulty": 1}},
@@ -3786,6 +3787,18 @@ def _ensure_lesson_first(units):
     elif idx > 0:
         nodes.insert(0, nodes.pop(idx))
     return units
+
+
+RETIRED_NODE_TYPES = {"mindmap"}
+
+
+def _drop_retired_node_types(nodes):
+    """Mindmaps were removed from the product on 2026-10-31. The prompts no
+    longer offer them, but a model can still emit one, so filter here too.
+    Old plans that already hold a mindmap node still render it."""
+    if not isinstance(nodes, list):
+        return nodes
+    return [n for n in nodes if not (isinstance(n, dict) and n.get("type") in RETIRED_NODE_TYPES)]
 
 
 def _apply_budget(units, budget, archetype):
@@ -4414,6 +4427,7 @@ async def start_study_journey(request: StudyPlanRequest):
                 yield f"data: {json.dumps({'status': 'error', 'message': f'Plan JSON parse failed: {e}'})}\n\n"
                 return
 
+            nodes = _drop_retired_node_types(nodes)
             nodes = _weight_path_by_diagnostic(
                 nodes, request.diagnostic, unique_topics, days_to_exam,
                 flagged_topics=[f["topic"] for f in student_flags],
@@ -5094,7 +5108,6 @@ MATCH FORMAT TO INTENT:
 - Explaining, reviewing, teaching → "lesson"
 - Drilling, practicing, testing → "quiz" or "flashcard"
 - Listening → "audio"
-- Visualizing connections → "mindmap"
 
 OUT OF SCOPE (warm redirect):
 - Clinical advice, treatment questions, patient scenarios
@@ -5105,7 +5118,6 @@ NODE TYPES you can return:
 - "flashcard": Flashcard set (12 cards)
 - "quiz": Quiz questions (12 questions)
 - "audio": Audio lesson
-- "mindmap": Visual concept map
 
 Return ONLY valid JSON in {prompt_language}:
 {{
@@ -5140,6 +5152,8 @@ If the request is out of scope, return:
         print(f"✅ Interpreted request: understood={result.get('understood')}")
         print(f"   Echo: {result.get('echo')}")
         if result.get('node'):
+            if result['node'].get('type') in RETIRED_NODE_TYPES:
+                result['node']['type'] = 'lesson'
             print(f"   Node: {result['node'].get('type')} - {result['node'].get('label')}")
 
         return result

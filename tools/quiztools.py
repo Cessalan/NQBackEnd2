@@ -2783,5 +2783,4 @@ class NursingTools:
             summarize_document,
             generate_study_sheet_stream,
             generate_audio_content,
-            generate_mindmap_stream
         ]
